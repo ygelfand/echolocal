@@ -31,6 +31,8 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default $HOME/.echolocal.yaml)")
 	cobra.OnInitialize(initConfig)
 
+	root.AddCommand(newInstallCmd())
+	root.AddCommand(newUninstallCmd())
 	root.AddCommand(newToolsCmd())
 	return root
 }
