@@ -3,11 +3,9 @@ package echod
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,11 +18,11 @@ import (
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/prop"
 	"github.com/ygelfand/echolocal/internal/satellite"
+	"github.com/ygelfand/echolocal/internal/speaker"
 )
 
 func newRunCmd() *cobra.Command {
 	var (
-		splash    time.Duration
 		heartbeat time.Duration
 		tag       string
 		ringPath  string
@@ -40,8 +38,9 @@ func newRunCmd() *cobra.Command {
 			"restarts it if it exits, and nothing else drives the ring.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			lg := newBootLog(tag, cmd.ErrOrStderr())
-			defer lg.Close()
+			h := alog.NewHandler(tag, cmd.ErrOrStderr())
+			defer h.Close()
+			slog.SetDefault(slog.New(h))
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -49,8 +48,8 @@ func newRunCmd() *cobra.Command {
 			// Launched by init or an adb shell, either of which can go away.
 			signal.Ignore(syscall.SIGHUP)
 
-			lg.logf("echod %s starting: pid=%d uid=%d context=%s", Version, os.Getpid(), os.Getuid(), selinuxContext())
-			_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", uptime()))
+			slog.Info("echod starting", "version", Version, "pid", os.Getpid(), "uid", os.Getuid(), "context", selinuxContext())
+			_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", alog.Uptime()))
 			_ = prop.Set(layout.StateProp, "starting")
 
 			ring := &led.Ring{Path: ringPath}
@@ -59,29 +58,53 @@ func newRunCmd() *cobra.Command {
 			// whatever we write, including our blank frames. Amazon's ledcontroller turned this
 			// off before driving frames; taking its place means taking that over too.
 			if err := ring.SetBootAnimation(false); err != nil {
-				lg.logf("disabling driver boot animation failed: %v", err)
+				slog.Error("disabling driver boot animation failed", "err", err)
 			}
 
 			// ledctrl leaves the global drive current at 0, where frame writes are accepted and
 			// read back correctly but nothing lights up. 3 is the driver's own default.
 			if cur, err := ring.Current(); err != nil {
-				lg.logf("reading led_current failed: %v", err)
+				slog.Error("reading led_current failed", "err", err)
 			} else if cur == 0 {
-				lg.logf("led_current is 0, raising to 3")
+				slog.Info("led_current is 0, raising to 3")
 				if err := ring.SetCurrent(3); err != nil {
-					lg.logf("setting led_current failed: %v", err)
+					slog.Error("setting led_current failed", "err", err)
 				}
 			}
 
+			// The ring spins from here until everything is up.
+			splashCtx, online := context.WithCancel(ctx)
+			defer online()
+			go func() {
+				if err := led.Splash(splashCtx, ring); err != nil && ctx.Err() == nil {
+					slog.Error("splash failed", "err", err)
+				}
+			}()
+
 			mute, err := gpio.NewMute()
 			if err != nil {
-				lg.logf("mute unavailable: %v", err)
+				slog.Error("mute unavailable", "err", err)
 			}
 			muteLED, err := gpio.NewMuteLED()
 			if err != nil {
-				lg.logf("mute LED unavailable: %v", err)
+				slog.Error("mute LED unavailable", "err", err)
 			} else if err := muteLED.SetBright(true); err != nil {
-				lg.logf("setting mute LED bright failed: %v", err)
+				slog.Error("setting mute LED bright failed", "err", err)
+			}
+
+			// The speaker holds its stream open for the life of the process and feeds silence
+			// when idle: the amplifier hisses when nothing drives the DAC, and toggling it
+			// pops. Closing it turns the amplifier back off, so every exit path matters.
+			spk, err := speaker.Acquire()
+			if err != nil {
+				slog.Error("speaker unavailable", "err", err)
+			} else {
+				defer spk.Close()
+				go func() {
+					if err := spk.Run(ctx); err != nil && ctx.Err() == nil {
+						slog.Error("speaker stopped", "err", err)
+					}
+				}()
 			}
 
 			sat, err := satellite.New(satellite.Config{
@@ -91,41 +114,31 @@ func newRunCmd() *cobra.Command {
 				Ring:    ring,
 				Mute:    mute,
 				MuteLED: muteLED,
-				Logger:  slog.New(slog.NewTextHandler(lg.slogWriter(), nil)),
+				Speaker: spk,
 			})
 			if err != nil {
-				lg.logf("satellite unavailable: %v", err)
+				slog.Error("satellite unavailable", "err", err)
 			} else {
 				go func() {
-					lg.logf("serving esphome api on %s", addr)
+					slog.Info("serving esphome api", "addr", addr)
 					if err := sat.Serve(ctx); err != nil && ctx.Err() == nil {
-						lg.logf("satellite stopped: %v", err)
+						slog.Error("satellite stopped", "err", err)
 					}
 				}()
 			}
 
-			lg.logf("splash: %s", splash)
-			if sat != nil {
-				sat.Splash(splash)
-			} else {
-				go func() {
-					if err := led.Splash(ctx, ring, splash); err != nil && ctx.Err() == nil {
-						lg.logf("splash failed: %v", err)
-					}
-				}()
-			}
 
-			lg.logf("resident")
+			online()
+			slog.Info("resident")
 			_ = prop.Set(layout.StateProp, "resident")
-			idle(ctx, lg, heartbeat)
+			idle(ctx, heartbeat)
 
-			lg.logf("stopping")
+			slog.Info("stopping")
 			_ = prop.Set(layout.StateProp, "stopped")
 			return ring.Off()
 		},
 	}
 
-	c.Flags().DurationVar(&splash, "splash", 2*time.Second, "boot animation duration")
 	c.Flags().DurationVar(&heartbeat, "heartbeat", time.Minute, "liveness log interval, 0 to disable")
 	c.Flags().StringVar(&tag, "tag", layout.LogTag, "logcat tag")
 	c.Flags().StringVar(&name, "name", "", "device name Home Assistant sees; derived from the serial if unset")
@@ -135,7 +148,7 @@ func newRunCmd() *cobra.Command {
 }
 
 // idle keeps echod resident, logging liveness so a boot can be checked long after it happened.
-func idle(ctx context.Context, lg *bootLog, every time.Duration) {
+func idle(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		<-ctx.Done()
 		return
@@ -148,7 +161,7 @@ func idle(ctx context.Context, lg *bootLog, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			lg.logf("alive")
+			slog.Info("alive")
 		}
 	}
 }
@@ -180,52 +193,3 @@ func selinuxContext() string {
 	return strings.TrimRight(string(b), "\x00\n")
 }
 
-// bootLog writes to logcat and to stderr, stamped with uptime since the wall clock is not
-// synced this early.
-type bootLog struct {
-	stderr io.Writer
-	a      *alog.Logger
-}
-
-func newBootLog(tag string, stderr io.Writer) *bootLog {
-	l := &bootLog{stderr: stderr}
-	a, err := alog.New(tag)
-	if err != nil {
-		fmt.Fprintf(stderr, "logcat unavailable: %v\n", err)
-		return l
-	}
-	l.a = a
-	return l
-}
-
-func (l *bootLog) logf(format string, args ...any) {
-	msg := fmt.Sprintf("[%8.2f] %s", uptime(), fmt.Sprintf(format, args...))
-	fmt.Fprintln(l.stderr, msg)
-	if l.a != nil {
-		_ = l.a.Infof("%s", msg)
-	}
-}
-
-// slogWriter feeds slog output to the same places as our own lines.
-func (l *bootLog) slogWriter() io.Writer {
-	if l.a == nil {
-		return l.stderr
-	}
-	return io.MultiWriter(l.stderr, l.a.Writer(alog.Info))
-}
-
-func (l *bootLog) Close() {
-	if l.a != nil {
-		_ = l.a.Close()
-	}
-}
-
-func uptime() float64 {
-	b, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return 0
-	}
-	first, _, _ := strings.Cut(string(b), " ")
-	v, _ := strconv.ParseFloat(first, 64)
-	return v
-}

@@ -149,12 +149,19 @@ func ioctlArgless(fd, req uintptr) error {
 	return nil
 }
 
-// Open configures and starts a capture stream. The device must not already be held —
-// on the Echo Dot that means stopping the `media` service first, otherwise this blocks.
+// Open configures and starts a capture stream. The open is non-blocking so a device someone else
+// holds returns ErrBusy instead of waiting; reads block normally once it is ours.
 func Open(card, device int, cfg Config) (*Capture, error) {
 	path := fmt.Sprintf("/dev/snd/pcmC%dD%dc", card, device)
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
+		if errors.Is(err, syscall.EBUSY) || errors.Is(err, syscall.EAGAIN) {
+			return nil, fmt.Errorf("%w: %s", ErrBusy, path)
+		}
+		return nil, err
+	}
+	if err := clearNonBlock(f); err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 

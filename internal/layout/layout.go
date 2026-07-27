@@ -17,10 +17,18 @@ const (
 // echod runs as Amazon's ledcontroller service: taking over the definition removes the only
 // other writer of the LED ring and gets us init's supervision.
 const (
-	Service     = "/system/bin/ledcontroller"
-	Backup      = Service + ".orig"
-	ServiceName = "ledcontroller"
+	Service      = "/system/bin/ledcontroller"
+	BackupSuffix = ".orig"
+	Backup       = Service + BackupSuffix
+	ServiceName  = "ledcontroller"
 )
+
+// AnimationScripts are the boot animation wrappers init runs; both call ledctrl, which waits on
+// a binder service echod does not publish.
+var AnimationScripts = []string{
+	"/system/bin/start_animation.sh",
+	"/system/bin/stop_animation.sh",
+}
 
 // SELinux labels. A service's domain comes from the label of the file init execs, and
 // system_file has no transition rule, which leaves echod in init's own domain.
@@ -63,6 +71,10 @@ const (
 
 // MACPath is where the wlan0 address is readable, on the device and over adb.
 const MACPath = "/sys/class/net/wlan0/address"
+
+// StatePath holds echod's runtime settings. echod starts around 4s into boot and the Wi-Fi driver
+// comes up around 10s, so the MAC is remembered here rather than read fresh every time.
+const StatePath = StateDir + "/state.json"
 
 // NameFromMAC builds the fallback display name, unique per device.
 func NameFromMAC(mac string) string {

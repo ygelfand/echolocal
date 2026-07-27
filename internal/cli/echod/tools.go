@@ -9,6 +9,7 @@ func newToolsCmd() *cobra.Command {
 		Long: "Direct access to the Echo Dot's audio and LED hardware, for characterising it\n" +
 			"and for checking a unit after install.",
 	}
-	c.AddCommand(newMicCmd(), newLEDCmd(), newInfoCmd(), newButtonsCmd(), newI2CCmd(), newMuteCmd())
+	c.AddCommand(newMicCmd(), newLEDCmd(), newInfoCmd(), newButtonsCmd(), newI2CCmd(), newMuteCmd(),
+		newMixerCmd(), newPlayCmd())
 	return c
 }

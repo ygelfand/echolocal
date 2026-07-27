@@ -20,6 +20,9 @@ linters:
         - (*os.File).Close
         - (*github.com/ygelfand/go-esphome-device/mdns.Advertiser).Close
         - (*github.com/ygelfand/echolocal/internal/input.Device).Close
+        - (*github.com/ygelfand/echolocal/internal/alsa.Mixer).Close
+        - (*github.com/ygelfand/echolocal/internal/alsa.Playback).Close
+        - (*github.com/ygelfand/echolocal/internal/speaker.Player).Close
         - fmt.Fprintf
         - fmt.Fprintln
 

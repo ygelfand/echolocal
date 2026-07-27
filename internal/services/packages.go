@@ -25,6 +25,10 @@ var Hidden = []Package{
 	{"com.amazon.device.smarthome.adapters.ble", "smart home BLE adapter"},
 	{"com.amazon.device.smarthome.adapters.echo", "smart home Echo adapter"},
 	{"com.amazon.device.smarthome.ota", "smart home OTA"},
+	{"com.amazon.device.software.ota", "firmware OTA"},
+	{"com.amazon.client.metrics", "telemetry; also runs a logcat harvester"},
+	{"com.amazon.NativeAccessorProxyServices", "Alexa SIM directive and OOBE receivers"},
+	{"com.amazon.whad", "whole-home audio; advertises a control plane on the LAN"},
 }
 
 // Package is one package and why it goes.

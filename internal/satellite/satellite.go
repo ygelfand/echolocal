@@ -19,6 +19,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/state"
+	"github.com/ygelfand/echolocal/internal/speaker"
 )
 
 // Config is what a satellite needs to come up.
@@ -31,7 +33,7 @@ type Config struct {
 	Ring    *led.Ring
 	Mute    *gpio.Mute
 	MuteLED *gpio.MuteLED
-	Logger  *slog.Logger
+	Speaker *speaker.Player
 }
 
 // Satellite is the running server and the entities Home Assistant drives.
@@ -39,9 +41,8 @@ type Satellite struct {
 	srv     *esphome.Server
 	ring    *ringLight
 	mute    *muteSwitch
-	volume  *volumeControl
+	player  *mediaPlayer
 	buttons map[uint16]*button
-	log     *slog.Logger
 	name    string
 }
 
@@ -52,20 +53,24 @@ func New(cfg Config) (*Satellite, error) {
 		return nil, err
 	}
 
-	ring := newRingLight(cfg.Ring, cfg.Logger)
+	if err := state.LoadError(); err != nil {
+		slog.Error("reading saved state failed, continuing with defaults", "err", err)
+	}
+
+	ring := newRingLight(cfg.Ring)
 	ents := esphome.NewEntities()
 	ents.Add(ring.entities()...)
 
 	var mute *muteSwitch
 	if cfg.Mute != nil {
-		mute = newMuteSwitch(cfg.Mute, cfg.MuteLED, cfg.Logger)
+		mute = newMuteSwitch(cfg.Mute, cfg.MuteLED, cfg.Speaker)
 		ents.Add(mute.entities()...)
 	}
 
-	volume := newVolumeControl(ring, cfg.Logger)
-	ents.Add(volume.num)
+	player := newMediaPlayer(ring, cfg.Speaker)
+	ents.Add(player.entities()...)
 
-	buttons := newButtons(volume, mute)
+	buttons := newButtons(player, mute)
 	for _, b := range buttons {
 		ents.Add(b.event)
 	}
@@ -82,20 +87,16 @@ func New(cfg Config) (*Satellite, error) {
 			Version:      cfg.Version,
 		},
 		PSK:    psk,
-		Logger: cfg.Logger,
+		Logger: slog.Default(),
 		// Persist a key Home Assistant pushes, or the next connection reverts to the old one.
 		OnSetEncryptionKey: func(k esphome.PSK) error { return writePSK(layout.KeyPath, k) },
 		Handler:            ents,
 	}
 	return &Satellite{
-		srv: srv, ring: ring, mute: mute, volume: volume, buttons: buttons,
-		log: cfg.Logger, name: node,
+		srv: srv, ring: ring, mute: mute, player: player, buttons: buttons,
+		name: node,
 	}, nil
 }
-
-// Splash runs the boot animation on the ring. It returns immediately; a command from Home
-// Assistant replaces it.
-func (s *Satellite) Splash(d time.Duration) { s.ring.Splash(d) }
 
 // Serve listens until ctx is cancelled, advertising over mDNS so Home Assistant finds the
 // device without being told an address.
@@ -105,7 +106,7 @@ func (s *Satellite) Serve(ctx context.Context) error {
 		return fmt.Errorf("satellite: listen %s: %w", s.srv.Addr, err)
 	}
 
-	watchButtons(ctx, s.log, s.buttons)
+	watchButtons(ctx, s.buttons)
 
 	adv, err := mdns.Advertise(mdns.Config{
 		Name:         s.name,
@@ -119,7 +120,7 @@ func (s *Satellite) Serve(ctx context.Context) error {
 	})
 	if err != nil {
 		// Discovery is a convenience; a device reachable by address still works.
-		s.log.Warn("mdns advertise failed", "err", err)
+		slog.Warn("mdns advertise failed", "err", err)
 	} else {
 		defer adv.Close()
 	}
@@ -136,14 +137,13 @@ type ringLight struct {
 	light *esphome.Light
 	segs  []*esphome.Light
 	ring  *led.Ring
-	log   *slog.Logger
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	frame  []led.Color
 }
 
-func newRingLight(ring *led.Ring, log *slog.Logger) *ringLight {
+func newRingLight(ring *led.Ring) *ringLight {
 	r := &ringLight{
 		light: &esphome.Light{
 			Base:                esphome.Base{ObjectID: "ring", Name: "LED Ring"},
@@ -151,7 +151,6 @@ func newRingLight(ring *led.Ring, log *slog.Logger) *ringLight {
 			Effects:             led.EffectNames(),
 		},
 		ring:  ring,
-		log:   log,
 		frame: make([]led.Color, led.Segments),
 	}
 	r.light.OnCommand = r.apply
@@ -205,7 +204,7 @@ func (r *ringLight) animate(f func(context.Context)) {
 func (r *ringLight) Flash(frame []led.Color, d time.Duration) {
 	r.animate(func(ctx context.Context) {
 		if err := r.ring.SetSegments(frame); err != nil {
-			r.log.Error("flash write failed", "err", err)
+			slog.Error("flash write failed", "err", err)
 			return
 		}
 		select {
@@ -226,7 +225,7 @@ func (r *ringLight) restore() {
 		return
 	}
 	if err := r.paint(s); err != nil {
-		r.log.Error("ring restore failed", "err", err)
+		slog.Error("ring restore failed", "err", err)
 	}
 }
 
@@ -240,16 +239,6 @@ func (r *ringLight) still() {
 	}
 }
 
-// Splash runs the boot animation without blocking, so the ring says "started" while echod gets
-// on with everything else. A command from Home Assistant cuts it short.
-func (r *ringLight) Splash(d time.Duration) {
-	r.animate(func(ctx context.Context) {
-		if err := led.Splash(ctx, r.ring, d); err != nil && ctx.Err() == nil {
-			r.log.Error("splash failed", "err", err)
-		}
-	})
-}
-
 func (r *ringLight) apply(s esphome.LightState) {
 	s = usable(s)
 
@@ -258,7 +247,7 @@ func (r *ringLight) apply(s esphome.LightState) {
 		effect := s.Effect
 		r.animate(func(ctx context.Context) {
 			if err := led.RunEffect(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
-				r.log.Error("effect failed", "effect", effect, "err", err)
+				slog.Error("effect failed", "effect", effect, "err", err)
 			}
 		})
 		r.light.Set(s)
@@ -267,7 +256,7 @@ func (r *ringLight) apply(s esphome.LightState) {
 
 	r.still()
 	if err := r.paint(s); err != nil {
-		r.log.Error("ring write failed", "err", err)
+		slog.Error("ring write failed", "err", err)
 		return
 	}
 	r.light.Set(s)
@@ -288,7 +277,7 @@ func (r *ringLight) applySegment(i int, seg *esphome.Light, s esphome.LightState
 	r.mu.Unlock()
 
 	if err := r.ring.SetSegments(frame); err != nil {
-		r.log.Error("segment write failed", "segment", i, "err", err)
+		slog.Error("segment write failed", "segment", i, "err", err)
 		return
 	}
 	seg.Set(s)
@@ -355,11 +344,46 @@ func writePSK(path string, k esphome.PSK) error {
 }
 
 // macAddress reports wlan0's address, which Home Assistant uses to recognise the device across
-// address changes.
+// address changes. The interface does not exist yet when echod starts on a cold boot, so the
+// remembered value stands in and a watcher saves the real one for next time.
 func macAddress() string {
+	saved := state.Get().MAC
+
+	if mac := readMAC(); mac != "" {
+		if mac != saved {
+			_ = state.SetMAC(mac)
+		}
+		return mac
+	}
+
+	go rememberMAC()
+
+	if saved != "" {
+		return saved
+	}
+	return "00:00:00:00:00:00"
+}
+
+// rememberMAC waits for the interface to come up and saves its address.
+func rememberMAC() {
+	for range macAttempts {
+		time.Sleep(macRetry)
+		if mac := readMAC(); mac != "" {
+			_ = state.SetMAC(mac)
+			return
+		}
+	}
+}
+
+const (
+	macRetry    = 2 * time.Second
+	macAttempts = 30
+)
+
+func readMAC() string {
 	b, err := os.ReadFile(layout.MACPath)
 	if err != nil {
-		return "00:00:00:00:00:00"
+		return ""
 	}
 	return strings.TrimSpace(string(b))
 }

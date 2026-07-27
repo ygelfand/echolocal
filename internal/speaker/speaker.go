@@ -1,0 +1,290 @@
+package speaker
+
+import (
+	"context"
+	"encoding/binary"
+	"fmt"
+	"log/slog"
+	"math"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/ygelfand/echolocal/internal/alsa"
+)
+
+// The playback codec accepts one format only: 48 kHz, S16_LE, stereo.
+const (
+	Rate     = 48000
+	Channels = 2
+	Bits     = 16
+
+	period  = 1024
+	periods = 4
+
+	// codecSettle is how long the codec sits powered and idle before the amplifier is enabled,
+	// measured from the vendor HAL doing the same thing on a route change.
+	codecSettle = 1100 * time.Millisecond
+)
+
+const (
+	Card           = 0
+	PlaybackDevice = 23
+
+	// AmpSwitch gates the speaker.
+	AmpSwitch = "Ext_Speaker_Amp_Switch"
+)
+
+// Player owns the speaker: one playback stream held open for the life of the process, with the
+// amplifier enabled while it runs.
+type Player struct {
+	pb    *alsa.Playback
+	mixer *alsa.Mixer
+
+	// OnOutput is called when the output changes, so the jack state can be reported.
+	OnOutput func(Output)
+
+	volume atomic.Uint32 // linear gain, derived from step and the current output's curve
+	step   atomic.Int32
+
+	pathMu sync.Mutex
+	out    Output
+
+	mu      sync.Mutex
+	pending []int16 // interleaved stereo waiting to go out
+}
+
+// NewPlayer opens the playback stream and the mixer.
+func NewPlayer() (*Player, error) {
+	m, err := alsa.OpenMixer(Card)
+	if err != nil {
+		return nil, fmt.Errorf("speaker: opening mixer: %w", err)
+	}
+
+	pb, err := alsa.OpenPlayback(Card, PlaybackDevice, alsa.Config{
+		Channels:   Channels,
+		Rate:       Rate,
+		Format:     alsa.FormatS16_LE,
+		Bits:       Bits,
+		PeriodSize: period,
+		Periods:    periods,
+	})
+	if err != nil {
+		_ = m.Close()
+		return nil, fmt.Errorf("speaker: opening playback: %w", err)
+	}
+
+	// Mixer writes happen in Run: the first one enumerates the card, which takes over a second.
+	p := &Player{pb: pb, mixer: m, out: DetectOutput()}
+	p.SetVolume(VolumeSteps)
+	return p, nil
+}
+
+// route applies the output's sequence. The amplifier stays off: it is enabled separately, after
+// the codec has settled.
+func (p *Player) route() {
+	p.pathMu.Lock()
+	defer p.pathMu.Unlock()
+	p.apply(pathSequence[p.out])
+}
+
+// amp switches the speaker amplifier.
+func (p *Player) amp(on bool) {
+	p.pathMu.Lock()
+	defer p.pathMu.Unlock()
+
+	if p.out != OutputSpeaker {
+		return
+	}
+	value := "Off"
+	if on {
+		value = "On"
+	}
+	p.apply([]kctl{{name: AmpSwitch, value: value}})
+}
+
+// Output reports which output the player is driving.
+func (p *Player) Output() Output {
+	p.pathMu.Lock()
+	defer p.pathMu.Unlock()
+	return p.out
+}
+
+// setOutput moves the codec between the speaker and the headphone jack. The gain is re-derived
+// because each output has its own curve.
+func (p *Player) setOutput(out Output) {
+	p.pathMu.Lock()
+	if p.out == out {
+		p.pathMu.Unlock()
+		return
+	}
+	p.out = out
+	p.apply([]kctl{{name: AmpSwitch, value: "Off"}})
+	if out == OutputSpeaker {
+		p.apply(headphoneOff)
+	}
+	p.apply(pathSequence[out])
+	p.pathMu.Unlock()
+
+	time.Sleep(codecSettle)
+	p.amp(true)
+
+	p.SetVolume(int(p.step.Load()))
+	slog.Info("output changed", "output", out)
+	if p.OnOutput != nil {
+		p.OnOutput(out)
+	}
+}
+
+// watchJack follows the headphone jack.
+func (p *Player) watchJack(ctx context.Context) {
+	t := time.NewTicker(jackPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			p.setOutput(DetectOutput())
+		}
+	}
+}
+
+// apply writes a mixer sequence in order, logging failures and continuing.
+func (p *Player) apply(seq []kctl) {
+	for _, c := range seq {
+		var err error
+		if c.value != "" {
+			err = p.mixer.SetEnum(c.name, c.value)
+		} else {
+			err = p.mixer.SetInt(c.name, uint32(c.level))
+		}
+		if err != nil {
+			slog.Error("mixer write failed", "control", c.name, "err", err)
+		}
+	}
+}
+
+// Run feeds the stream until ctx is cancelled, writing silence when nothing is queued.
+func (p *Player) Run(ctx context.Context) error {
+	buf := make([]byte, period*Channels*Bits/8)
+
+	// The order the vendor HAL uses on a route change: route with the amplifier off, let the
+	// codec sit idle, enable the amplifier, then feed.
+	out := p.Output()
+	p.apply(initSequence)
+	p.route()
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-time.After(codecSettle):
+	}
+
+	p.amp(true)
+	slog.Info("playback path up", "output", out)
+	if p.OnOutput != nil {
+		p.OnOutput(out)
+	}
+	go p.watchJack(ctx)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		p.fill(buf)
+		if _, err := p.pb.Write(buf); err != nil {
+			if err == alsa.ErrUnderrun {
+				slog.Warn("playback underrun")
+				continue
+			}
+			return err
+		}
+	}
+}
+
+// fill takes what is queued and pads the rest with silence.
+func (p *Player) fill(buf []byte) {
+	p.mu.Lock()
+	take := min(len(p.pending), period*Channels)
+	chunk := p.pending[:take]
+	p.pending = p.pending[take:]
+	if len(p.pending) == 0 {
+		p.pending = nil
+	}
+	p.mu.Unlock()
+
+	gain := p.Volume()
+	for i := range period * Channels {
+		var s int16
+		if i < len(chunk) {
+			s = int16(float32(chunk[i]) * gain)
+		}
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
+	}
+}
+
+// Play queues interleaved stereo samples.
+func (p *Player) Play(samples []int16) {
+	p.mu.Lock()
+	p.pending = append(p.pending, samples...)
+	p.mu.Unlock()
+}
+
+// Note is one tone in a chime. A zero frequency is a rest.
+type Note struct {
+	Freq float64
+	Ms   int
+}
+
+// Beep queues a tone.
+func (p *Player) Beep(freq float64, ms int, level float64) {
+	p.Chime(level, Note{Freq: freq, Ms: ms})
+}
+
+// Chime queues notes back to back, each shaped by the same short envelope so the joins do not
+// click.
+func (p *Player) Chime(level float64, notes ...Note) {
+	var out []int16
+	for _, n := range notes {
+		out = append(out, tone(n, level)...)
+	}
+	p.Play(out)
+}
+
+func tone(n Note, level float64) []int16 {
+	frames := Rate * n.Ms / 1000
+	out := make([]int16, frames*Channels)
+
+	for i := range frames {
+		if n.Freq == 0 {
+			continue
+		}
+		env := math.Min(1, math.Min(float64(i), float64(frames-i))/float64(Rate/200))
+		s := int16(level * env * math.MaxInt16 * math.Sin(2*math.Pi*n.Freq*float64(i)/Rate))
+		out[i*Channels] = s
+		out[i*Channels+1] = s
+	}
+	return out
+}
+
+// SetVolume sets the playback level as a step on the vendor's curve for the current output.
+func (p *Player) SetVolume(step int) {
+	step = max(0, min(step, VolumeSteps))
+	p.step.Store(int32(step))
+	p.volume.Store(math.Float32bits(gainForStep(p.Output(), step)))
+}
+
+// Step is the current volume step.
+func (p *Player) Step() int { return int(p.step.Load()) }
+
+// Volume is the current linear gain.
+func (p *Player) Volume() float32 { return math.Float32frombits(p.volume.Load()) }
+
+// Close mutes the codec, turns the amplifier off and closes the stream.
+func (p *Player) Close() error {
+	p.apply(initSequence)
+	_ = p.mixer.Close()
+	return p.pb.Close()
+}

@@ -50,14 +50,24 @@ type button struct {
 // buttons builds the set, with an event entity each so Home Assistant can automate on presses
 // even where the device does nothing itself — the action button, until there is a voice turn to
 // start.
-func newButtons(volume *volumeControl, mute *muteSwitch) map[uint16]*button {
+func newButtons(player *mediaPlayer, mute *muteSwitch) map[uint16]*button {
+	spk := player.speaker
+
 	out := map[uint16]*button{
-		keyVolumeUp:   {name: "volume_up", repeats: true, press: func() { volume.adjust(1) }},
-		keyVolumeDown: {name: "volume_down", repeats: true, press: func() { volume.adjust(-1) }},
-		keyAction:     {name: "action"},
+		keyVolumeUp:   {name: "volume_up", repeats: true, press: func() { player.adjust(1) }},
+		keyVolumeDown: {name: "volume_down", repeats: true, press: func() { player.adjust(-1) }},
+		keyAction: {
+			name:  "action",
+			press: func() { chime(spk, toneAction) },
+			hold:  func() { chime(spk, toneActionHold) },
+		},
 	}
 	if mute != nil {
-		out[keyMute] = &button{name: "mute", press: mute.toggle}
+		out[keyMute] = &button{
+			name:  "mute",
+			press: mute.toggle,
+			hold:  func() { chime(spk, toneMuteHold) },
+		}
 	}
 
 	for _, b := range out {
@@ -91,21 +101,21 @@ func title(name string) string {
 // A press is reported on release so its length is known, unless the button is held past
 // LongPress, when the hold fires immediately and the release is swallowed — waiting for release
 // to act on a hold feels broken.
-func watchButtons(ctx context.Context, log *slog.Logger, buttons map[uint16]*button) {
+func watchButtons(ctx context.Context, buttons map[uint16]*button) {
 	devices, err := input.List()
 	if err != nil {
-		log.Error("listing input devices failed", "err", err)
+		slog.Error("listing input devices failed", "err", err)
 		return
 	}
 	if len(devices) == 0 {
-		log.Warn("no input devices; buttons will not work")
+		slog.Warn("no input devices; buttons will not work")
 		return
 	}
 
 	for _, d := range devices {
 		go func(d *input.Device) {
 			defer d.Close()
-			watch(ctx, log, d, buttons)
+			watch(ctx, d, buttons)
 		}(d)
 	}
 }
@@ -121,6 +131,9 @@ type press struct {
 }
 
 func (p *press) stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.hold != nil {
 		p.hold.Stop()
 	}
@@ -133,14 +146,14 @@ func (p *press) stop() {
 	}
 }
 
-func watch(ctx context.Context, log *slog.Logger, d *input.Device, buttons map[uint16]*button) {
+func watch(ctx context.Context, d *input.Device, buttons map[uint16]*button) {
 	state := make(map[uint16]*press)
 
 	for {
 		e, err := d.Read()
 		if err != nil {
 			if ctx.Err() == nil {
-				log.Error("reading input failed", "device", d.Path, "err", err)
+				slog.Error("reading input failed", "device", d.Path, "err", err)
 			}
 			return
 		}
@@ -178,9 +191,14 @@ func watch(ctx context.Context, log *slog.Logger, d *input.Device, buttons map[u
 				p.mu.Lock()
 				p.held = true
 				p.mu.Unlock()
-				p.stop()
 
-				log.Info("button held", "button", b.name)
+				// A repeating button keeps ramping until it is let go; stopping here ended the
+				// ramp after three ticks.
+				if !b.repeats {
+					p.stop()
+				}
+
+				slog.Info("button held", "button", b.name)
 				b.event.Trigger(EventHold)
 				if b.hold != nil {
 					b.hold()
@@ -202,7 +220,7 @@ func watch(ctx context.Context, log *slog.Logger, d *input.Device, buttons map[u
 				continue
 			}
 
-			log.Info("button pressed", "button", b.name)
+			slog.Info("button pressed", "button", b.name)
 			b.event.Trigger(EventPress)
 			if b.press != nil && !b.repeats {
 				b.press()

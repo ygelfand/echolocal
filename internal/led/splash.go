@@ -68,18 +68,17 @@ func RunEffect(ctx context.Context, r *Ring, name string, base Color) error {
 	return play(ctx, r, 0, frame)
 }
 
-// Splash plays a short Home Assistant blue comet, then leaves the ring dark. It says echod
-// started and reached its hardware; anything longer is just delay.
-func Splash(ctx context.Context, r *Ring, total time.Duration) error {
-	if total <= 0 {
-		return r.Off()
-	}
-
-	fade := min(250*time.Millisecond, total/2)
-	if err := play(ctx, r, total-fade, comet(HomeAssistant)); err != nil {
+// Splash spins a Home Assistant blue comet until ctx is cancelled, then fades out. echod runs it
+// from start-up until everything is online.
+func Splash(ctx context.Context, r *Ring) error {
+	if err := play(ctx, r, 0, comet(HomeAssistant)); err != nil {
 		return err
 	}
-	return fadeOut(ctx, r, fade)
+
+	// ctx is done by now, so the fade needs its own.
+	fade, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	return fadeOut(fade, r, 250*time.Millisecond)
 }
 
 // play runs an animation for d, or until ctx is cancelled when d is zero.
@@ -106,14 +105,14 @@ func play(ctx context.Context, r *Ring, d time.Duration, frame func(time.Duratio
 
 // comet runs a bright head clockwise with a decaying tail behind it.
 func comet(base Color) func(time.Duration) []Color {
-	const perSegment = 60 * time.Millisecond
+	// Two frames per segment, so the head advances evenly.
+	const perSegment = 2 * FrameInterval
 	tail := []float64{1, 0.55, 0.3, 0.16, 0.08}
 
 	return func(elapsed time.Duration) []Color {
 		head := int(elapsed/perSegment) % Segments
 		out := make([]Color, Segments)
 		for i, f := range tail {
-			// Segment indices increase clockwise, so the tail sits at lower indices.
 			out[((head-i)%Segments+Segments)%Segments] = scale(base, f)
 		}
 		return out

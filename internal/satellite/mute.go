@@ -6,20 +6,22 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/gpio"
+	"github.com/ygelfand/echolocal/internal/speaker"
+	"github.com/ygelfand/echolocal/internal/state"
 )
 
 // muteSwitch is the microphone mute, drivable from Home Assistant and from the button on top of
 // the device. gpio444 is a real cut rather than a software flag, so "muted" in Home Assistant
 // means the microphones are disconnected.
 type muteSwitch struct {
-	sw     *esphome.Switch
-	bright *esphome.Switch
-	mute   *gpio.Mute
-	led    *gpio.MuteLED
-	log    *slog.Logger
+	sw      *esphome.Switch
+	bright  *esphome.Switch
+	mute    *gpio.Mute
+	led     *gpio.MuteLED
+	speaker *speaker.Player
 }
 
-func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, log *slog.Logger) *muteSwitch {
+func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSwitch {
 	s := &muteSwitch{
 		sw: &esphome.Switch{
 			Base: esphome.Base{
@@ -28,14 +30,18 @@ func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, log *slog.Logger) *muteSwitc
 				Icon:     "mdi:microphone-off",
 			},
 		},
-		mute: m,
-		led:  led,
-		log:  log,
+		mute:    m,
+		led:     led,
+		speaker: spk,
 	}
 	s.sw.OnCommand = s.set
 
+	// The mute line does not survive a reboot, so the saved value is applied rather than read.
+	saved := state.Get().Settings
 	if muted, err := m.Get(); err != nil {
-		log.Error("reading mute state failed", "err", err)
+		slog.Error("reading mute state failed", "err", err)
+	} else if want := saved.MicMutedOr(muted); want != muted {
+		s.apply(want)
 	} else {
 		s.sw.Set(muted)
 	}
@@ -53,7 +59,9 @@ func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, log *slog.Logger) *muteSwitc
 	}
 	s.bright.OnCommand = s.setBright
 	if bright, err := led.Bright(); err != nil {
-		log.Error("reading mute LED brightness failed", "err", err)
+		slog.Error("reading mute LED brightness failed", "err", err)
+	} else if want := saved.MuteLEDBrightOr(bright); want != bright {
+		s.applyBright(want)
 	} else {
 		s.bright.Set(bright)
 	}
@@ -69,8 +77,15 @@ func (s *muteSwitch) entities() []esphome.Entity {
 }
 
 func (s *muteSwitch) setBright(bright bool) {
+	s.applyBright(bright)
+	if err := state.SetMuteLEDBright(bright); err != nil {
+		slog.Error("saving mute LED brightness failed", "err", err)
+	}
+}
+
+func (s *muteSwitch) applyBright(bright bool) {
 	if err := s.led.SetBright(bright); err != nil {
-		s.log.Error("setting mute LED brightness failed", "bright", bright, "err", err)
+		slog.Error("setting mute LED brightness failed", "bright", bright, "err", err)
 		return
 	}
 	if now, err := s.led.Bright(); err == nil {
@@ -78,10 +93,24 @@ func (s *muteSwitch) setBright(bright bool) {
 	}
 }
 
-// set drives the line, then publishes what the hardware actually reads back.
+// set drives the line and remembers the new state. apply is the quiet version, for start-up.
 func (s *muteSwitch) set(muted bool) {
+	s.apply(muted)
+	if err := state.SetMicMuted(s.sw.Get()); err != nil {
+		slog.Error("saving mute state failed", "err", err)
+	}
+
+	if s.sw.Get() {
+		chime(s.speaker, toneMute)
+		return
+	}
+	chime(s.speaker, toneUnmute)
+}
+
+// apply drives the line, then publishes what the hardware actually reads back.
+func (s *muteSwitch) apply(muted bool) {
 	if err := s.mute.Set(muted); err != nil {
-		s.log.Error("setting mute failed", "muted", muted, "err", err)
+		slog.Error("setting mute failed", "muted", muted, "err", err)
 		return
 	}
 	s.publish()
@@ -90,17 +119,26 @@ func (s *muteSwitch) set(muted bool) {
 func (s *muteSwitch) toggle() {
 	muted, err := s.mute.Toggle()
 	if err != nil {
-		s.log.Error("toggling mute failed", "err", err)
+		slog.Error("toggling mute failed", "err", err)
 		return
 	}
 	s.sw.Set(muted)
-	s.log.Info("mute button", "muted", muted)
+	slog.Info("mute button", "muted", muted)
+
+	if muted {
+		chime(s.speaker, toneMute)
+	} else {
+		chime(s.speaker, toneUnmute)
+	}
+	if err := state.SetMicMuted(muted); err != nil {
+		slog.Error("saving mute state failed", "err", err)
+	}
 }
 
 func (s *muteSwitch) publish() {
 	muted, err := s.mute.Get()
 	if err != nil {
-		s.log.Error("reading mute state failed", "err", err)
+		slog.Error("reading mute state failed", "err", err)
 		return
 	}
 	s.sw.Set(muted)
