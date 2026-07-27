@@ -10,24 +10,8 @@ import (
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/device"
-)
-
-// Paths on the device. echod lives under /system/app because that tree is labelled
-// u:object_r:system_file:s0, the label that leaves an init-started service in init's own
-// domain. It takes over ledcontroller's service definition, so init supervises it and nothing
-// else drives the LED ring.
-const (
-	Dir     = "/system/app/echod"
-	Binary  = Dir + "/echod"
-	Service = "/system/bin/ledcontroller"
-	Backup  = Service + ".orig"
-
-	ServiceName = "ledcontroller"
-	LogPath     = "/dev/echolocal.log"
-
-	// StockLabel is the label Amazon's binary must carry, or it would run in init's domain
-	// instead of its own.
-	StockLabel = "u:object_r:ledd_exec:s0"
+	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/services"
 )
 
 type Status int
@@ -56,6 +40,14 @@ type Reporter func(Event)
 type Config struct {
 	// EchodPath is the host path to the arm binary to install.
 	EchodPath string
+
+	// Name is what Home Assistant calls the device. Only needed on a device that has none.
+	Name string
+
+	// ZeroPSK leaves the device without a key, running Noise with the reserved zero key so
+	// Home Assistant can push one. Nothing to paste, but until HA does that anyone on the
+	// network can drive the device.
+	ZeroPSK bool
 }
 
 type step struct {
@@ -65,18 +57,28 @@ type step struct {
 
 var steps = []step{
 	{"check device", checkDevice},
+	{"hide Amazon packages", hidePackages},
+	{"device name", installName},
+	{"encryption key", installKey},
 	{"remount /system rw", remountRW},
 	{"install echod", installBinary},
 	{"back up stock ledcontroller", backupService},
 	{"take over ledcontroller service", takeOverService},
+	{"open the API port", installFirewallHook},
 	{"stop service", stopService},
 	{"remount /system ro", remountRO},
+	{"start echod", startService},
+}
+
+var restartSteps = []step{
+	{"stop echod", stopService},
 	{"start echod", startService},
 }
 
 var uninstallSteps = []step{
 	{"stop echod", stopService},
 	{"remount /system rw", remountRW},
+	{"close the API port", removeFirewallHook},
 	{"restore stock ledcontroller", restoreService},
 	{"remove echod", removeBinary},
 	{"remount /system ro", remountRO},
@@ -97,6 +99,11 @@ func Install(ctx context.Context, d *device.Device, cfg Config, report Reporter)
 // Uninstall puts Amazon's ledcontroller back and removes echod.
 func Uninstall(ctx context.Context, d *device.Device, report Reporter) error {
 	return execute(ctx, uninstallSteps, &run{d: d}, report)
+}
+
+// Restart cycles echod through init.
+func Restart(ctx context.Context, d *device.Device, report Reporter) error {
+	return execute(ctx, restartSteps, &run{d: d}, report)
 }
 
 func execute(ctx context.Context, steps []step, r *run, report Reporter) error {
@@ -151,13 +158,13 @@ func remountRW(r *run) (string, bool, error) {
 }
 
 func installBinary(r *run) (string, bool, error) {
-	if _, err := r.d.Shell("mkdir -p " + Dir); err != nil {
+	if _, err := r.d.Shell("mkdir -p " + layout.Dir); err != nil {
 		return "", false, err
 	}
-	if err := r.d.PushFile(r.cfg.EchodPath, Binary, 0o755); err != nil {
+	if err := r.d.PushFile(r.cfg.EchodPath, layout.Binary, 0o755); err != nil {
 		return "", false, err
 	}
-	label, err := r.d.Label(Binary)
+	label, err := r.d.Label(layout.Binary)
 	if err != nil {
 		return "", false, err
 	}
@@ -167,46 +174,51 @@ func installBinary(r *run) (string, bool, error) {
 // backupService keeps Amazon's binary. Moving it a second time would move our own symlink
 // onto the backup and lose the original for good, so this only ever runs once.
 func backupService(r *run) (string, bool, error) {
-	have, err := r.d.Exists(Backup)
+	have, err := r.d.Exists(layout.Backup)
 	if err != nil {
 		return "", false, err
 	}
 	if have {
-		return "already saved at " + Backup, true, nil
+		return "already saved at " + layout.Backup, true, nil
 	}
-	if _, err := r.d.Shell(fmt.Sprintf("mv %s %s", Service, Backup)); err != nil {
+	if _, err := r.d.Shell(fmt.Sprintf("mv %s %s", layout.Service, layout.Backup)); err != nil {
 		return "", false, err
 	}
-	return Backup, false, nil
+	return layout.Backup, false, nil
 }
 
 func takeOverService(r *run) (string, bool, error) {
-	_, err := r.d.Shell(fmt.Sprintf("rm -f %s && ln -s %s %s", Service, Binary, Service))
+	_, err := r.d.Shell(fmt.Sprintf("rm -f %s && ln -s %s %s", layout.Service, layout.Binary, layout.Service))
 	if err != nil {
 		return "", false, err
 	}
-	target, err := r.d.Shell("readlink " + Service)
+	target, err := r.d.Shell("readlink " + layout.Service)
 	return strings.TrimSpace(target), false, err
 }
 
 // stopService releases the running binary: /system cannot be remounted read-only while a
 // process is mapped to a file that was just overwritten.
+//
+// init publishes a transient "stopping" before the process is reaped, so only "stopped" means
+// the mapping is gone.
 func stopService(r *run) (string, bool, error) {
-	if err := r.d.Setprop("ctl.stop", ServiceName); err != nil {
+	if err := r.d.Setprop("ctl.stop", layout.ServiceName); err != nil {
 		return "", false, err
 	}
-	deadline := time.Now().Add(5 * time.Second)
+
+	var state string
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		state, err := r.d.Getprop("init.svc." + ServiceName)
-		if err != nil {
+		var err error
+		if state, err = r.d.Getprop("init.svc." + layout.ServiceName); err != nil {
 			return "", false, err
 		}
-		if state != "running" {
+		if state == "stopped" {
 			return state, false, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return "", false, errors.New("service still running after ctl.stop")
+	return "", false, fmt.Errorf("service is %q 10s after ctl.stop, want stopped", state)
 }
 
 func remountRO(r *run) (string, bool, error) {
@@ -214,83 +226,101 @@ func remountRO(r *run) (string, bool, error) {
 	return "", false, err
 }
 
-// startService hands control back to init and waits for echod to report itself, since
-// ctl.start returns before the process has run.
-func startService(r *run) (string, bool, error) {
-	if _, err := r.d.Shell("rm -f " + LogPath); err != nil {
+// hidePackages releases the hardware echod needs: Amazon's audio clients keep mediaserver
+// holding the PCM devices, and one of them owns the mute button. It runs before anything
+// touches /system, so a failure here leaves the filesystem untouched.
+func hidePackages(r *run) (string, bool, error) {
+	hid, stopped, err := services.Hide(r.d)
+	if err != nil {
 		return "", false, err
 	}
-	if err := r.d.Setprop("ctl.start", ServiceName); err != nil {
+	if len(hid) == 0 && len(stopped) == 0 {
+		return fmt.Sprintf("%d already hidden, none running", len(services.Hidden)), true, nil
+	}
+	return fmt.Sprintf("hid %d of %d, stopped %d", len(hid), len(services.Hidden), len(stopped)), false, nil
+}
+
+// startService hands control back to init and waits for echod to report itself, since
+// ctl.start returns before the process has run. echod publishes its start as an uptime, which
+// only moves forward within a boot, so a changed value means this run rather than the last.
+func startService(r *run) (string, bool, error) {
+	before, _ := r.d.Getprop(layout.StartedProp)
+
+	if err := r.d.Setprop("ctl.start", layout.ServiceName); err != nil {
 		return "", false, err
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if log, err := r.d.ReadFile(LogPath); err == nil && len(log) > 0 {
-			return firstLine(string(log)), false, nil
+		started, err := r.d.Getprop(layout.StartedProp)
+		if err != nil {
+			return "", false, err
+		}
+		if started != "" && started != before {
+			return "started at uptime " + started, false, nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	state, _ := r.d.Getprop("init.svc." + ServiceName)
-	return "", false, fmt.Errorf("echod wrote no log within 10s (init.svc.%s=%s)", ServiceName, state)
+	state, _ := r.d.Getprop("init.svc." + layout.ServiceName)
+	return "", false, fmt.Errorf("echod did not report a start within 10s (init.svc.%s=%s)", layout.ServiceName, state)
 }
 
 // restoreService refuses to run without the backup: removing our symlink without putting the
 // stock binary back would leave init with a service definition pointing at nothing.
 func restoreService(r *run) (string, bool, error) {
-	have, err := r.d.Exists(Backup)
+	have, err := r.d.Exists(layout.Backup)
 	if err != nil {
 		return "", false, err
 	}
 	if !have {
-		link, err := r.d.IsSymlink(Service)
+		link, err := r.d.IsSymlink(layout.Service)
 		if err != nil {
 			return "", false, err
 		}
 		if !link {
 			return "not installed", true, nil
 		}
-		return "", false, fmt.Errorf("%s is missing; restore it before uninstalling", Backup)
+		return "", false, fmt.Errorf("%s is missing; restore it before uninstalling", layout.Backup)
 	}
 
-	if _, err := r.d.Shell(fmt.Sprintf("rm -f %s && mv %s %s", Service, Backup, Service)); err != nil {
+	if _, err := r.d.Shell(fmt.Sprintf("rm -f %s && mv %s %s", layout.Service, layout.Backup, layout.Service)); err != nil {
 		return "", false, err
 	}
 
 	// mv preserves the label, so this confirms rather than fixes.
-	label, err := r.d.Label(Service)
+	label, err := r.d.Label(layout.Service)
 	if err != nil {
 		return "", false, err
 	}
-	if label != StockLabel {
-		if err := r.d.Chcon(StockLabel, Service); err != nil {
+	if label != layout.StockLabel {
+		if err := r.d.Chcon(layout.StockLabel, layout.Service); err != nil {
 			return "", false, err
 		}
-		return "relabelled to " + StockLabel, false, nil
+		return "relabelled to " + layout.StockLabel, false, nil
 	}
 	return label, false, nil
 }
 
 func removeBinary(r *run) (string, bool, error) {
-	have, err := r.d.Exists(Dir)
+	have, err := r.d.Exists(layout.Dir)
 	if err != nil {
 		return "", false, err
 	}
 	if !have {
 		return "nothing to remove", true, nil
 	}
-	_, err = r.d.Shell("rm -rf " + Dir)
-	return Dir, false, err
+	_, err = r.d.Shell("rm -rf " + layout.Dir)
+	return layout.Dir, false, err
 }
 
 func startStock(r *run) (string, bool, error) {
-	if err := r.d.Setprop("ctl.start", ServiceName); err != nil {
+	if err := r.d.Setprop("ctl.start", layout.ServiceName); err != nil {
 		return "", false, err
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		state, err := r.d.Getprop("init.svc." + ServiceName)
+		state, err := r.d.Getprop("init.svc." + layout.ServiceName)
 		if err != nil {
 			return "", false, err
 		}
@@ -300,9 +330,4 @@ func startStock(r *run) (string, bool, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return "", false, errors.New("stock ledcontroller did not start")
-}
-
-func firstLine(s string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	return line
 }

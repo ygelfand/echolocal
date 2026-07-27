@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/electricbubble/gadb"
 )
@@ -35,8 +36,41 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("device: %q exited %d: %s", e.Cmd, e.Code, out)
 }
 
-// Connect selects a device, or the only one present when serial is empty.
-func Connect(serial string) (*Device, error) {
+// Info identifies a connected device well enough to choose between several.
+type Info struct {
+	Serial  string
+	Model   string
+	Product string
+}
+
+func (i Info) String() string {
+	switch {
+	case i.Model != "" && i.Product != "":
+		return fmt.Sprintf("%s (%s)", i.Model, i.Product)
+	case i.Model != "":
+		return i.Model
+	}
+	return i.Serial
+}
+
+// List returns the devices adb can actually talk to. Offline and unauthorized entries are
+// skipped: they show up in adb's listing but every command against them fails.
+func List() ([]Info, error) {
+	devices, err := online()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Info, 0, len(devices))
+	for _, gd := range devices {
+		d := &Device{d: gd}
+		model, _ := d.Getprop("ro.product.model")
+		product, _ := d.Getprop("ro.product.device")
+		out = append(out, Info{Serial: gd.Serial(), Model: model, Product: product})
+	}
+	return out, nil
+}
+
+func online() ([]gadb.Device, error) {
 	c, err := gadb.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("device: no adb server on 127.0.0.1:5037 (%w); start one with `adb start-server`", err)
@@ -46,16 +80,32 @@ func Connect(serial string) (*Device, error) {
 		return nil, fmt.Errorf("device: listing devices: %w", err)
 	}
 
+	out := make([]gadb.Device, 0, len(devices))
+	for _, d := range devices {
+		if state, err := d.State(); err == nil && state == gadb.StateOnline {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// Connect selects a device, or the only online one when serial is empty.
+func Connect(serial string) (*Device, error) {
+	devices, err := online()
+	if err != nil {
+		return nil, err
+	}
+
 	switch {
 	case len(devices) == 0:
 		return nil, errors.New("device: no device connected; check the USB cable and `adb devices`")
 	case serial != "":
 		for _, d := range devices {
 			if d.Serial() == serial {
-				return &Device{d: d}, nil
+				return rooted(&Device{d: d})
 			}
 		}
-		return nil, fmt.Errorf("device: no device with serial %q", serial)
+		return nil, fmt.Errorf("device: no online device with serial %q", serial)
 	case len(devices) > 1:
 		serials := make([]string, 0, len(devices))
 		for _, d := range devices {
@@ -64,19 +114,20 @@ func Connect(serial string) (*Device, error) {
 		return nil, fmt.Errorf("device: %d devices connected, pick one with --serial: %s",
 			len(devices), strings.Join(serials, ", "))
 	}
+	return rooted(&Device{d: devices[0]})
+}
 
-	dev := &Device{d: devices[0]}
-
-	// Everything the installer does needs root, so establish it here rather than failing
-	// partway through a /system edit.
-	root, err := dev.IsRoot()
+// rooted refuses a device that cannot do what an install needs, rather than failing partway
+// through a /system edit.
+func rooted(d *Device) (*Device, error) {
+	root, err := d.IsRoot()
 	if err != nil {
 		return nil, err
 	}
 	if !root {
 		return nil, errors.New("device: adbd is not running as root; unlock and root the device first")
 	}
-	return dev, nil
+	return d, nil
 }
 
 func (d *Device) Serial() string { return d.d.Serial() }
@@ -165,6 +216,15 @@ func (d *Device) PullFile(remote, local string) error {
 		return fmt.Errorf("device: pulling %s: %w", remote, err)
 	}
 	return f.Sync()
+}
+
+// WriteFile creates a file on the device with the given contents and mode.
+func (d *Device) WriteFile(remote string, data []byte, mode os.FileMode) error {
+	if err := d.d.Push(bytes.NewReader(data), remote, time.Now(), mode); err != nil {
+		return fmt.Errorf("device: writing %s: %w", remote, err)
+	}
+	_, err := d.Shell(fmt.Sprintf("chmod %o %s", mode.Perm(), quote(remote)))
+	return err
 }
 
 // PushFile copies a file onto the device and sets its mode.

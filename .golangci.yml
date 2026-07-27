@@ -18,6 +18,8 @@ linters:
         - (io.Closer).Close
         - (net.Conn).Close
         - (*os.File).Close
+        - (*github.com/ygelfand/go-esphome-device/mdns.Advertiser).Close
+        - (*github.com/ygelfand/echolocal/internal/input.Device).Close
         - fmt.Fprintf
         - fmt.Fprintln
 

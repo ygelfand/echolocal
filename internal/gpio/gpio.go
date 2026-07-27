@@ -27,8 +27,9 @@ const (
 	// write it can also clear it.
 	MutePin = 87
 
-	// MuteLEDPin only dims the mute button LED and cannot switch it off, because the LED
-	// is lit by the mute line itself.
+	// MuteLEDPin sets how brightly the mute button LED burns. It cannot switch it off,
+	// because the LED is lit by the mute line itself. Measured: driven low is full
+	// brightness, driven high is very dim, and left as an input it sits dim.
 	MuteLEDPin = 88
 )
 
@@ -146,4 +147,33 @@ func (m *Mute) Toggle() (bool, error) {
 	}
 	next := !cur
 	return next, m.Set(next)
+}
+
+// MuteLED sets how brightly the mute button burns while muted. There are two levels, not a
+// range: the pin is a plain GPIO, and nothing found so far gives finer control.
+type MuteLED struct{ pin Pin }
+
+// NewMuteLED takes the LED line and drives it, which nothing else does once Amazon's LED HAL
+// is gone. Left alone the pin floats as an input and the button sits dim.
+func NewMuteLED() (*MuteLED, error) {
+	p := Pin{N: Line(MuteLEDPin)}
+	if err := p.Export(); err != nil {
+		return nil, fmt.Errorf("export mute LED line: %w", err)
+	}
+	if err := p.SetDirection("out"); err != nil {
+		return nil, fmt.Errorf("set mute LED line to output: %w", err)
+	}
+	return &MuteLED{pin: p}, nil
+}
+
+// SetBright picks full brightness or dim.
+func (l *MuteLED) SetBright(bright bool) error { return l.pin.Set(!bright) }
+
+// Bright reports whether the LED is at full brightness.
+func (l *MuteLED) Bright() (bool, error) {
+	driven, err := l.pin.Get()
+	if err != nil {
+		return false, err
+	}
+	return !driven, nil
 }

@@ -49,29 +49,11 @@ func (e Event) TypeName() string {
 	return fmt.Sprintf("TYPE_%d", e.Type)
 }
 
-// CodeName maps the key codes this hardware actually emits. Anything unmapped prints its
-// number, which is what matters when discovering a new button.
 func (e Event) CodeName() string {
 	if e.Type != EvKey {
 		return fmt.Sprintf("%d", e.Code)
 	}
-	if n, ok := keyNames[e.Code]; ok {
-		return n
-	}
 	return fmt.Sprintf("KEY_%d", e.Code)
-}
-
-var keyNames = map[uint16]string{
-	113: "KEY_MUTE",
-	114: "KEY_VOLUMEDOWN",
-	115: "KEY_VOLUMEUP",
-	116: "KEY_POWER",
-	139: "KEY_MENU",
-	158: "KEY_BACK",
-	172: "KEY_HOMEPAGE",
-	212: "KEY_CAMERA",
-	217: "KEY_SEARCH",
-	528: "KEY_FOCUS",
 }
 
 func (e Event) String() string {

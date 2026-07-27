@@ -24,12 +24,18 @@ var (
 	styleDetail = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	styleCount  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+
+	styleKeyBox = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42")).
+			Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("42")).
+			Padding(0, 2).MarginLeft(2)
 )
 
 func newInstallCmd() *cobra.Command {
 	var (
-		serial string
-		echod  string
+		serial  string
+		echod   string
+		name    string
+		zeroPSK bool
 	)
 
 	c := &cobra.Command{
@@ -39,21 +45,31 @@ func newInstallCmd() *cobra.Command {
 			"so init starts and supervises it. Safe to re-run.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			d, err := device.Connect(serial)
+			d, err := connect(cmd.Context(), cmd.OutOrStdout(), serial)
 			if err != nil {
 				return err
 			}
-			cfg := installer.Config{EchodPath: echod}
-			return render(cmd.Context(), cmd.OutOrStdout(), "Installing EchoLocal",
+			chosen, err := resolveName(cmd.Context(), cmd.OutOrStdout(), d, name)
+			if err != nil {
+				return err
+			}
+			cfg := installer.Config{EchodPath: echod, Name: chosen, ZeroPSK: zeroPSK}
+			if err := render(cmd.Context(), cmd.OutOrStdout(), "Installing EchoLocal",
 				"✓ echod installed and running",
 				func(report installer.Reporter) error {
 					return installer.Install(cmd.Context(), d, cfg, report)
-				})
+				}); err != nil {
+				return err
+			}
+			return printPairing(cmd.OutOrStdout(), d, chosen)
 		},
 	}
 
 	c.Flags().StringVar(&serial, "serial", "", "device serial, when more than one is connected")
 	c.Flags().StringVar(&echod, "echod", "bin/echod", "path to the echod binary to install")
+	c.Flags().BoolVar(&zeroPSK, "zero-psk", false,
+		"leave the device unprovisioned so Home Assistant can push a key, instead of generating one")
+	nameFlag(c, &name)
 	return c
 }
 
@@ -65,7 +81,7 @@ func newUninstallCmd() *cobra.Command {
 		Short: "Restore Amazon's ledcontroller and remove echod",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			d, err := device.Connect(serial)
+			d, err := connect(cmd.Context(), cmd.OutOrStdout(), serial)
 			if err != nil {
 				return err
 			}
@@ -79,6 +95,27 @@ func newUninstallCmd() *cobra.Command {
 
 	c.Flags().StringVar(&serial, "serial", "", "device serial, when more than one is connected")
 	return c
+}
+
+// printPairing shows what Home Assistant needs. The key is the one thing a user has to carry
+// off this screen, so it gets a box of its own rather than a line of step detail.
+func printPairing(out io.Writer, d *device.Device, name string) error {
+	key, err := installer.ReadKey(d)
+	if err != nil {
+		return err
+	}
+
+	if key == "" {
+		fmt.Fprintf(out, "\n%s\n", styleDetail.Render(
+			"unprovisioned: Home Assistant will push an encryption key on first connection"))
+		return nil
+	}
+
+	fmt.Fprintf(out, "\n%s\n%s\n",
+		styleTitle.Render("Add to Home Assistant"),
+		styleDetail.Render("  Settings → Devices → ESPHome → "+name+", then paste this key:"))
+	fmt.Fprintln(out, styleKeyBox.Render(key))
+	return nil
 }
 
 // render drives a step run, live when attached to a terminal and plain lines otherwise.

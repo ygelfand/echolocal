@@ -2,6 +2,7 @@ package led
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 )
@@ -13,33 +14,75 @@ var HomeAssistant = Color{R: 0x18, G: 0xBC, B: 0xF2}
 // driver absorbs comfortably at this rate.
 const FrameInterval = 40 * time.Millisecond
 
-// Splash plays EchoLocal's boot animation for total, then leaves the ring dark.
+// Effects the ring can run, as Home Assistant names them.
+const (
+	EffectComet   = "Comet"
+	EffectRainbow = "Rainbow"
+	EffectPulse   = "Pulse"
+)
+
+// EffectNames lists the effects, for the light entity's effect list.
+func EffectNames() []string { return []string{EffectComet, EffectRainbow, EffectPulse} }
+
+// Arc lights a clockwise fraction of the ring, from 0 to 1, dimming the leading segment by
+// whatever is left over. Twelve segments cannot show thirty volume steps, so the partial
+// segment is what makes each step visible — the same trick Amazon's firmware used.
 //
-// Three movements — a Home Assistant blue comet, a rainbow rotation, then blue pulses —
-// so that a glance at the ring says which firmware booted and that echod reached its
-// hardware. Returns early if ctx is cancelled, always blanking the ring on the way out.
+// It fills from segment 11 so the arc grows across the front of the device.
+func Arc(fraction float64, c Color) []Color {
+	fraction = math.Max(0, math.Min(1, fraction))
+	lit := fraction * Segments
+
+	out := make([]Color, Segments)
+	for i := range Segments {
+		remaining := lit - float64(i)
+		if remaining <= 0 {
+			break
+		}
+		level := math.Min(1, remaining)
+		out[(11+i)%Segments] = scale(c, level)
+	}
+	return out
+}
+
+// effect returns the frame function for a named effect, or nil if there is no such effect.
+// base is the colour Home Assistant set, which effects use where it makes sense.
+func effect(name string, base Color) func(time.Duration) []Color {
+	switch name {
+	case EffectComet:
+		return comet(base)
+	case EffectRainbow:
+		return rainbow
+	case EffectPulse:
+		return breathe(base)
+	}
+	return nil
+}
+
+// RunEffect animates until ctx is cancelled.
+func RunEffect(ctx context.Context, r *Ring, name string, base Color) error {
+	frame := effect(name, base)
+	if frame == nil {
+		return fmt.Errorf("led: no effect %q", name)
+	}
+	return play(ctx, r, 0, frame)
+}
+
+// Splash plays a short Home Assistant blue comet, then leaves the ring dark. It says echod
+// started and reached its hardware; anything longer is just delay.
 func Splash(ctx context.Context, r *Ring, total time.Duration) error {
 	if total <= 0 {
 		return r.Off()
 	}
 
-	movements := []struct {
-		share float64
-		frame func(elapsed time.Duration) []Color
-	}{
-		{0.3, comet},
-		{0.4, rainbow},
-		{0.3, breathe},
+	fade := min(250*time.Millisecond, total/2)
+	if err := play(ctx, r, total-fade, comet(HomeAssistant)); err != nil {
+		return err
 	}
-
-	for _, m := range movements {
-		if err := play(ctx, r, time.Duration(float64(total)*m.share), m.frame); err != nil {
-			return err
-		}
-	}
-	return fadeOut(ctx, r, 400*time.Millisecond)
+	return fadeOut(ctx, r, fade)
 }
 
+// play runs an animation for d, or until ctx is cancelled when d is zero.
 func play(ctx context.Context, r *Ring, d time.Duration, frame func(time.Duration) []Color) error {
 	t := time.NewTicker(FrameInterval)
 	defer t.Stop()
@@ -47,7 +90,7 @@ func play(ctx context.Context, r *Ring, d time.Duration, frame func(time.Duratio
 	start := time.Now()
 	for {
 		elapsed := time.Since(start)
-		if elapsed >= d {
+		if d > 0 && elapsed >= d {
 			return nil
 		}
 		if err := r.SetSegments(frame(elapsed)); err != nil {
@@ -62,17 +105,19 @@ func play(ctx context.Context, r *Ring, d time.Duration, frame func(time.Duratio
 }
 
 // comet runs a bright head clockwise with a decaying tail behind it.
-func comet(elapsed time.Duration) []Color {
+func comet(base Color) func(time.Duration) []Color {
 	const perSegment = 60 * time.Millisecond
 	tail := []float64{1, 0.55, 0.3, 0.16, 0.08}
 
-	head := int(elapsed/perSegment) % Segments
-	out := make([]Color, Segments)
-	for i, f := range tail {
-		// Segment indices increase clockwise, so the tail sits at lower indices.
-		out[((head-i)%Segments+Segments)%Segments] = scale(HomeAssistant, f)
+	return func(elapsed time.Duration) []Color {
+		head := int(elapsed/perSegment) % Segments
+		out := make([]Color, Segments)
+		for i, f := range tail {
+			// Segment indices increase clockwise, so the tail sits at lower indices.
+			out[((head-i)%Segments+Segments)%Segments] = scale(base, f)
+		}
+		return out
 	}
-	return out
 }
 
 // rainbow spins a full hue wheel around the ring.
@@ -87,16 +132,18 @@ func rainbow(elapsed time.Duration) []Color {
 	return out
 }
 
-// breathe pulses the whole ring in brand blue.
-func breathe(elapsed time.Duration) []Color {
+// breathe pulses the whole ring.
+func breathe(base Color) func(time.Duration) []Color {
 	const period = 1200 * time.Millisecond
 
-	f := (1 - math.Cos(2*math.Pi*float64(elapsed%period)/float64(period))) / 2
-	out := make([]Color, Segments)
-	for i := range out {
-		out[i] = scale(HomeAssistant, f)
+	return func(elapsed time.Duration) []Color {
+		f := (1 - math.Cos(2*math.Pi*float64(elapsed%period)/float64(period))) / 2
+		out := make([]Color, Segments)
+		for i := range out {
+			out[i] = scale(base, f)
+		}
+		return out
 	}
-	return out
 }
 
 func fadeOut(ctx context.Context, r *Ring, d time.Duration) error {

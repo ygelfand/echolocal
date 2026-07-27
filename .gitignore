@@ -22,10 +22,6 @@ dist/
 internal/assets/payload/echod
 internal/assets/payload/*.sha256
 
-# Device images and dumps. Boot images are patched from the user's own device;
-# we never redistribute them.
-*.img
-*.img.orig
 dumps/
 captures/
 
