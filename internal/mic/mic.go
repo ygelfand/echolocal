@@ -51,7 +51,10 @@ const (
 // Source is the capture stream. Listeners receive mono frames; a listener that cannot keep up
 // misses frames rather than stalling the reader.
 type Source struct {
-	pcm *alsa.Capture
+	// The hardware, taken by Start and let go by Close. Nil in between: the handle outlives the
+	// device so that a restart can take it again without every listener being rebuilt.
+	devMu sync.Mutex
+	pcm   *alsa.Capture
 
 	mu        sync.Mutex
 	listeners map[int]chan []int16
@@ -87,17 +90,30 @@ func (s *Source) Mixing() settings.Mixing {
 	return s.mixing
 }
 
-// Acquire opens the capture device, taking it off Android if it got there first, the same way the
-// speaker does.
-func Acquire() (*Source, error) {
-	s, err := open()
+// New makes the array without taking the hardware, so listeners can subscribe before there is
+// anything to hear. Listen, Recent and the mixing setting work throughout; frames start at Start.
+func New() *Source {
+	mixer, mixing := NewMixer(settings.MixDelaySum)
+	return &Source{
+		listeners: map[int]chan []int16{},
+		raw:       map[int]chan []byte{},
+		mixer:     mixer,
+		mixing:    mixing,
+	}
+}
+
+func (s *Source) Name() string { return "capture" }
+
+// Start takes the capture device, off Android if it got there first, the same way the speaker does.
+func (s *Source) Start(context.Context) error {
+	err := s.open()
 	if err == nil || !errors.Is(err, alsa.ErrBusy) {
-		return s, err
+		return err
 	}
 
 	slog.Warn("capture device busy, stopping "+MediaService+" to take it", "err", err)
 	if err := prop.Stop(MediaService); err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
 		if err := prop.Start(MediaService); err != nil {
@@ -108,19 +124,28 @@ func Acquire() (*Source, error) {
 	for range acquireAttempts {
 		time.Sleep(acquireRetry)
 
-		s, err = open()
+		err = s.open()
 		if err == nil {
 			slog.Info("capture device acquired")
-			return s, nil
+			return nil
 		}
 		if !errors.Is(err, alsa.ErrBusy) {
-			return nil, err
+			return err
 		}
 	}
-	return nil, err
+	return err
 }
 
-func open() (*Source, error) {
+// Acquire is New and Start together, for a tool that wants the array for the length of one command.
+func Acquire() (*Source, error) {
+	s := New()
+	if err := s.Start(context.Background()); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Source) open() error {
 	pcm, err := alsa.Open(Card, CaptureDevice, alsa.Config{
 		Channels:   Channels,
 		Rate:       Rate,
@@ -130,16 +155,20 @@ func open() (*Source, error) {
 		Periods:    periods,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("mic: opening capture: %w", err)
+		return fmt.Errorf("mic: opening capture: %w", err)
 	}
-	mixer, mixing := NewMixer(settings.MixDelaySum)
-	return &Source{
-		pcm:       pcm,
-		listeners: map[int]chan []int16{},
-		raw:       map[int]chan []byte{},
-		mixer:     mixer,
-		mixing:    mixing,
-	}, nil
+
+	s.devMu.Lock()
+	s.pcm = pcm
+	s.devMu.Unlock()
+	return nil
+}
+
+// device is the hardware, or nil when it is not held.
+func (s *Source) device() *alsa.Capture {
+	s.devMu.Lock()
+	defer s.devMu.Unlock()
+	return s.pcm
 }
 
 // Listen returns a channel of mono frames and a function that stops the subscription.
@@ -204,6 +233,10 @@ func Decode(raw []byte) [][]int16 {
 // Run reads until ctx is cancelled. It reads whether or not anyone is listening, because a stream
 // left unread overruns and the hardware ring is only 160 ms deep.
 func (s *Source) Run(ctx context.Context) error {
+	pcm := s.device()
+	if pcm == nil {
+		return errors.New("mic: the capture device is not held")
+	}
 	raw := make([]byte, FrameSamples*Channels*Bits/8)
 
 	for {
@@ -211,7 +244,7 @@ func (s *Source) Run(ctx context.Context) error {
 			return nil
 		}
 
-		n, err := s.pcm.Read(raw)
+		n, err := pcm.Read(raw)
 		if err != nil {
 			if errors.Is(err, alsa.ErrOverrun) {
 				slog.Warn("capture overrun")
@@ -263,7 +296,19 @@ func (s *Source) broadcast(raw []byte) {
 // Dropped is how many frames a listener has missed.
 func (s *Source) Dropped() uint64 { return s.dropped.Load() }
 
-func (s *Source) Close() error { return s.pcm.Close() }
+// Close lets the device go. The Source stays usable and its listeners stay subscribed: Start can take
+// the hardware again, which is how a restart works.
+func (s *Source) Close() error {
+	s.devMu.Lock()
+	pcm := s.pcm
+	s.pcm = nil
+	s.devMu.Unlock()
+
+	if pcm == nil {
+		return nil
+	}
+	return pcm.Close()
+}
 
 // Mono takes the centre microphone alone, narrowed from 24 bits to 16. The beamformed mix is what
 // listeners get; this is for tools that need one microphone as it comes off the hardware.

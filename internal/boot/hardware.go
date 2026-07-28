@@ -9,9 +9,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
-	"github.com/ygelfand/echolocal/internal/mic"
-	"github.com/ygelfand/echolocal/internal/service"
-	"github.com/ygelfand/echolocal/internal/speaker"
 )
 
 // Taking the hardware. Whatever is free, Android takes, so each of these is held for the life of the
@@ -56,32 +53,6 @@ func takeMute() (*gpio.Mute, *gpio.MuteLED) {
 		slog.Error("setting mute LED bright failed", "err", err)
 	}
 	return mute, muteLED
-}
-
-// takeSpeaker holds the playback stream open for the life of the process, feeding silence when idle:
-// the amplifier hisses when nothing drives the DAC, and toggling it pops.
-//
-// Neither this nor the microphones restart on failure. They are acquired here rather than by the
-// service, so a restart would re-run the loop against a handle that is already broken; making the
-// handle outlive the device is what would turn them into restartable services.
-func takeSpeaker(group *service.Group) *speaker.Player {
-	spk, err := speaker.Acquire()
-	if err != nil {
-		slog.Error("speaker unavailable", "err", err)
-		return nil
-	}
-	group.Add(runner{name: "speaker", run: spk.Run, close: spk.Close})
-	return spk
-}
-
-func takeMicrophones(group *service.Group) *mic.Source {
-	source, err := mic.Acquire()
-	if err != nil {
-		slog.Error("microphones unavailable", "err", err)
-		return nil
-	}
-	group.Add(runner{name: "capture", run: source.Run, close: source.Close})
-	return source
 }
 
 // listenAddr is the port the installer opened in the firewall.

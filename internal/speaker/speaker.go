@@ -3,6 +3,7 @@ package speaker
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -47,6 +48,9 @@ const (
 // Player owns the speaker: one playback stream held open for the life of the process, with the
 // amplifier enabled while it runs.
 type Player struct {
+	// The hardware, taken by Start and let go by Close. Nil in between: the handle outlives the
+	// device so that a restart can take it again without everything holding a Player being rebuilt.
+	devMu sync.Mutex
 	pb    *alsa.Playback
 	mixer *alsa.Mixer
 
@@ -64,15 +68,30 @@ type Player struct {
 	resampling settings.Resampling
 	splices    atomic.Uint64
 
+	// deaf counts what was thrown away for want of a device.
+	deaf atomic.Uint64
+
 	mu      sync.Mutex
 	pending []int16 // interleaved stereo waiting to go out
 }
 
-// NewPlayer opens the playback stream and the mixer.
-func NewPlayer() (*Player, error) {
+// New makes the speaker without taking the hardware, so callers can hold it before there is anything
+// to play through. Audio queued before Start waits; Volume and the rest work throughout.
+func New() *Player {
+	p := &Player{out: DetectOutput()}
+	p.voice, p.resampling = NewResampler(settings.ResampleSinc)
+	p.SetVolume(VolumeSteps)
+	return p
+}
+
+func (p *Player) Name() string { return "speaker" }
+
+// open takes the playback stream and the mixer. Mixer writes happen in Run: the first one enumerates
+// the card, which takes over a second.
+func (p *Player) open() error {
 	m, err := alsa.OpenMixer(Card)
 	if err != nil {
-		return nil, fmt.Errorf("speaker: opening mixer: %w", err)
+		return fmt.Errorf("speaker: opening mixer: %w", err)
 	}
 
 	pb, err := alsa.OpenPlayback(Card, PlaybackDevice, alsa.Config{
@@ -85,14 +104,20 @@ func NewPlayer() (*Player, error) {
 	})
 	if err != nil {
 		_ = m.Close()
-		return nil, fmt.Errorf("speaker: opening playback: %w", err)
+		return fmt.Errorf("speaker: opening playback: %w", err)
 	}
 
-	// Mixer writes happen in Run: the first one enumerates the card, which takes over a second.
-	p := &Player{pb: pb, mixer: m, out: DetectOutput()}
-	p.voice, p.resampling = NewResampler(settings.ResampleSinc)
-	p.SetVolume(VolumeSteps)
-	return p, nil
+	p.devMu.Lock()
+	p.pb, p.mixer = pb, m
+	p.devMu.Unlock()
+	return nil
+}
+
+// device is the hardware, or nils when it is not held.
+func (p *Player) device() (*alsa.Playback, *alsa.Mixer) {
+	p.devMu.Lock()
+	defer p.devMu.Unlock()
+	return p.pb, p.mixer
 }
 
 // route applies the output's sequence. The amplifier stays off: it is enabled separately, after
@@ -167,12 +192,17 @@ func (p *Player) watchJack(ctx context.Context) {
 
 // apply writes a mixer sequence in order, logging failures and continuing.
 func (p *Player) apply(seq []kctl) {
+	_, mixer := p.device()
+	if mixer == nil {
+		return
+	}
+
 	for _, c := range seq {
 		var err error
 		if c.value != "" {
-			err = p.mixer.SetEnum(c.name, c.value)
+			err = mixer.SetEnum(c.name, c.value)
 		} else {
-			err = p.mixer.SetInt(c.name, uint32(c.level))
+			err = mixer.SetInt(c.name, uint32(c.level))
 		}
 		if err != nil {
 			slog.Error("mixer write failed", "control", c.name, "err", err)
@@ -182,6 +212,10 @@ func (p *Player) apply(seq []kctl) {
 
 // Run feeds the stream until ctx is cancelled, writing silence when nothing is queued.
 func (p *Player) Run(ctx context.Context) error {
+	pb, _ := p.device()
+	if pb == nil {
+		return errors.New("speaker: the playback device is not held")
+	}
 	buf := make([]byte, period*Channels*Bits/8)
 
 	// The order the vendor HAL uses on a route change: route with the amplifier off, let the
@@ -209,7 +243,7 @@ func (p *Player) Run(ctx context.Context) error {
 		}
 
 		p.fill(buf)
-		if _, err := p.pb.Write(buf); err != nil {
+		if _, err := pb.Write(buf); err != nil {
 			if err == alsa.ErrUnderrun {
 				slog.Warn("playback underrun")
 				continue
@@ -248,7 +282,18 @@ func (p *Player) fill(buf []byte) {
 }
 
 // Play queues interleaved stereo samples.
+//
+// Audio offered while the device is not held is dropped rather than queued. Nothing is draining the
+// queue then, so it would grow for as long as the speaker stayed away — and a device that cannot play
+// should say so in the log rather than in memory.
 func (p *Player) Play(samples []int16) {
+	if pb, _ := p.device(); pb == nil {
+		if n := p.deaf.Add(1); n == 1 || n%100 == 0 {
+			slog.Warn("audio dropped, no playback device", "times", n)
+		}
+		return
+	}
+
 	p.mu.Lock()
 	p.pending = append(p.pending, samples...)
 	p.mu.Unlock()
@@ -362,8 +407,21 @@ func (p *Player) Step() int { return int(p.step.Load()) }
 func (p *Player) Volume() float32 { return math.Float32frombits(p.volume.Load()) }
 
 // Close mutes the codec, turns the amplifier off and closes the stream.
+// Close mutes the codec, turns the amplifier off and lets the device go. The Player stays usable:
+// Start can take it again, which is how a restart works.
 func (p *Player) Close() error {
 	p.apply(initSequence)
-	_ = p.mixer.Close()
-	return p.pb.Close()
+
+	p.devMu.Lock()
+	pb, mixer := p.pb, p.mixer
+	p.pb, p.mixer = nil, nil
+	p.devMu.Unlock()
+
+	if mixer != nil {
+		_ = mixer.Close()
+	}
+	if pb == nil {
+		return nil
+	}
+	return pb.Close()
 }

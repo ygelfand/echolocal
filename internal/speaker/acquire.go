@@ -1,6 +1,7 @@
 package speaker
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"time"
@@ -17,20 +18,20 @@ const (
 	acquireAttempts = 8
 )
 
-// Acquire opens the speaker, taking the playback device off Android if it got there first.
+// Start takes the playback device, off Android if it got there first.
 //
 // mediaserver retries the open and wins it within a few hundred milliseconds of echod releasing,
 // so a restart can leave us with no speaker. Stopping the service releases it; it is started again
 // either way, because leaving it down trips the framework watchdog.
-func Acquire() (*Player, error) {
-	p, err := NewPlayer()
+func (p *Player) Start(context.Context) error {
+	err := p.open()
 	if err == nil || !errors.Is(err, alsa.ErrBusy) {
-		return p, err
+		return err
 	}
 
 	slog.Warn("playback device busy, stopping "+MediaService+" to take it", "err", err)
 	if err := prop.Stop(MediaService); err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
 		if err := prop.Start(MediaService); err != nil {
@@ -41,14 +42,24 @@ func Acquire() (*Player, error) {
 	for range acquireAttempts {
 		time.Sleep(acquireRetry)
 
-		p, err = NewPlayer()
+		err = p.open()
 		if err == nil {
 			slog.Info("playback device acquired")
-			return p, nil
+			return nil
 		}
 		if !errors.Is(err, alsa.ErrBusy) {
-			return nil, err
+			return err
 		}
 	}
-	return nil, err
+	return err
+}
+
+// Acquire is New and Start together, for a tool that wants the speaker for the length of one command.
+// The supervised path holds the Player from the start and lets the service take the device.
+func Acquire() (*Player, error) {
+	p := New()
+	if err := p.Start(context.Background()); err != nil {
+		return nil, err
+	}
+	return p, nil
 }

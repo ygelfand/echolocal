@@ -16,10 +16,12 @@ import (
 	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/prop"
 	"github.com/ygelfand/echolocal/internal/satellite"
 	"github.com/ygelfand/echolocal/internal/service"
 	"github.com/ygelfand/echolocal/internal/settings"
+	"github.com/ygelfand/echolocal/internal/speaker"
 )
 
 // Config is what the device needs to know that it cannot work out for itself.
@@ -68,8 +70,18 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 
 	mute, muteLED := takeMute()
-	spk := takeSpeaker(group)
-	source := takeMicrophones(group)
+
+	// The audio devices are held for the life of the process: whatever is free, Android takes. The
+	// handles are made here and the services take the hardware, so a device lost to Android can be
+	// taken back on a restart without everything holding a handle being rebuilt.
+	//
+	// The speaker also feeds silence while idle, because the amplifier hisses when nothing drives the
+	// DAC and toggling it pops.
+	spk := speaker.New()
+	group.Add(spk, forever())
+
+	source := mic.New()
+	group.Add(source, forever())
 
 	sat, err := satellite.New(satellite.Config{
 		Name:    name(cfg.Name),

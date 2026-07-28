@@ -42,7 +42,6 @@ func newRunCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			// Launched by init or an adb shell, either of which can go away.
 			signal.Ignore(syscall.SIGHUP)
 
 			return boot.Run(ctx, boot.Config{Name: name, Version: Version})
