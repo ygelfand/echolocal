@@ -23,6 +23,8 @@ linters:
         - (*github.com/ygelfand/echolocal/internal/alsa.Mixer).Close
         - (*github.com/ygelfand/echolocal/internal/alsa.Playback).Close
         - (*github.com/ygelfand/echolocal/internal/speaker.Player).Close
+        - (*github.com/ygelfand/echolocal/internal/mic.Source).Close
+        - (*github.com/ygelfand/echolocal/internal/alog.Handler).Close
         - fmt.Fprintf
         - fmt.Fprintln
 

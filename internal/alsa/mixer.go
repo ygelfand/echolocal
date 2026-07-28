@@ -33,7 +33,9 @@ const (
 
 	infoTypeOff  = elemIDSize
 	infoCountOff = elemIDSize + 8
-	// The value union for an enumerated control: items, item, name[64].
+	// The value union, which the control's type selects. For an integer control it is min, max and
+	// step; for an enumerated one, items, item and name[64].
+	infoRangeOff     = elemIDSize + 16
 	infoEnumItemsOff = elemIDSize + 16
 	infoEnumItemOff  = infoEnumItemsOff + 4
 	infoEnumNameOff  = infoEnumItemsOff + 8
@@ -84,6 +86,9 @@ type Control struct {
 	Type  uint32
 	Count uint32
 	Items []string
+
+	// The range of an integer control, zero for any other type.
+	Min, Max, Step int64
 }
 
 // Controls lists the card's controls. There is no cheap way to ask how many there are, so this
@@ -144,7 +149,21 @@ func (m *Mixer) info(numid uint32) (Control, error) {
 		Type:  binary.LittleEndian.Uint32(buf[infoTypeOff:]),
 		Count: binary.LittleEndian.Uint32(buf[infoCountOff:]),
 	}
-	if c.Type != TypeEnumerated {
+	// The value union that follows the count is the type's own: min, max and step for an integer
+	// control, item names for an enumerated one.
+	switch c.Type {
+	case TypeInteger:
+		c.Min = int64(int32(binary.LittleEndian.Uint32(buf[infoRangeOff:])))
+		c.Max = int64(int32(binary.LittleEndian.Uint32(buf[infoRangeOff+longSize:])))
+		c.Step = int64(int32(binary.LittleEndian.Uint32(buf[infoRangeOff+2*longSize:])))
+		return c, nil
+	case TypeInteger64:
+		c.Min = int64(binary.LittleEndian.Uint64(buf[infoRangeOff:]))
+		c.Max = int64(binary.LittleEndian.Uint64(buf[infoRangeOff+8:]))
+		c.Step = int64(binary.LittleEndian.Uint64(buf[infoRangeOff+16:]))
+		return c, nil
+	case TypeEnumerated:
+	default:
 		return c, nil
 	}
 
@@ -173,6 +192,10 @@ func (m *Mixer) Get(c Control) ([]uint32, error) {
 	w := valueWidth(c.Type)
 	out := make([]uint32, c.Count)
 	for i := range out {
+		if w == 1 {
+			out[i] = uint32(buf[valueDataOff+i])
+			continue
+		}
 		out[i] = binary.LittleEndian.Uint32(buf[valueDataOff+i*w:])
 	}
 	return out, nil
@@ -203,6 +226,46 @@ func (m *Mixer) Set(c Control, v uint32) error {
 		return fmt.Errorf("alsa: writing %q: %w", c.Name, err)
 	}
 	return nil
+}
+
+// SetAll writes one value per channel, for controls that carry a different value in each: a
+// coefficient blob rather than a level.
+func (m *Mixer) SetAll(c Control, values []uint32) error {
+	if uint32(len(values)) != c.Count {
+		return fmt.Errorf("alsa: %q takes %d values, given %d", c.Name, c.Count, len(values))
+	}
+
+	var buf [elemValueSize]byte
+	binary.LittleEndian.PutUint32(buf[idNumidOff:], c.Numid)
+	w := valueWidth(c.Type)
+	for i, v := range values {
+		if w == 1 {
+			buf[valueDataOff+i] = byte(v)
+			continue
+		}
+		binary.LittleEndian.PutUint32(buf[valueDataOff+i*w:], v)
+	}
+	if err := ioctl(m.f.Fd(), ioctlElemWrite, unsafe.Pointer(&buf)); err != nil {
+		return fmt.Errorf("alsa: writing %q: %w", c.Name, err)
+	}
+	return nil
+}
+
+// SetBytes writes a byte-typed control, by name.
+func (m *Mixer) SetBytes(name string, data []byte) error {
+	c, err := m.Find(name)
+	if err != nil {
+		return err
+	}
+	if c.Type != TypeBytes {
+		return fmt.Errorf("alsa: %q is not a byte control", name)
+	}
+
+	values := make([]uint32, len(data))
+	for i, b := range data {
+		values[i] = uint32(b)
+	}
+	return m.SetAll(c, values)
 }
 
 // SetEnum picks an enumerated control's item by name.

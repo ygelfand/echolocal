@@ -65,6 +65,9 @@ type WakeWord struct {
 	// Delivery is how the reply from this slot's pipeline reaches the device.
 	Delivery *Delivery `json:"delivery,omitempty"`
 
+	// FollowUp is seconds to listen after a reply, zero to only do it when Home Assistant asks.
+	FollowUp *int `json:"follow_up,omitempty"`
+
 	// Seconds before giving up. Listening holds the microphone open and Home Assistant normally ends
 	// it, so that one is a backstop; thinking holds only the ring, and a model can take a minute.
 	MaxListen *int `json:"max_listen,omitempty"`
@@ -123,6 +126,7 @@ func SetWakeThreshold(slot int, v float64) error { return store().SetWakeThresho
 func SetWakeTone(slot int, v Tone) error         { return store().SetWakeTone(slot, v) }
 func SetWakeEffect(slot int, v string) error     { return store().SetWakeEffect(slot, v) }
 func SetWakeDelivery(slot int, v Delivery) error { return store().SetWakeDelivery(slot, v) }
+func SetWakeFollowUp(slot, seconds int) error    { return store().SetWakeFollowUp(slot, seconds) }
 func SetWakeMaxListen(slot, seconds int) error   { return store().SetWakeMaxListen(slot, seconds) }
 func SetWakeMaxThink(slot, seconds int) error    { return store().SetWakeMaxThink(slot, seconds) }
 
@@ -236,6 +240,10 @@ func (st *Store) SetWakeEffect(slot int, v string) error {
 
 func (st *Store) SetWakeDelivery(slot int, v Delivery) error {
 	return st.updateWord(slot, func(w *WakeWord) { w.Delivery = &v })
+}
+
+func (st *Store) SetWakeFollowUp(slot, seconds int) error {
+	return st.updateWord(slot, func(w *WakeWord) { w.FollowUp = &seconds })
 }
 
 func (st *Store) SetWakeMaxListen(slot, seconds int) error {

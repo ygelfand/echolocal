@@ -73,6 +73,7 @@ const (
 	evTimeout                      // Home Assistant never closed the run
 	evPending                      // a turn held back for the last one to close has waited long enough
 	evPlaying                      // the reply has audio, so the pipeline owes nothing more
+	evContinue                     // Home Assistant wants the answer to a question it just asked
 )
 
 type event struct {
@@ -121,13 +122,17 @@ type conversation struct {
 	stopAudio func()
 	deadline  *time.Timer
 
-	// pending is a slot whose turn is waiting for the previous one to finish closing, or -1.
+	// followUp says this turn was opened without a wake word, so hearing nothing is a normal ending
+	// rather than Home Assistant having gone away.
+	followUp bool
+
+	// pending is a turn owed once the current one has finished closing, nil when none.
 	//
 	// Home Assistant's events carry no run identifier, so a turn started while the last one is still
 	// ending cannot tell that one's events from its own — and the first thing to arrive is the old
 	// run's RUN_END, which would end the new turn instead. Waiting for the old run to close makes
 	// that event the go-ahead rather than a stray.
-	pending int
+	pending *nextTurn
 	grace   *time.Timer
 
 	reply reply
@@ -135,6 +140,12 @@ type conversation struct {
 
 // graceStart is how long to wait for a stopped run to close before starting the next one anyway.
 const graceStart = 750 * time.Millisecond
+
+// nextTurn is a turn to open: which slot, and whether it follows a reply rather than a wake word.
+type nextTurn struct {
+	slot     int
+	followUp bool
+}
 
 // reply is the state of the answer being spoken. It only means anything in phaseReplying.
 type reply struct {
@@ -164,7 +175,6 @@ func newConversation(k *kit) *conversation {
 		leds:    k.LEDs,
 		log:     k.Log,
 		events:  make(chan event, 32),
-		pending: -1,
 	}
 
 	k.Voice.OnPipelineEvent = c.pipeline
@@ -230,7 +240,15 @@ func (c *conversation) Run(ctx context.Context) {
 func (c *conversation) handle(e event) {
 	switch e.kind {
 	case evStart:
-		c.start(e.slot)
+		c.start(nextTurn{slot: e.slot})
+
+	case evContinue:
+		// The pipeline asked a question. Its answer is owed after the reply has been spoken, so this
+		// only records the intent; evPlayed opens it.
+		if c.phase != phaseIdle {
+			slog.Info("pipeline asked for an answer", "slot", c.slot+1)
+			c.pending = &nextTurn{slot: c.slot, followUp: true}
+		}
 
 	case evHeard:
 		if e.text != "" {
@@ -294,7 +312,15 @@ func (c *conversation) handle(e event) {
 	case evPlayed:
 		c.reported(e.at)
 		if c.phase == phaseReplying {
+			slot := c.slot
 			c.idle("spoken")
+
+			// Continual conversation: the slot keeps listening after every reply, not only the ones
+			// Home Assistant asked to continue.
+			if c.pending == nil && c.wake.FollowUp(slot) > 0 {
+				c.pending = &nextTurn{slot: slot, followUp: true}
+			}
+			c.startPending()
 		}
 
 	case evRunEnd:
@@ -316,6 +342,7 @@ func (c *conversation) handle(e event) {
 
 	case evError:
 		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
+		c.clearPending()
 		c.idle("failed")
 		c.trouble()
 
@@ -332,8 +359,17 @@ func (c *conversation) handle(e event) {
 		chime(c.speaker, toneCancel)
 
 	case evTimeout:
-		// Which phase ran out says whose fault it is: listening means Home Assistant stopped
-		// answering, thinking means its pipeline is slower than the slot allows for.
+		c.clearPending()
+
+		// Nobody spoke into a turn nobody asked for, which is how a follow-up is meant to end. Every
+		// other timeout is something failing: listening means Home Assistant stopped answering,
+		// thinking means its pipeline is slower than the slot allows for.
+		if c.followUp && c.phase == phaseListening {
+			slog.Info("nothing followed", "slot", c.slot+1)
+			c.idle("nothing said")
+			return
+		}
+
 		switch c.phase {
 		case phaseListening:
 			slog.Warn("gave up listening", "slot", c.slot+1, "after", c.wake.MaxListen(c.slot))
@@ -345,8 +381,10 @@ func (c *conversation) handle(e event) {
 	}
 }
 
-// start opens a turn on the pipeline paired with slot.
-func (c *conversation) start(slot int) {
+// start opens a turn on the pipeline paired with a slot.
+func (c *conversation) start(n nextTurn) {
+	slot := n.slot
+
 	// Saying the wake word while the device is still listening is part of the sentence, not a new
 	// request: acting on it would cut off what the user is in the middle of saying. Once it is
 	// thinking or speaking, a wake word is a deliberate interruption and takes the turn over.
@@ -361,7 +399,7 @@ func (c *conversation) start(slot int) {
 		c.idle("interrupted")
 
 		// The stopped run has yet to close, and its last events are still on their way.
-		c.pending = slot
+		c.pending = &nextTurn{slot: slot}
 		c.grace = time.NewTimer(graceStart)
 		return
 	}
@@ -386,8 +424,14 @@ func (c *conversation) start(slot int) {
 	}
 
 	c.slot = slot
+	c.followUp = n.followUp
+
+	// A follow-up chimes like any other turn: the microphone is open with nothing said to say so.
+	// It is not a wake, though, so it does not report a phrase nobody spoke.
 	c.wake.Chime(slot)
-	c.log.Woke(phrase)
+	if !n.followUp {
+		c.log.Woke(phrase)
+	}
 	if err := c.vs.StartTurn(phrase, audioSettings()); err != nil {
 		slog.Error("starting the turn failed", "slot", slot+1, "err", err)
 		c.trouble()
@@ -402,9 +446,21 @@ func (c *conversation) start(slot int) {
 		c.claim.Play(effect, c.ring.Base())
 	}
 
-	c.arm(c.wake.MaxListen(slot))
+	c.arm(c.listenFor(n))
 	c.startAudio(slot)
 	slog.Info("turn started", "slot", slot+1, "phrase", phrase)
+}
+
+// listenFor is how long a turn may listen. A follow-up gets its own, shorter, window when the slot
+// sets one: it was not asked for, so silence is a likely answer and holding the microphone open
+// through the full limit is what the wake word is there to avoid.
+func (c *conversation) listenFor(n nextTurn) time.Duration {
+	if n.followUp {
+		if d := c.wake.FollowUp(n.slot); d > 0 {
+			return d
+		}
+	}
+	return c.wake.MaxListen(n.slot)
 }
 
 // think stops sending audio. The same animation turned around says the device has stopped listening
@@ -472,16 +528,16 @@ func (c *conversation) enter(p phase) {
 
 // startPending opens the turn that was held back, if there is one.
 func (c *conversation) startPending() {
-	slot := c.pending
+	next := c.pending
 	c.clearPending()
 
-	if slot >= 0 {
-		c.start(slot)
+	if next != nil {
+		c.start(*next)
 	}
 }
 
 func (c *conversation) clearPending() {
-	c.pending = -1
+	c.pending = nil
 	if c.grace != nil {
 		c.grace.Stop()
 		c.grace = nil
@@ -540,6 +596,10 @@ func (c *conversation) pipeline(e esphome.PipelineEvent) {
 		c.post(event{kind: evHeard, text: e.Data["text"]})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_STT_VAD_END:
 		c.post(event{kind: evHeard})
+	case api.VoiceAssistantEvent_VOICE_ASSISTANT_INTENT_END:
+		if e.Data["continue_conversation"] == "1" {
+			c.post(event{kind: evContinue})
+		}
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_TTS_START:
 		c.post(event{kind: evReplyText, text: e.Data["text"]})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_TTS_END:

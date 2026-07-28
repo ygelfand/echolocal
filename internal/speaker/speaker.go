@@ -199,9 +199,12 @@ func (p *Player) apply(seq []kctl) {
 
 	for _, c := range seq {
 		var err error
-		if c.value != "" {
+		switch {
+		case c.value != "":
 			err = mixer.SetEnum(c.name, c.value)
-		} else {
+		case c.blob != nil:
+			err = mixer.SetBytes(c.name, c.blob)
+		default:
 			err = mixer.SetInt(c.name, uint32(c.level))
 		}
 		if err != nil {

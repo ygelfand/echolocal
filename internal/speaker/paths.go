@@ -20,6 +20,7 @@ type kctl struct {
 	name  string
 	value string
 	level int32
+	blob  []byte
 }
 
 var initSequence = []kctl{
@@ -27,6 +28,20 @@ var initSequence = []kctl{
 	{name: "Audio_DacMux_Setting", value: "On"},
 	{name: "Ignore Ramp Up", value: "Off"},
 	{name: driverGain, level: 0},
+	{name: "biquad coefficients", blob: speakerEQ},
+}
+
+// speakerEQ is the DAC's filter chain: six unity blocks and one tuned filter, which is the vendor's
+// tuning for this speaker. The coefficients read back as zeros until something writes them.
+var speakerEQ = []byte{
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	127, 247, 0, 0, 128, 9, 0, 0, 127, 239, 0, 0, 0, 17, 0, 0,
+	0, 17, 0, 0, 127, 222, 0, 0, 15, 0, 0,
 }
 
 var pathSequence = map[Output][]kctl{

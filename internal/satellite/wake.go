@@ -40,6 +40,7 @@ type wakeSlot struct {
 	tone      *esphome.Select
 	effect    *esphome.Select
 	delivery  *esphome.Select
+	followUp  *esphome.Number
 	maxListen *esphome.Number
 	maxThink  *esphome.Number
 }
@@ -131,6 +132,16 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 			},
 			Options: settings.Labels(deliveries()),
 		},
+		followUp: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("follow_up_%d", n+1),
+				Name:     fmt.Sprintf("Assistant %d follow-up time", n+1),
+				Icon:     "mdi:comment-question-outline",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 0, Max: 30, Step: 1, Unit: "s",
+			Mode: esphome.NumberBox,
+		},
 		maxListen: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("max_listen_%d", n+1),
@@ -189,6 +200,12 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 		}
 		slog.Info("reply delivery", "slot", n+1, "using", how)
 	}
+	s.followUp.OnCommand = func(v float32) {
+		s.followUp.Set(v)
+		if err := settings.SetWakeFollowUp(n, int(v)); err != nil {
+			slog.Error("saving the follow-up time failed", "slot", n+1, "err", err)
+		}
+	}
 	s.maxListen.OnCommand = func(v float32) {
 		s.maxListen.Set(v)
 		if err := settings.SetWakeMaxListen(n, int(v)); err != nil {
@@ -219,6 +236,7 @@ func (w *wakeControl) restoreSlots() {
 		s.tone.Set(saved.ToneOr(settings.DefaultTone).Label())
 		s.effect.Set(saved.EffectOr(settings.DefaultEffect))
 		s.delivery.Set(saved.DeliveryOr(settings.DefaultDelivery).Label())
+		s.followUp.Set(float32(saved.FollowUpOr(settings.DefaultFollowUp)))
 		s.maxListen.Set(float32(saved.MaxListenOr(settings.DefaultMaxListen)))
 		s.maxThink.Set(float32(saved.MaxThinkOr(settings.DefaultMaxThink)))
 	}
@@ -230,7 +248,8 @@ func (w *wakeControl) restoreSlots() {
 func (w *wakeControl) entities() []esphome.Entity {
 	ents := []esphome.Entity{w.backend}
 	for _, s := range w.slots {
-		ents = append(ents, s.threshold, s.tone, s.effect, s.delivery, s.maxListen, s.maxThink)
+		ents = append(ents, s.threshold, s.tone, s.effect, s.delivery, s.followUp,
+			s.maxListen, s.maxThink)
 	}
 	return ents
 }
@@ -257,6 +276,12 @@ func (w *wakeControl) Chime(slot int) {
 // Delivery is how a slot's reply should reach the device.
 func (w *wakeControl) Delivery(slot int) settings.Delivery {
 	return w.saved(slot).DeliveryOr(settings.DefaultDelivery)
+}
+
+// FollowUp is how long a turn opened without a wake word listens for, zero when only Home Assistant
+// may ask for one.
+func (w *wakeControl) FollowUp(slot int) time.Duration {
+	return time.Duration(w.saved(slot).FollowUpOr(settings.DefaultFollowUp)) * time.Second
 }
 
 // MaxListen and MaxThink are how long a slot's turn may spend in each phase.

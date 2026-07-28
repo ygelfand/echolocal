@@ -56,6 +56,23 @@ func TestDeliveryIsPerSlot(t *testing.T) {
 	}
 }
 
+// Follow-up time is per slot too, and zero is off rather than unset.
+func TestFollowUpIsPerSlot(t *testing.T) {
+	st := load(t)
+
+	if err := st.SetWakeFollowUp(0, 8); err != nil {
+		t.Fatalf("SetWakeFollowUp: %v", err)
+	}
+
+	got := st.Get().Wake
+	if v := got.Slot(0).FollowUpOr(DefaultFollowUp); v != 8 {
+		t.Errorf("slot 1 follow-up = %d", v)
+	}
+	if v := got.Slot(1).FollowUpOr(DefaultFollowUp); v != 0 {
+		t.Errorf("slot 2 follow-up = %d, want off", v)
+	}
+}
+
 // A zero value has to survive, or turning something off would read as never having been set and the
 // default would turn it back on.
 func TestZeroValueSticks(t *testing.T) {

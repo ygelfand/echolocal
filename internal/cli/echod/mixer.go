@@ -54,6 +54,10 @@ func newMixerCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(out, "%s = %s\n", ctl.Name, describe(ctl, v))
+				fmt.Fprintf(out, "type: %s  count: %d\n", kind(ctl.Type), ctl.Count)
+				if ctl.Type == alsa.TypeInteger || ctl.Type == alsa.TypeInteger64 {
+					fmt.Fprintf(out, "range: %d..%d step %d\n", ctl.Min, ctl.Max, ctl.Step)
+				}
 				if len(ctl.Items) > 0 {
 					fmt.Fprintf(out, "items: %s\n", strings.Join(ctl.Items, ", "))
 				}
@@ -64,11 +68,27 @@ func newMixerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if ctl.Type == alsa.TypeEnumerated {
+			switch fields := strings.Fields(args[1]); {
+			case ctl.Type == alsa.TypeEnumerated:
 				if err := m.SetEnum(args[0], args[1]); err != nil {
 					return err
 				}
-			} else {
+
+			// A control with a value per channel takes them all at once, quoted as one argument.
+			case len(fields) > 1:
+				values := make([]uint32, 0, len(fields))
+				for _, f := range fields {
+					n, err := strconv.ParseUint(f, 10, 32)
+					if err != nil {
+						return fmt.Errorf("%q is not a number", f)
+					}
+					values = append(values, uint32(n))
+				}
+				if err := m.SetAll(ctl, values); err != nil {
+					return err
+				}
+
+			default:
 				n, err := strconv.ParseUint(args[1], 10, 32)
 				if err != nil {
 					return fmt.Errorf("%q is not a number", args[1])
@@ -89,6 +109,22 @@ func newMixerCmd() *cobra.Command {
 
 	c.Flags().IntVar(&card, "card", 0, "sound card index")
 	return c
+}
+
+func kind(t uint32) string {
+	switch t {
+	case alsa.TypeBoolean:
+		return "boolean"
+	case alsa.TypeInteger:
+		return "integer"
+	case alsa.TypeEnumerated:
+		return "enumerated"
+	case alsa.TypeBytes:
+		return "bytes"
+	case alsa.TypeInteger64:
+		return "integer64"
+	}
+	return fmt.Sprintf("type %d", t)
 }
 
 func describe(c alsa.Control, values []uint32) string {

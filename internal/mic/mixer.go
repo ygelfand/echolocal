@@ -1,9 +1,11 @@
 package mic
 
 import (
+	"log/slog"
 	"sync"
 
 	"github.com/ygelfand/echolocal/internal/settings"
+	"github.com/ygelfand/echolocal/internal/subband"
 )
 
 // Mixer reduces the array's channels to the one channel everything downstream reads. Wake detection
@@ -30,45 +32,46 @@ func (Center) Mix(mics [][]int16) []int16 {
 	return mics[CenterMic]
 }
 
-// A mixer that needs more than belongs here — the device's own beamformer wants a filter bank and
-// 460 KB of coefficients — lives in its own package and calls Register, so adding one costs nothing
-// in this file.
-var (
-	mixersMu sync.RWMutex
-	mixers   = map[settings.Mixing]func() Mixer{
-		settings.MixCenter:   func() Mixer { return Center{} },
-		settings.MixDelaySum: func() Mixer { return NewBeamformer() },
-	}
-	order = []settings.Mixing{settings.MixCenter, settings.MixDelaySum}
-)
-
-// Register adds a way to combine the array.
-func Register(m settings.Mixing, make func() Mixer) {
-	mixersMu.Lock()
-	defer mixersMu.Unlock()
-
-	if _, seen := mixers[m]; !seen {
-		order = append(order, m)
-	}
-	mixers[m] = make
+type mix struct {
+	name settings.Mixing
+	make func() Mixer
 }
 
-// Mixings lists what this build can do, in the order it became available.
+// What this build can do, in the order it is offered. The vendor's own beamformer is in the list
+// only when its coefficients are there to read, and reading them waits until something asks: they
+// are 460 KB of text on the vendor partition, and the mix may never be chosen.
+var mixes = sync.OnceValue(func() []mix {
+	out := []mix{
+		{settings.MixCenter, func() Mixer { return Center{} }},
+		{settings.MixDelaySum, func() Mixer { return NewBeamformer() }},
+	}
+
+	w, err := subband.Load(subband.VendorDir)
+	if err != nil {
+		slog.Error("vendor beamformer unavailable", "err", err)
+		return out
+	}
+	slog.Info("vendor beamformer available", "bands", subband.Bands, "beams", subband.Beams)
+	return append(out, mix{settings.MixBeamformer, func() Mixer { return w.New() }})
+})
+
+// Mixings lists what the array can be combined with.
 func Mixings() []settings.Mixing {
-	mixersMu.RLock()
-	defer mixersMu.RUnlock()
-	return append([]settings.Mixing(nil), order...)
+	out := make([]settings.Mixing, 0, len(mixes()))
+	for _, m := range mixes() {
+		out = append(out, m.name)
+	}
+	return out
 }
 
 // NewMixer builds one, falling back to the array for anything this build does not have: a setting
-// left over from another version should not leave the device deaf.
+// left over from another version, or from a device with the coefficients this one lacks, should not
+// leave it deaf.
 func NewMixer(m settings.Mixing) (Mixer, settings.Mixing) {
-	mixersMu.RLock()
-	make, ok := mixers[m]
-	mixersMu.RUnlock()
-
-	if !ok {
-		return mixers[settings.MixDelaySum](), settings.MixDelaySum
+	for _, have := range mixes() {
+		if have.name == m {
+			return have.make(), m
+		}
 	}
-	return make(), m
+	return NewBeamformer(), settings.MixDelaySum
 }

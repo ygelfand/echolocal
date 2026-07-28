@@ -12,6 +12,9 @@ const (
 	// Seconds. Nobody speaks for fifteen, and a pipeline with a model in it can take a while.
 	DefaultMaxListen = 15
 	DefaultMaxThink  = 90
+
+	// Zero is no follow-up unless Home Assistant asks for one.
+	DefaultFollowUp = 0
 )
 
 // VolumeOr reports the stored volume step, or def if it has never been set.
@@ -96,6 +99,14 @@ func (w WakeWord) DeliveryOr(def Delivery) Delivery {
 		return def
 	}
 	return *w.Delivery
+}
+
+// FollowUpOr reports how long a turn opened without a wake word listens for.
+func (w WakeWord) FollowUpOr(def int) int {
+	if w.FollowUp == nil {
+		return def
+	}
+	return *w.FollowUp
 }
 
 // MaxListenOr and MaxThinkOr report the limits in seconds.
