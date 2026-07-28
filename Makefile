@@ -11,11 +11,13 @@ LDFLAGS := -X 'main.Version=$(VERSION)' \
 BUILD_DIR := bin
 ASSET_DIR := internal/assets/payload
 
-# echod targets the Echo Dot 2: MT8163, 32-bit userspace, Android 5.1 (API 22).
+# echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). Amazon ships a 32-bit userspace but
+# the SoC and kernel are arm64 and /system/lib64 is present, so echod is built 64-bit: the wake word
+# pipeline costs 50ms per 80ms of audio there against 88ms as 32-bit code, which does not fit.
 # The ALSA path is pure Go over /dev/snd ioctls, so no cgo and no NDK image. Keep it that
 # way unless something genuinely needs C; the NDK target below exists only for that case.
 NDK_IMAGE := echolocal-ndk:latest
-DEVICE_ENV := GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0
+DEVICE_ENV := GOOS=linux GOARCH=arm64 CGO_ENABLED=0
 DEVICE_LDFLAGS := -s -w $(LDFLAGS)
 
 ADB ?= adb
