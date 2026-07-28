@@ -30,7 +30,8 @@ type mediaPlayer struct {
 	step int
 }
 
-func newMediaPlayer(leds *led.Driver, spk *speaker.Player) *mediaPlayer {
+func newMediaPlayer(k *kit) *mediaPlayer {
+	leds, spk := k.LEDs, k.Speaker
 	p := &mediaPlayer{
 		mp: &esphome.MediaPlayer{
 			Base: esphome.Base{ObjectID: "speaker", Name: "Speaker", Icon: "mdi:speaker"},

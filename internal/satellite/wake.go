@@ -44,7 +44,7 @@ type wakeSlot struct {
 	maxThink  *esphome.Number
 }
 
-func newWakeControl(spk *speaker.Player, backends []settings.WakeBackend, slots int) *wakeControl {
+func newWakeControl(k *kit, backends []settings.WakeBackend, slots int) *wakeControl {
 	w := &wakeControl{
 		backend: &esphome.Select{
 			Base: esphome.Base{
@@ -55,7 +55,7 @@ func newWakeControl(spk *speaker.Player, backends []settings.WakeBackend, slots 
 			},
 			Options: settings.Labels(backends),
 		},
-		speaker: spk,
+		speaker: k.Speaker,
 	}
 
 	w.backend.OnCommand = func(label string) {

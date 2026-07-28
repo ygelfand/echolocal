@@ -23,7 +23,8 @@ type options struct {
 	resampling *esphome.Select
 }
 
-func newOptions(source *mic.Source, spk *speaker.Player) *options {
+func newOptions(k *kit) *options {
+	source, spk := k.Mic, k.Speaker
 	o := &options{}
 
 	if source != nil {

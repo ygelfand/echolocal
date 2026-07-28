@@ -100,6 +100,7 @@ type conversation struct {
 	wake    *wakeControl
 	ring    *ringLight
 	leds    *led.Driver
+	log     *activity
 
 	events chan event
 
@@ -152,25 +153,24 @@ type reply struct {
 	playingAt time.Time
 }
 
-func newConversation(vs *esphome.VoiceSatellite, source *mic.Source, spk *speaker.Player,
-	ring *ringLight, leds *led.Driver, player *mediaPlayer, wakeCtl *wakeControl) *conversation {
-
+func newConversation(k *kit) *conversation {
 	c := &conversation{
-		vs:      vs,
-		source:  source,
-		speaker: spk,
-		player:  player,
-		wake:    wakeCtl,
-		ring:    ring,
-		leds:    leds,
+		vs:      k.Voice,
+		source:  k.Mic,
+		speaker: k.Speaker,
+		player:  k.Player,
+		wake:    k.Wake,
+		ring:    k.Ring,
+		leds:    k.LEDs,
+		log:     k.Log,
 		events:  make(chan event, 32),
 		pending: -1,
 	}
 
-	vs.OnPipelineEvent = c.pipeline
-	vs.OnTTSAudio = c.tts
-	vs.OnAnnounce = c.announce
-	vs.OnStartRequestAccepted = func(port uint32, failed bool) {
+	k.Voice.OnPipelineEvent = c.pipeline
+	k.Voice.OnTTSAudio = c.tts
+	k.Voice.OnAnnounce = c.announce
+	k.Voice.OnStartRequestAccepted = func(port uint32, failed bool) {
 		if failed {
 			slog.Error("home assistant refused the turn")
 			c.post(event{kind: evError, code: "refused"})
@@ -234,14 +234,16 @@ func (c *conversation) handle(e event) {
 
 	case evHeard:
 		if e.text != "" {
-			slog.Info("heard", "text", e.text)
+			slog.Info("heard", "slot", c.slot+1, "text", e.text)
+			c.log.Heard(e.text)
 		}
 		if c.phase == phaseListening {
 			c.think()
 		}
 
 	case evReplyText:
-		slog.Info("replying", "text", e.text)
+		slog.Info("replying", "slot", c.slot+1, "text", e.text)
+		c.log.Replied(e.text)
 		if c.phase == phaseListening {
 			c.think()
 		}
@@ -313,7 +315,7 @@ func (c *conversation) handle(e event) {
 		c.disarm()
 
 	case evError:
-		slog.Error("pipeline error", "code", e.code, "message", e.msg)
+		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
 		c.idle("failed")
 		c.trouble()
 
@@ -366,7 +368,7 @@ func (c *conversation) start(slot int) {
 	c.clearPending()
 
 	if !c.vs.Subscribed() {
-		slog.Warn("no voice pipeline subscribed, ignoring wake")
+		slog.Warn("no voice pipeline subscribed, ignoring wake", "slot", slot+1)
 		c.wake.Chime(slot)
 		c.trouble()
 		return
@@ -385,8 +387,9 @@ func (c *conversation) start(slot int) {
 
 	c.slot = slot
 	c.wake.Chime(slot)
+	c.log.Woke(phrase)
 	if err := c.vs.StartTurn(phrase, audioSettings()); err != nil {
-		slog.Error("starting the turn failed", "err", err)
+		slog.Error("starting the turn failed", "slot", slot+1, "err", err)
 		c.trouble()
 		return
 	}
@@ -400,7 +403,7 @@ func (c *conversation) start(slot int) {
 	}
 
 	c.arm(c.wake.MaxListen(slot))
-	c.startAudio()
+	c.startAudio(slot)
 	slog.Info("turn started", "slot", slot+1, "phrase", phrase)
 }
 
@@ -593,10 +596,12 @@ func audioSettings() *api.VoiceAssistantAudioSettings {
 
 // startAudio begins sending microphone frames. The streamer only reads, so it needs no coordination
 // beyond being told to stop.
-func (c *conversation) startAudio() {
+func (c *conversation) startAudio(slot int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.stopAudio = cancel
-	go alog.Safely("turn audio", func() { c.stream(ctx) })
+
+	// slot is captured rather than read from the loop's state, which the streamer does not own.
+	go alog.Safely("turn audio", func() { c.stream(ctx, slot) })
 }
 
 func (c *conversation) stopStreaming() {
@@ -612,7 +617,7 @@ func (c *conversation) stopStreaming() {
 }
 
 // stream sends microphone frames until it is told to stop.
-func (c *conversation) stream(ctx context.Context) {
+func (c *conversation) stream(ctx context.Context, slot int) {
 	frames, unlisten := c.source.Listen()
 	defer unlisten()
 
@@ -642,6 +647,7 @@ func (c *conversation) stream(ctx context.Context) {
 		}
 		rms := math.Sqrt(energy / float64(samples))
 		slog.Info("sent audio",
+			"slot", slot+1,
 			"seconds", float64(samples)/float64(mic.Rate),
 			"peak", peak,
 			"peakdbfs", math.Round(20*math.Log10(max(float64(peak), 1)/32768)*10)/10,

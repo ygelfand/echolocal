@@ -45,12 +45,12 @@ type Config struct {
 
 // Satellite is the running server and the entities Home Assistant drives.
 type Satellite struct {
-	srv     *esphome.Server
-	ring    *ringLight
+	srv *esphome.Server
+
+	// kit is everything the satellite is made of, shared with the pieces themselves.
+	kit *kit
+
 	mute    *muteSwitch
-	player  *mediaPlayer
-	wake    *wakeControl
-	voice   *esphome.VoiceSatellite
 	turn    *conversation
 	buttons *buttonEvents
 	name    string
@@ -77,31 +77,42 @@ func New(cfg Config) (*Satellite, error) {
 		slog.Warn("no wake word models to advertise", "err", err)
 	}
 
-	ring := newRingLight(cfg.Ring)
+	k := &kit{
+		Speaker: cfg.Speaker,
+		Mic:     cfg.Mic,
+		Mute:    cfg.Mute,
+		MuteLED: cfg.MuteLED,
+		LEDs:    cfg.Ring,
+	}
 	ents := esphome.NewEntities()
-	ents.Add(ring.entities()...)
+
+	k.Ring = newRingLight(k)
+	ents.Add(k.Ring.entities()...)
 
 	var mute *muteSwitch
-	if cfg.Mute != nil {
-		mute = newMuteSwitch(cfg.Mute, cfg.MuteLED, cfg.Speaker)
+	if k.Mute != nil {
+		mute = newMuteSwitch(k)
 		ents.Add(mute.entities()...)
 	}
 
-	player := newMediaPlayer(cfg.Ring, cfg.Speaker)
-	ents.Add(player.entities()...)
+	k.Player = newMediaPlayer(k)
+	ents.Add(k.Player.entities()...)
 
-	wakeCtl := newWakeControl(cfg.Speaker, wake.Backends(models), WakeSlots)
-	ents.Add(wakeCtl.entities()...)
+	k.Wake = newWakeControl(k, wake.Backends(models), WakeSlots)
+	ents.Add(k.Wake.entities()...)
 
-	ents.Add(newOptions(cfg.Mic, cfg.Speaker).entities()...)
+	ents.Add(newOptions(k).entities()...)
+
+	k.Log = newActivity()
+	ents.Add(k.Log.entities()...)
 
 	// The action button drives the conversation, which needs the satellite that is built below.
-	s := &Satellite{ring: ring, mute: mute, player: player, wake: wakeCtl, models: models}
+	s := &Satellite{kit: k, mute: mute, models: models}
 
 	s.buttons = newButtonEvents()
 	ents.Add(s.buttons.entities()...)
 
-	ents.Add(newDiagnostics(cfg.Speaker, s.WakeSlot).entities()...)
+	ents.Add(newDiagnostics(k, s.WakeSlot).entities()...)
 
 	node := layout.Slug(cfg.Name)
 	srv := &esphome.Server{
@@ -130,9 +141,9 @@ func New(cfg Config) (*Satellite, error) {
 			esphome.FeatureSpeaker |
 			esphome.FeatureAnnounce |
 			esphome.FeatureStartConversation
-		s.voice = newVoiceSatellite(s.backendModels())
-		s.turn = newConversation(s.voice, cfg.Mic, cfg.Speaker, ring, cfg.Ring, player, wakeCtl)
-		srv.Handler = esphome.Chain(ents, s.voice)
+		k.Voice = newVoiceSatellite(s.backendModels())
+		s.turn = newConversation(k)
+		srv.Handler = esphome.Chain(ents, k.Voice)
 	}
 	return s, nil
 }
@@ -161,13 +172,13 @@ func newVoiceSatellite(models []wake.Model) *esphome.VoiceSatellite {
 // missing from it. A slot the device will not run therefore reverts in the interface rather than
 // sitting there looking armed.
 func (s *Satellite) OnWakeWord(load func(ids []string) []string) {
-	if s.voice == nil {
+	if s.kit.Voice == nil {
 		return
 	}
 
-	s.voice.OnSetActiveWakeWords = func(ids []string) {
+	s.kit.Voice.OnSetActiveWakeWords = func(ids []string) {
 		accepted := load(ids)
-		s.voice.ActiveWakeWords = accepted
+		s.kit.Voice.ActiveWakeWords = accepted
 
 		for slot := range WakeSlots {
 			id := ""
@@ -185,24 +196,24 @@ func (s *Satellite) OnWakeWord(load func(ids []string) []string) {
 }
 
 // WakeThreshold is a slot's detection threshold, as set from Home Assistant.
-func (s *Satellite) WakeThreshold(slot int) float64 { return s.wake.Threshold(slot) }
+func (s *Satellite) WakeThreshold(slot int) float64 { return s.kit.Wake.Threshold(slot) }
 
 // ActiveWakeWords is what the device is advertising as listening, by slot.
 func (s *Satellite) ActiveWakeWords() []string {
-	if s.voice == nil {
+	if s.kit.Voice == nil {
 		return nil
 	}
-	return s.voice.ActiveWakeWords
+	return s.kit.Voice.ActiveWakeWords
 }
 
 // SetActiveWakeWords corrects what is advertised to what is actually running. The engine loads at
 // start-up rather than waiting to be told, so this is how the advertisement is reconciled with what
 // came up: anything that failed to load is not claimed.
 func (s *Satellite) SetActiveWakeWords(ids []string) {
-	if s.voice == nil {
+	if s.kit.Voice == nil {
 		return
 	}
-	s.voice.ActiveWakeWords = ids
+	s.kit.Voice.ActiveWakeWords = ids
 	slog.Info("wake words listening", "active", ids)
 }
 
@@ -214,19 +225,19 @@ func (s *Satellite) SetActiveWakeWords(ids []string) {
 // so the integration reconnects and asks again — otherwise its pickers would go on offering the old
 // engine's models until the next restart.
 func (s *Satellite) OnWakeBackend(reload func(settings.WakeBackend) []string) {
-	if s.voice == nil {
+	if s.kit.Voice == nil {
 		return
 	}
 
-	s.wake.onBackend = func(b settings.WakeBackend) {
+	s.kit.Wake.onBackend = func(b settings.WakeBackend) {
 		active := reload(b)
 
 		available, fallback := wakeWords(s.backendModels(), WakeSlots)
 		if len(active) == 0 {
 			active = fallback
 		}
-		s.voice.AvailableWakeWords = available
-		s.voice.ActiveWakeWords = active
+		s.kit.Voice.AvailableWakeWords = available
+		s.kit.Voice.ActiveWakeWords = active
 
 		slog.Info("re-advertising wake words", "backend", b, "count", len(available), "active", active)
 		s.srv.Reconnect()
@@ -236,7 +247,7 @@ func (s *Satellite) OnWakeBackend(reload func(settings.WakeBackend) []string) {
 // PipelineReady reports whether Home Assistant has a voice pipeline listening. Wake detection runs
 // before that happens, but nothing can be done with a detection until it does, so this is what the
 // device shows on the ring while it comes up.
-func (s *Satellite) PipelineReady() bool { return s.voice != nil && s.voice.Subscribed() }
+func (s *Satellite) PipelineReady() bool { return s.kit.Voice != nil && s.kit.Voice.Subscribed() }
 
 // RunConversation owns the voice conversation until ctx is cancelled. Nothing happens on a wake word
 // until it is running.
@@ -253,7 +264,7 @@ func (s *Satellite) RunConversation(ctx context.Context) {
 func (s *Satellite) Action() {
 	if s.turn == nil {
 		slog.Warn("no voice pipeline; the action button has nothing to do")
-		chime(s.player.speaker, toneTrouble)
+		chime(s.kit.Player.speaker, toneTrouble)
 		return
 	}
 
@@ -272,7 +283,7 @@ func (s *Satellite) Action() {
 func (s *Satellite) ActionHold() {
 	if s.turn == nil {
 		slog.Warn("no voice pipeline; the action button has nothing to hold")
-		chime(s.player.speaker, toneTrouble)
+		chime(s.kit.Player.speaker, toneTrouble)
 		return
 	}
 	s.turn.Start(1)

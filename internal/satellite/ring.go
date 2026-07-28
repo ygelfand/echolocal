@@ -26,14 +26,14 @@ type ringLight struct {
 	frame []led.Color
 }
 
-func newRingLight(d *led.Driver) *ringLight {
+func newRingLight(k *kit) *ringLight {
 	r := &ringLight{
 		light: &esphome.Light{
 			Base:                esphome.Base{ObjectID: "ring", Name: "LED ring"},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
 			Effects:             led.EffectNames(),
 		},
-		base:  d.Claim(led.PriorityBase),
+		base:  k.LEDs.Claim(led.PriorityBase),
 		frame: make([]led.Color, led.Segments),
 	}
 	r.light.OnCommand = r.apply

@@ -79,7 +79,6 @@ var (
 type hwParams [hwParamsSize]byte
 
 func (p *hwParams) set(off int, v uint32) { binary.LittleEndian.PutUint32(p[off:], v) }
-func (p *hwParams) get(off int) uint32    { return binary.LittleEndian.Uint32(p[off:]) }
 
 // init opens every parameter to its full range so the driver can narrow them.
 func (p *hwParams) init() {
@@ -114,10 +113,6 @@ func (p *hwParams) setInterval(param int, v uint32) {
 	p.set(off, v)
 	p.set(off+4, v)
 	p.set(off+8, 1<<2)
-}
-
-func (p *hwParams) intervalMin(param int) uint32 {
-	return p.get(intervalOff + (param-firstInterval)*intervalLen)
 }
 
 // snd_xferi: a signed long, a pointer and an unsigned long, so 24 bytes here.

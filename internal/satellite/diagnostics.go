@@ -21,7 +21,8 @@ type diagnostics struct {
 	wake         []*esphome.Button
 }
 
-func newDiagnostics(spk *speaker.Player, wake func(int)) *diagnostics {
+func newDiagnostics(k *kit, wake func(int)) *diagnostics {
+	spk := k.Speaker
 	d := &diagnostics{}
 
 	if spk != nil {

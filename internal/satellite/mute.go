@@ -27,7 +27,8 @@ type muteSwitch struct {
 	speaker    *speaker.Player
 }
 
-func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSwitch {
+func newMuteSwitch(k *kit) *muteSwitch {
+	m, led, spk := k.Mute, k.MuteLED, k.Speaker
 	s := &muteSwitch{
 		sw: &esphome.Switch{
 			Base: esphome.Base{

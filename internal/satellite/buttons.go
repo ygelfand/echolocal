@@ -58,11 +58,11 @@ func (s *Satellite) OnButton(e buttons.Event) {
 	switch e.Name {
 	case buttons.VolumeUp:
 		if e.Kind != buttons.Hold {
-			s.player.adjust(1)
+			s.kit.Player.adjust(1)
 		}
 	case buttons.VolumeDown:
 		if e.Kind != buttons.Hold {
-			s.player.adjust(-1)
+			s.kit.Player.adjust(-1)
 		}
 
 	case buttons.Mute:
@@ -72,7 +72,7 @@ func (s *Satellite) OnButton(e buttons.Event) {
 				s.mute.toggle()
 			}
 		case buttons.Hold:
-			chime(s.player.speaker, toneMuteHold)
+			chime(s.kit.Player.speaker, toneMuteHold)
 		}
 
 	case buttons.Action:
