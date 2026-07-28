@@ -12,8 +12,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/mic"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
-	"github.com/ygelfand/echolocal/internal/state"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
@@ -37,6 +37,10 @@ type voiceTurn struct {
 	mu      sync.Mutex
 	running bool
 	stop    func()
+
+	// wakeSlot is which of Home Assistant's wake word slots opened the turn, so the feedback that
+	// runs through it is that slot's. A turn the action button opened reports slot 0.
+	wakeSlot int
 
 	replyBytes int
 	replyPeak  int
@@ -67,10 +71,18 @@ func newVoiceTurn(vs *esphome.VoiceSatellite, source *mic.Source, spk *speaker.P
 	return t
 }
 
-// Start opens a turn. Wake detection calls it, and so does the action button.
+// slot is which wake word slot opened the running turn.
+func (t *voiceTurn) slot() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.wakeSlot
+}
+
+// Start opens a turn on the pipeline paired with slot. Wake detection calls it, and so does the
+// action button.
 // Start reports whether a turn opened. The caller lights the ring on a wake, so it needs to know
 // when nothing is going to stop it.
-func (t *voiceTurn) Start(phrase string) bool {
+func (t *voiceTurn) Start(slot int, phrase string) bool {
 	if !t.vs.Subscribed() {
 		slog.Warn("no voice pipeline subscribed, ignoring wake")
 		t.trouble()
@@ -90,6 +102,7 @@ func (t *voiceTurn) Start(phrase string) bool {
 	t.replyURL = ""
 	t.held = nil
 	t.flowing = false
+	t.wakeSlot = slot
 	t.mu.Unlock()
 
 	if err := t.vs.StartTurn(phrase, audioSettings()); err != nil {
@@ -99,7 +112,7 @@ func (t *voiceTurn) Start(phrase string) bool {
 	}
 
 	// The ring is left alone: whatever the wake started keeps running through listening.
-	slog.Info("turn started", "phrase", phrase)
+	slog.Info("turn started", "slot", slot+1, "phrase", phrase)
 	go alog.Safely("voice turn", t.stream)
 	return true
 }
@@ -466,16 +479,29 @@ func (t *voiceTurn) end() {
 	slog.Info("turn ended", "replying", replying)
 }
 
-// wakeWords advertises what is installed, with the selection Home Assistant made.
-func wakeWords(models []wake.Model) ([]esphome.WakeWord, []string) {
+// wakeWords advertises the models the selected backend can run, with the per-slot selection the user
+// last made for it. Only that backend's models are offered: the other's cannot be loaded without a
+// second front end, so offering them would be offering something the device will refuse.
+func wakeWords(models []wake.Model, slots int) ([]esphome.WakeWord, []string) {
 	out := make([]esphome.WakeWord, 0, len(models))
 	for _, m := range models {
 		out = append(out, esphome.WakeWord{ID: m.ID, Phrase: m.Phrase, TrainedLanguages: m.Languages})
 	}
 
-	active := state.Get().Settings.Wake.WordID()
-	if active == "" && len(models) > 0 {
-		active = models[0].ID
+	saved := settings.Get().Wake
+	var active []string
+	for i := range slots {
+		if id := saved.WordID(i); id != "" {
+			if _, ok := wake.Find(models, id); ok {
+				active = append(active, id)
+			}
+		}
 	}
-	return out, []string{active}
+
+	// Nothing saved for this backend yet: start it listening for something rather than nothing, or a
+	// fresh device looks broken until the user finds the select.
+	if len(active) == 0 && len(models) > 0 {
+		active = []string{models[0].ID}
+	}
+	return out, active
 }

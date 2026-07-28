@@ -14,6 +14,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/alsa"
 	"github.com/ygelfand/echolocal/internal/audio"
 	"github.com/ygelfand/echolocal/internal/prop"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // The capture codec accepts one format only: 16 kHz, S24_3LE, 9 channels.
@@ -65,12 +66,12 @@ type Source struct {
 
 	// mixer is read by the reader and replaced from Home Assistant, both under mu.
 	mixer  Mixer
-	mixing audio.Mixing
+	mixing settings.Mixing
 }
 
 // SetMixing chooses how the microphones are combined. It takes effect on the next frame, and reports
 // what it settled on, which differs from the request only when this build cannot do it.
-func (s *Source) SetMixing(m audio.Mixing) audio.Mixing {
+func (s *Source) SetMixing(m settings.Mixing) settings.Mixing {
 	mixer, settled := NewMixer(m)
 
 	s.mu.Lock()
@@ -80,7 +81,7 @@ func (s *Source) SetMixing(m audio.Mixing) audio.Mixing {
 }
 
 // Mixing is the combination in use.
-func (s *Source) Mixing() audio.Mixing {
+func (s *Source) Mixing() settings.Mixing {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mixing
@@ -131,7 +132,7 @@ func open() (*Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mic: opening capture: %w", err)
 	}
-	mixer, mixing := NewMixer(audio.MixDelaySum)
+	mixer, mixing := NewMixer(settings.MixDelaySum)
 	return &Source{
 		pcm:       pcm,
 		listeners: map[int]chan []int16{},

@@ -15,7 +15,7 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/mic"
-	"github.com/ygelfand/echolocal/internal/state"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
@@ -41,8 +41,8 @@ func newWakeCmd() *cobra.Command {
 				return err
 			}
 
-			// Same selection the agent uses: Home Assistant's, via state.
-			m := wake.Pick(models, state.Get().Settings.Wake.WordID())
+			// Same selection the agent uses: Home Assistant's, via the saved settings.
+			m := wake.Pick(models, settings.Get().Wake.WordID(0))
 
 			det, err := microwakeword.NewDetector(m.Config)
 			if err != nil {

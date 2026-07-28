@@ -8,8 +8,8 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
-	"github.com/ygelfand/echolocal/internal/state"
 )
 
 // VolumeSteps runs 0..30, the range Android gives STREAM_MUSIC and the one the vendor's volume
@@ -56,7 +56,7 @@ func newMediaPlayer(ring *ringLight, spk *speaker.Player) *mediaPlayer {
 		p.jack.Set(spk.Output() == speaker.OutputHeadphone)
 	}
 
-	p.apply(state.Get().Settings.Speaker.VolumeOr(VolumeSteps / 2))
+	p.apply(settings.Get().Speaker.VolumeOr(VolumeSteps / 2))
 	p.mp.SetState(esphome.MediaPlayerIdle)
 	return p
 }
@@ -92,7 +92,7 @@ func (p *mediaPlayer) command(c esphome.MediaCommand) {
 // set applies a level and remembers it.
 func (p *mediaPlayer) set(step int) {
 	applied := p.apply(step)
-	if err := state.SetSpeakerVolume(applied); err != nil {
+	if err := settings.SetSpeakerVolume(applied); err != nil {
 		slog.Error("saving volume failed", "err", err)
 	}
 }

@@ -20,8 +20,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/mic"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
-	"github.com/ygelfand/echolocal/internal/state"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
@@ -52,6 +52,9 @@ type Satellite struct {
 	turn    *voiceTurn
 	buttons map[uint16]*button
 	name    string
+
+	// models is everything installed, of either backend. What is advertised is filtered from it.
+	models []wake.Model
 }
 
 // New builds the server and its entities. It does not listen; call Serve.
@@ -61,8 +64,15 @@ func New(cfg Config) (*Satellite, error) {
 		return nil, err
 	}
 
-	if err := state.LoadError(); err != nil {
-		slog.Error("reading saved state failed, continuing with defaults", "err", err)
+	if err := settings.LoadError(); err != nil {
+		slog.Error("reading saved settings failed, continuing with defaults", "err", err)
+	}
+
+	// The installed models decide which backends can be offered, so they are read before anything
+	// that shows a choice.
+	models, err := wake.Installed(layout.ModelDir)
+	if err != nil {
+		slog.Warn("no wake word models to advertise", "err", err)
 	}
 
 	ring := newRingLight(cfg.Ring)
@@ -78,13 +88,13 @@ func New(cfg Config) (*Satellite, error) {
 	player := newMediaPlayer(ring, cfg.Speaker)
 	ents.Add(player.entities()...)
 
-	wakeCtl := newWakeControl(ring, cfg.Speaker)
+	wakeCtl := newWakeControl(ring, cfg.Speaker, wake.Backends(models), WakeSlots)
 	ents.Add(wakeCtl.entities()...)
 
 	ents.Add(newOptions(cfg.Mic, cfg.Speaker).entities()...)
 
 	// The action button starts a conversation, which needs the satellite that is built below.
-	s := &Satellite{ring: ring, mute: mute, player: player, wake: wakeCtl}
+	s := &Satellite{ring: ring, mute: mute, player: player, wake: wakeCtl, models: models}
 
 	buttons := newButtons(player, mute, s.StartConversation)
 	for _, b := range buttons {
@@ -120,57 +130,111 @@ func New(cfg Config) (*Satellite, error) {
 			esphome.FeatureSpeaker |
 			esphome.FeatureAnnounce |
 			esphome.FeatureStartConversation
-		s.voice = newVoiceSatellite()
-		s.turn = newVoiceTurn(s.voice, cfg.Mic, cfg.Speaker, ring, player, s.wake.Effect)
+		s.voice = newVoiceSatellite(s.backendModels())
+
+		// The turn's animation is the one the wake word that started it is set to.
+		s.turn = newVoiceTurn(s.voice, cfg.Mic, cfg.Speaker, ring, player,
+			func() string { return s.wake.Effect(s.turn.slot()) })
 		srv.Handler = esphome.Chain(ents, s.voice)
 	}
 	return s, nil
 }
 
-// newVoiceSatellite advertises what is installed and follows Home Assistant's selection.
-func newVoiceSatellite() *esphome.VoiceSatellite {
-	models, err := wake.Installed(layout.ModelDir)
-	if err != nil {
-		slog.Warn("no wake word models to advertise", "err", err)
-	}
+// backendModels is what the selected backend can run.
+func (s *Satellite) backendModels() []wake.Model {
+	return wake.OfKind(s.models, settings.Get().Wake.BackendOr(settings.DefaultBackend))
+}
 
-	available, active := wakeWords(models)
+// newVoiceSatellite advertises what the selected backend can run and follows Home Assistant's
+// selection.
+func newVoiceSatellite(models []wake.Model) *esphome.VoiceSatellite {
+	available, active := wakeWords(models, WakeSlots)
 	vs := &esphome.VoiceSatellite{
 		AvailableWakeWords: available,
 		ActiveWakeWords:    active,
-		MaxActiveWakeWords: 1,
+		MaxActiveWakeWords: WakeSlots,
 	}
 	slog.Info("advertising wake words", "count", len(available), "active", active)
 	return vs
 }
 
-// OnWakeWord is called when Home Assistant picks a different wake word, so the engine can load it.
-func (s *Satellite) OnWakeWord(load func(id string) error) {
+// OnWakeWord is called when Home Assistant changes the selection, so the engine can follow. It is
+// given every slot: load reports which of them it accepted, and only those are echoed back as
+// active, because Home Assistant takes the echo as authoritative and reverts a slot whose word is
+// missing from it. A slot the device will not run therefore reverts in the interface rather than
+// sitting there looking armed.
+func (s *Satellite) OnWakeWord(load func(ids []string) []string) {
 	if s.voice == nil {
 		return
 	}
 
 	s.voice.OnSetActiveWakeWords = func(ids []string) {
-		if len(ids) == 0 {
-			return
-		}
-		s.voice.ActiveWakeWords = ids
+		accepted := load(ids)
+		s.voice.ActiveWakeWords = accepted
 
-		if err := load(ids[0]); err != nil {
-			slog.Error("loading the selected wake word failed", "id", ids[0], "err", err)
-			return
+		for slot := range WakeSlots {
+			id := ""
+			if slot < len(accepted) {
+				id = accepted[slot]
+			}
+			if err := settings.SetWakeWord(slot, id); err != nil {
+				slog.Error("saving the wake word failed", "slot", slot+1, "err", err)
+			}
 		}
-		if err := state.SetWakeWord(ids[0]); err != nil {
-			slog.Error("saving the wake word failed", "err", err)
+		if len(accepted) != len(ids) {
+			slog.Warn("some wake words were refused", "asked", ids, "running", accepted)
 		}
 	}
 }
 
-// WakeEnabled reports whether the user wants wake detection running.
-func (s *Satellite) WakeEnabled() bool { return s.wake.Enabled() }
+// WakeThreshold is a slot's detection threshold, as set from Home Assistant.
+func (s *Satellite) WakeThreshold(slot int) float64 { return s.wake.Threshold(slot) }
 
-// WakeSensitivity is the detection threshold, as set from Home Assistant.
-func (s *Satellite) WakeSensitivity() float64 { return s.wake.Sensitivity() }
+// ActiveWakeWords is what the device is advertising as listening, by slot.
+func (s *Satellite) ActiveWakeWords() []string {
+	if s.voice == nil {
+		return nil
+	}
+	return s.voice.ActiveWakeWords
+}
+
+// SetActiveWakeWords corrects what is advertised to what is actually running. The engine loads at
+// start-up rather than waiting to be told, so this is how the advertisement is reconciled with what
+// came up: anything that failed to load is not claimed.
+func (s *Satellite) SetActiveWakeWords(ids []string) {
+	if s.voice == nil {
+		return
+	}
+	s.voice.ActiveWakeWords = ids
+	slog.Info("wake words listening", "active", ids)
+}
+
+// OnWakeBackend is called when the user changes engines. reload swaps the engine over and reports
+// the wake words it managed to bring up, which become what is advertised as active.
+//
+// Home Assistant only re-reads the available wake words when it sets them or when it connects, and
+// there is no way to push. Since the two engines offer different models, the connection is dropped
+// so the integration reconnects and asks again — otherwise its pickers would go on offering the old
+// engine's models until the next restart.
+func (s *Satellite) OnWakeBackend(reload func(settings.WakeBackend) []string) {
+	if s.voice == nil {
+		return
+	}
+
+	s.wake.onBackend = func(b settings.WakeBackend) {
+		active := reload(b)
+
+		available, fallback := wakeWords(s.backendModels(), WakeSlots)
+		if len(active) == 0 {
+			active = fallback
+		}
+		s.voice.AvailableWakeWords = available
+		s.voice.ActiveWakeWords = active
+
+		slog.Info("re-advertising wake words", "backend", b, "count", len(available), "active", active)
+		s.srv.Reconnect()
+	}
+}
 
 // PipelineReady reports whether Home Assistant has a voice pipeline listening. Wake detection runs
 // before that happens, but nothing can be done with a detection until it does, so this is what the
@@ -188,11 +252,14 @@ func (s *Satellite) StartConversation() {
 		slog.Warn("no voice pipeline; the action button has nothing to start")
 		return
 	}
-	s.turn.Start("")
+	// No wake word, so no slot to pair with: the first pipeline is the one Home Assistant falls back
+	// to for anything that reports no phrase.
+	s.turn.Start(0, "")
 }
 
-// WakeDetected shows and sounds a detection, then starts a conversation. The engine calls it.
-func (s *Satellite) WakeDetected() {
+// WakeDetected shows and sounds a detection in one of Home Assistant's slots, then starts a
+// conversation on the pipeline that slot is paired with. The engine calls it.
+func (s *Satellite) WakeDetected(slot int) {
 	// Saying the wake word while the device is still listening is part of the sentence, not a new
 	// request: acting on it would cut off what the user is in the middle of saying. Once the
 	// pipeline is replying, a wake word is a deliberate interruption and does start a turn.
@@ -203,9 +270,9 @@ func (s *Satellite) WakeDetected() {
 		return
 	}
 
-	slog.Info("wake word detected")
-	phrase, _ := s.phraseFor(0)
-	s.startWake(phrase)
+	phrase, _ := s.phraseFor(slot)
+	slog.Info("wake word detected", "slot", slot+1, "phrase", phrase)
+	s.startWake(slot, phrase)
 }
 
 // WakeSlot starts a turn as if the wake word in one of Home Assistant's slots had fired, for trying
@@ -217,22 +284,23 @@ func (s *Satellite) WakeSlot(slot int) {
 		return
 	}
 	slog.Info("wake requested", "slot", slot+1, "phrase", phrase)
-	s.startWake(phrase)
+	s.startWake(slot, phrase)
 }
 
-// startWake is the detection itself, once the phrase to report is known.
-func (s *Satellite) startWake(phrase string) {
-	s.wake.Chime()
+// startWake is the detection itself, once the phrase to report is known. The tone and the animation
+// are the slot's own.
+func (s *Satellite) startWake(slot int, phrase string) {
+	s.wake.Chime(slot)
 
 	// The animation starts on the wake either way. A turn stops it when it ends; without one there
 	// is nothing to stop it, so it gets a duration instead.
 	if s.turn == nil {
-		s.wake.Flash()
+		s.wake.Flash(slot)
 		return
 	}
-	s.wake.Hold()
+	s.wake.Hold(slot)
 
-	if !s.turn.Start(phrase) {
+	if !s.turn.Start(slot, phrase) {
 		s.ring.still()
 		s.ring.restore()
 	}
@@ -589,11 +657,11 @@ func writePSK(path string, k esphome.PSK) error {
 // address changes. The interface does not exist yet when echod starts on a cold boot, so the
 // remembered value stands in and a watcher saves the real one for next time.
 func macAddress() string {
-	saved := state.Get().MAC
+	saved := settings.Get().MAC
 
 	if mac := readMAC(); mac != "" {
 		if mac != saved {
-			_ = state.SetMAC(mac)
+			_ = settings.SetMAC(mac)
 		}
 		return mac
 	}
@@ -611,7 +679,7 @@ func rememberMAC() {
 	for range macAttempts {
 		time.Sleep(macRetry)
 		if mac := readMAC(); mac != "" {
-			_ = state.SetMAC(mac)
+			_ = settings.SetMAC(mac)
 			return
 		}
 	}

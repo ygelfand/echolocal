@@ -5,10 +5,9 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
-	"github.com/ygelfand/echolocal/internal/audio"
 	"github.com/ygelfand/echolocal/internal/mic"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
-	"github.com/ygelfand/echolocal/internal/state"
 )
 
 // Settings are grouped by what their names begin with rather than by sub-device: Home Assistant
@@ -37,8 +36,8 @@ func newOptions(source *mic.Source, spk *speaker.Player) *options {
 			},
 		}
 		bind(o.microphone, mic.Mixings(),
-			state.Get().Settings.Microphone.MixingOr(audio.MixDelaySum),
-			source.SetMixing, state.SetMicMixing)
+			settings.Get().Microphone.MixingOr(settings.MixDelaySum),
+			source.SetMixing, settings.SetMicMixing)
 	}
 
 	if spk != nil {
@@ -51,29 +50,22 @@ func newOptions(source *mic.Source, spk *speaker.Player) *options {
 			},
 		}
 		bind(o.resampling, speaker.Resamplings(),
-			state.Get().Settings.Speaker.ResamplingOr(audio.ResampleSinc),
-			spk.SetResampling, state.SetSpeakerResampling)
+			settings.Get().Speaker.ResamplingOr(settings.ResampleSinc),
+			spk.SetResampling, settings.SetSpeakerResampling)
 	}
 
 	return o
 }
 
-// labelled is a setting whose values are a closed set that knows how to name itself.
-type labelled interface{ Label() string }
-
-// bind wires a select to one of those settings: the options are the values' labels, choosing one
+// bind wires a select to an enumerated setting: the options are the values' labels, choosing one
 // applies it and stores whatever the device settled on, and saved is restored the same way. apply
 // returns what it settled on, so a value this build cannot do falls back visibly rather than
 // leaving Home Assistant showing something that is not running.
-func bind[T labelled](sel *esphome.Select, values []T, saved T, apply func(T) T, save func(T) error) {
-	labels := make(map[string]T, len(values))
-	for _, v := range values {
-		sel.Options = append(sel.Options, v.Label())
-		labels[v.Label()] = v
-	}
+func bind[T settings.Labelled](sel *esphome.Select, values []T, saved T, apply func(T) T, save func(T) error) {
+	sel.Options = settings.Labels(values)
 
 	sel.OnCommand = func(label string) {
-		want, ok := labels[label]
+		want, ok := settings.ByLabel(values, label)
 		if !ok {
 			slog.Warn("unknown option", "setting", sel.ObjectID, "value", label)
 			return

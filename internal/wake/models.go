@@ -10,33 +10,9 @@ import (
 	"github.com/zserge/microwakeword"
 
 	"github.com/ygelfand/echolocal/internal/oww"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/tflite"
 )
-
-// Kind is which engine a model belongs to. Both kinds are plain .tflite files that arrive the same
-// way, so the model itself has to say, and it does: an openWakeWord wake word classifies a window
-// of speech embeddings and takes them as its input, while a microWakeWord model is self-contained
-// and consumes audio features.
-//
-// One kind runs at a time. They cannot share a front end — openWakeWord's is one mel and embedding
-// chain feeding every wake word, microWakeWord's is per model — so mixing them means paying for
-// both, and the setting exists to keep that from happening by accident.
-//
-// The values are identifiers rather than labels, because they key what the user has saved.
-type Kind string
-
-const (
-	KindMicro        Kind = "microwakeword"
-	KindOpenWakeWord Kind = "openwakeword"
-)
-
-// Label is how the backend is shown.
-func (k Kind) Label() string {
-	if k == KindOpenWakeWord {
-		return "openWakeWord"
-	}
-	return "microWakeWord"
-}
 
 // Model is an installed wake word: the file to run and what to call it in Home Assistant.
 type Model struct {
@@ -49,7 +25,12 @@ type Model struct {
 	// Languages the model was trained on, as BCP-47 tags.
 	Languages []string
 
-	Kind   Kind
+	// Kind is which engine runs it. Both are plain .tflite files that arrive the same way, so the
+	// model itself has to say, and it does: an openWakeWord wake word classifies a window of speech
+	// embeddings and takes them as its input, while a microWakeWord model is self-contained and
+	// consumes audio features.
+	Kind settings.WakeBackend
+
 	Path   string
 	Config microwakeword.Config
 }
@@ -96,25 +77,25 @@ func Installed(dir string) ([]Model, error) {
 // kindOf asks the model which engine runs it. An openWakeWord classifier takes a window of
 // embeddings, [1, frames, 96]; anything else is treated as microWakeWord, which is the safe default
 // because that engine reports a load failure while a wrong guess the other way would score noise.
-func kindOf(path string) Kind {
+func kindOf(path string) settings.WakeBackend {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return KindMicro
+		return settings.BackendMicroWakeWord
 	}
 	m, err := tflite.Parse(raw)
 	if err != nil {
-		return KindMicro
+		return settings.BackendMicroWakeWord
 	}
 
 	g := m.Subgraphs[0]
 	if len(g.Inputs) == 0 {
-		return KindMicro
+		return settings.BackendMicroWakeWord
 	}
 	shape := g.Tensors[g.Inputs[0]].Shape
 	if len(shape) == 3 && shape[2] == oww.EmbeddingDims {
-		return KindOpenWakeWord
+		return settings.BackendOpenWakeWord
 	}
-	return KindMicro
+	return settings.BackendMicroWakeWord
 }
 
 func load(dir, id string) Model {
@@ -196,7 +177,7 @@ func Find(models []Model, id string) (Model, bool) {
 }
 
 // OfKind is the models one backend can run.
-func OfKind(models []Model, k Kind) []Model {
+func OfKind(models []Model, k settings.WakeBackend) []Model {
 	var out []Model
 	for _, m := range models {
 		if m.Kind == k {
@@ -206,11 +187,11 @@ func OfKind(models []Model, k Kind) []Model {
 	return out
 }
 
-// Kinds lists the backends that have something installed to run, openWakeWord first because it is
-// the one wake words are published for.
-func Kinds(models []Model) []Kind {
-	var out []Kind
-	for _, k := range []Kind{KindOpenWakeWord, KindMicro} {
+// Backends lists the ones with something installed to run, openWakeWord first because it is the one
+// wake words are published for.
+func Backends(models []Model) []settings.WakeBackend {
+	var out []settings.WakeBackend
+	for _, k := range []settings.WakeBackend{settings.BackendOpenWakeWord, settings.BackendMicroWakeWord} {
 		if len(OfKind(models, k)) > 0 {
 			out = append(out, k)
 		}

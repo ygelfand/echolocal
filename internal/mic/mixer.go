@@ -3,7 +3,7 @@ package mic
 import (
 	"sync"
 
-	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // Mixer reduces the array's channels to the one channel everything downstream reads. Wake detection
@@ -35,15 +35,15 @@ func (Centre) Mix(mics [][]int16) []int16 {
 // in this file.
 var (
 	mixersMu sync.RWMutex
-	mixers   = map[audio.Mixing]func() Mixer{
-		audio.MixCentre:   func() Mixer { return Centre{} },
-		audio.MixDelaySum: func() Mixer { return NewBeamformer() },
+	mixers   = map[settings.Mixing]func() Mixer{
+		settings.MixCentre:   func() Mixer { return Centre{} },
+		settings.MixDelaySum: func() Mixer { return NewBeamformer() },
 	}
-	order = []audio.Mixing{audio.MixCentre, audio.MixDelaySum}
+	order = []settings.Mixing{settings.MixCentre, settings.MixDelaySum}
 )
 
 // Register adds a way to combine the array.
-func Register(m audio.Mixing, make func() Mixer) {
+func Register(m settings.Mixing, make func() Mixer) {
 	mixersMu.Lock()
 	defer mixersMu.Unlock()
 
@@ -54,21 +54,21 @@ func Register(m audio.Mixing, make func() Mixer) {
 }
 
 // Mixings lists what this build can do, in the order it became available.
-func Mixings() []audio.Mixing {
+func Mixings() []settings.Mixing {
 	mixersMu.RLock()
 	defer mixersMu.RUnlock()
-	return append([]audio.Mixing(nil), order...)
+	return append([]settings.Mixing(nil), order...)
 }
 
 // NewMixer builds one, falling back to the array for anything this build does not have: a setting
 // left over from another version should not leave the device deaf.
-func NewMixer(m audio.Mixing) (Mixer, audio.Mixing) {
+func NewMixer(m settings.Mixing) (Mixer, settings.Mixing) {
 	mixersMu.RLock()
 	make, ok := mixers[m]
 	mixersMu.RUnlock()
 
 	if !ok {
-		return mixers[audio.MixDelaySum](), audio.MixDelaySum
+		return mixers[settings.MixDelaySum](), settings.MixDelaySum
 	}
 	return make(), m
 }

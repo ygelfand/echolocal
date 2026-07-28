@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // sine is n samples of a sine at hz, sampled at rate.
@@ -130,21 +130,21 @@ func TestResamplersRankByImageRejection(t *testing.T) {
 	const hz = 3000
 	in := sine(hz, VoiceRate, 4096, 8000)
 
-	image := make(map[audio.Resampling]float64)
-	for _, r := range []audio.Resampling{audio.ResampleSinc, audio.ResampleLinear, audio.ResampleHold} {
+	image := make(map[settings.Resampling]float64)
+	for _, r := range []settings.Resampling{settings.ResampleSinc, settings.ResampleLinear, settings.ResampleHold} {
 		u, _ := NewResampler(r)
 		out := left(u.Run(in, nil))[256:]
 		image[r] = energyAt(out, 2*VoiceRate-hz, Rate)
 		t.Logf("%-14s image %8.2f, tone %8.2f", r.Label(), image[r], energyAt(out, hz, Rate))
 	}
 
-	if image[audio.ResampleSinc] >= image[audio.ResampleLinear] {
+	if image[settings.ResampleSinc] >= image[settings.ResampleLinear] {
 		t.Errorf("the filter leaves %.2f of the image, linear only %.2f",
-			image[audio.ResampleSinc], image[audio.ResampleLinear])
+			image[settings.ResampleSinc], image[settings.ResampleLinear])
 	}
-	if image[audio.ResampleLinear] >= image[audio.ResampleHold] {
+	if image[settings.ResampleLinear] >= image[settings.ResampleHold] {
 		t.Errorf("linear leaves %.2f of the image, holding only %.2f",
-			image[audio.ResampleLinear], image[audio.ResampleHold])
+			image[settings.ResampleLinear], image[settings.ResampleHold])
 	}
 }
 

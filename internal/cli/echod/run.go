@@ -21,8 +21,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/prop"
 	"github.com/ygelfand/echolocal/internal/satellite"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
-	"github.com/ygelfand/echolocal/internal/state"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
@@ -163,17 +163,21 @@ func newRunCmd() *cobra.Command {
 				slog.Error("satellite unavailable", "err", err)
 			} else {
 				ready.Store(sat)
+
+				// Detection comes up before the API does, so Home Assistant cannot read the wake
+				// words while they are still loading and be told about one that then fails.
+				//
+				// No model installed is not fatal: the device works, it just cannot be woken.
+				if source != nil {
+					startWake(ctx, source, sat)
+				}
+
 				go alog.Safely("satellite", func() {
 					slog.Info("serving esphome api", "addr", addr)
 					if err := sat.Serve(ctx); err != nil && ctx.Err() == nil {
 						slog.Error("satellite stopped", "err", err)
 					}
 				})
-			}
-
-			// No model installed is not fatal: the device works, it just cannot be woken.
-			if source != nil && sat != nil {
-				startWake(ctx, source, sat)
 			}
 
 			// The ring keeps stepping until Home Assistant subscribes, which is a different thing
@@ -215,8 +219,8 @@ func idle(ctx context.Context, every time.Duration) {
 	}
 }
 
-// startWake runs detection on whichever installed model Home Assistant last selected. Nothing
-// installed means the device simply cannot be woken; everything else still works.
+// startWake runs detection on whichever wake words Home Assistant last selected, one per slot.
+// Nothing installed means the device simply cannot be woken; everything else still works.
 func startWake(ctx context.Context, source *mic.Source, sat *satellite.Satellite) {
 	models, err := wake.Installed(layout.ModelDir)
 	if err != nil {
@@ -224,24 +228,69 @@ func startWake(ctx context.Context, source *mic.Source, sat *satellite.Satellite
 		return
 	}
 
-	model := wake.Pick(models, state.Get().Settings.Wake.WordID())
-	engine, err := wake.New(model)
+	backend := settings.Get().Wake.BackendOr(settings.DefaultBackend)
+	engine, err := wake.New(backend, satellite.WakeSlots)
 	if err != nil {
-		slog.Error("loading wake word failed", "model", model.ID, "err", err)
+		slog.Error("starting the wake engine failed", "backend", backend, "err", err)
 		return
 	}
 
-	engine.Enabled = sat.WakeEnabled
-	engine.Cutoff = sat.WakeSensitivity
+	engine.Threshold = sat.WakeThreshold
 	engine.OnDetect = sat.WakeDetected
 	go engine.Run(ctx, source)
 
+	// apply loads one wake word per slot and reports the ids that came up. Whatever the engine
+	// refuses is left out, so Home Assistant reverts that slot rather than showing a wake word the
+	// device is not listening for.
+	apply := func(ids []string) []string {
+		var accepted []string
+		for slot := range satellite.WakeSlots {
+			if slot >= len(ids) || ids[slot] == "" {
+				engine.Clear(slot)
+				continue
+			}
+
+			m, ok := wake.Find(models, ids[slot])
+			if !ok {
+				slog.Warn("unknown wake word", "slot", slot+1, "id", ids[slot])
+				engine.Clear(slot)
+				continue
+			}
+			if err := engine.Use(slot, m); err != nil {
+				slog.Error("loading the selected wake word failed", "slot", slot+1, "id", m.ID, "err", err)
+				engine.Clear(slot)
+				continue
+			}
+			accepted = append(accepted, m.ID)
+		}
+		return accepted
+	}
+
+	// Load now rather than waiting to be told. Home Assistant only pushes a selection when the user
+	// changes one, so an engine that starts empty stays deaf until they do — while the device goes on
+	// advertising wake words it is not actually running.
+	sat.SetActiveWakeWords(apply(sat.ActiveWakeWords()))
+
 	// Home Assistant owns the choice, and it takes effect without a restart.
-	sat.OnWakeWord(func(id string) error {
-		return engine.Use(wake.Pick(models, id))
+	sat.OnWakeWord(apply)
+
+	// Changing the engine reloads every slot from what that engine was last used with.
+	sat.OnWakeBackend(func(b settings.WakeBackend) []string {
+		if err := engine.SetBackend(b); err != nil {
+			slog.Error("changing the wake engine failed", "backend", b, "err", err)
+			return nil
+		}
+
+		saved := settings.Get().Wake
+		ids := make([]string, satellite.WakeSlots)
+		for slot := range ids {
+			ids[slot] = saved.WordID(slot)
+		}
+		return apply(ids)
 	})
 
-	slog.Info("wake word ready", "phrase", model.Phrase, "id", model.ID, "installed", len(models))
+	slog.Info("wake engine ready", "backend", backend, "installed", len(models),
+		"runnable", len(wake.OfKind(models, backend)))
 }
 
 // satelliteName prefers the name echoctl recorded at install, since Home Assistant keys the

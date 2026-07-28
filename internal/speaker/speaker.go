@@ -12,7 +12,7 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/alsa"
-	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // The playback codec accepts one format only: 48 kHz, S16_LE, stereo.
@@ -61,7 +61,7 @@ type Player struct {
 
 	voiceMu    sync.Mutex
 	voice      Resampler
-	resampling audio.Resampling
+	resampling settings.Resampling
 	splices    atomic.Uint64
 
 	mu      sync.Mutex
@@ -90,7 +90,7 @@ func NewPlayer() (*Player, error) {
 
 	// Mixer writes happen in Run: the first one enumerates the card, which takes over a second.
 	p := &Player{pb: pb, mixer: m, out: DetectOutput()}
-	p.voice, p.resampling = NewResampler(audio.ResampleSinc)
+	p.voice, p.resampling = NewResampler(settings.ResampleSinc)
 	p.SetVolume(VolumeSteps)
 	return p, nil
 }
@@ -279,7 +279,7 @@ func (p *Player) Drain() {
 
 // SetResampling picks how voice is stretched to the playback rate and reports what it settled on,
 // which is the filter for anything this build does not have. It takes effect on the next reply.
-func (p *Player) SetResampling(r audio.Resampling) audio.Resampling {
+func (p *Player) SetResampling(r settings.Resampling) settings.Resampling {
 	p.voiceMu.Lock()
 	defer p.voiceMu.Unlock()
 
@@ -288,7 +288,7 @@ func (p *Player) SetResampling(r audio.Resampling) audio.Resampling {
 }
 
 // Resampling is the one in use.
-func (p *Player) Resampling() audio.Resampling {
+func (p *Player) Resampling() settings.Resampling {
 	p.voiceMu.Lock()
 	defer p.voiceMu.Unlock()
 	return p.resampling

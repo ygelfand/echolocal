@@ -4,7 +4,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // Resampler stretches the pipeline's 16 kHz mono to the 48 kHz stereo the codec takes.
@@ -90,16 +90,16 @@ func VoiceSweep() []int16 {
 
 var (
 	resamplersMu sync.RWMutex
-	resamplers   = map[audio.Resampling]func() Resampler{
-		audio.ResampleSinc:   func() Resampler { return &sinc{} },
-		audio.ResampleLinear: func() Resampler { return &linear{} },
-		audio.ResampleHold:   func() Resampler { return hold{} },
+	resamplers   = map[settings.Resampling]func() Resampler{
+		settings.ResampleSinc:   func() Resampler { return &sinc{} },
+		settings.ResampleLinear: func() Resampler { return &linear{} },
+		settings.ResampleHold:   func() Resampler { return hold{} },
 	}
-	resamplerOrder = []audio.Resampling{audio.ResampleSinc, audio.ResampleLinear, audio.ResampleHold}
+	resamplerOrder = []settings.Resampling{settings.ResampleSinc, settings.ResampleLinear, settings.ResampleHold}
 )
 
 // Register adds a way to stretch the voice stream.
-func Register(r audio.Resampling, make func() Resampler) {
+func Register(r settings.Resampling, make func() Resampler) {
 	resamplersMu.Lock()
 	defer resamplersMu.Unlock()
 
@@ -110,20 +110,20 @@ func Register(r audio.Resampling, make func() Resampler) {
 }
 
 // Resamplings lists what this build can do, in the order it became available.
-func Resamplings() []audio.Resampling {
+func Resamplings() []settings.Resampling {
 	resamplersMu.RLock()
 	defer resamplersMu.RUnlock()
-	return append([]audio.Resampling(nil), resamplerOrder...)
+	return append([]settings.Resampling(nil), resamplerOrder...)
 }
 
 // NewResampler builds one, falling back to the filter for anything this build does not have.
-func NewResampler(r audio.Resampling) (Resampler, audio.Resampling) {
+func NewResampler(r settings.Resampling) (Resampler, settings.Resampling) {
 	resamplersMu.RLock()
 	make, ok := resamplers[r]
 	resamplersMu.RUnlock()
 
 	if !ok {
-		return resamplers[audio.ResampleSinc](), audio.ResampleSinc
+		return resamplers[settings.ResampleSinc](), settings.ResampleSinc
 	}
 	return make(), r
 }

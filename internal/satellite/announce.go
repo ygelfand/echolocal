@@ -50,7 +50,7 @@ func (t *voiceTurn) announce(a esphome.Announce) {
 
 		// Home Assistant uses this to open a conversation without a wake word.
 		if a.StartConversation {
-			t.Start("")
+			t.Start(0, "")
 		}
 	})
 }

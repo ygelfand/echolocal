@@ -3,13 +3,14 @@ package wake
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/mic"
-	"github.com/ygelfand/echolocal/internal/oww"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // Defaults for a model that arrives without a manifest, which most do.
@@ -17,9 +18,6 @@ const (
 	WindowSize  = 5
 	FeatureStep = 10
 )
-
-// DefaultCutoff applies when nothing supplies a threshold.
-const DefaultCutoff = 0.85
 
 // Hold is how long scoring continues after a detection fires, to record the peak the utterance
 // reached. Feedback happens at once; this only decides what gets logged.
@@ -39,104 +37,174 @@ const (
 	NearMissSettle = 700 * time.Millisecond
 )
 
-// Engine feeds microphone frames to a detector.
+// Engine feeds microphone frames to the wake words of one backend.
+//
+// Slots are Home Assistant's: it offers a fixed number of wake word choices, each paired with its
+// own pipeline, and a detection has to say which one fired so the right pipeline runs. A slot with
+// no model is off, and all slots off is detection off — there is nothing else to switch.
 type Engine struct {
-	mu    sync.Mutex
-	det   detector
-	model Model
+	mu      sync.Mutex
+	backend backend
+	kind    settings.WakeBackend
+	slots   []slot
 
-	// front is the openWakeWord front end, built on first use and kept: it holds the audio history
-	// every wake word of that kind reads, so swapping the wake word must not disturb it.
-	front *oww.Engine
-
-	// Enabled and Cutoff are asked per frame, so changes in Home Assistant take effect at once.
-	Enabled func() bool
-	Cutoff  func() float64
+	// Threshold is asked for every score, so a change in Home Assistant takes effect at once. It is
+	// per slot because the models disagree on scale.
+	Threshold func(slot int) float64
 
 	// OnDetect runs on a detection, off the audio path.
-	OnDetect func()
+	OnDetect func(slot int)
 }
 
-// New loads a model. Thresholding happens in Run, against Cutoff.
-func New(m Model) (*Engine, error) {
-	e := &Engine{}
-	det, err := e.build(m)
+// slot is one wake word and how its scores are being read. The tracking is per slot: two wake words
+// listening to the same audio peak at different moments, and one firing must not silence the other.
+type slot struct {
+	model  Model
+	loaded bool
+
+	quiet      time.Time
+	peak       float64
+	peakAt     time.Time
+	suppressed int
+
+	// While holding, a detection has already fired and scoring continues only to find the peak the
+	// utterance reached, so hits and misses are both reported as peaks.
+	holding  bool
+	holdEnds time.Time
+	crossing float64
+}
+
+// New brings up an engine with no wake words loaded. Use puts them in.
+func New(kind settings.WakeBackend, slots int) (*Engine, error) {
+	b, err := newBackend(kind)
 	if err != nil {
 		return nil, err
 	}
-	e.det, e.model = det, m
-	return e, nil
+	return &Engine{backend: b, kind: kind, slots: make([]slot, slots)}, nil
 }
 
-// build makes the detector for a model, bringing up the openWakeWord front end if this is the first
-// wake word that needs it.
-func (e *Engine) build(m Model) (detector, error) {
-	if m.Kind != KindOpenWakeWord {
-		return newMicro(m)
-	}
-	if e.front == nil {
-		front, err := oww.New()
-		if err != nil {
-			return nil, err
-		}
-		e.front = front
-	}
-	return newOpenWakeWord(e.front, m)
-}
-
-// Model reports which wake word is loaded.
-func (e *Engine) Model() Model {
+// Kind reports which backend is running.
+func (e *Engine) Kind() settings.WakeBackend {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.model
+	return e.kind
 }
 
-// Use swaps the loaded model, for when Home Assistant picks a different wake word. The detector is
-// rebuilt, which is unavoidable: its weights and streaming state belong to the old model.
-func (e *Engine) Use(m Model) error {
+// SetBackend swaps the engine, dropping every loaded wake word: a model belongs to one backend and
+// nothing carries across. The caller reloads the slots afterwards, from what that backend was last
+// used with.
+func (e *Engine) SetBackend(kind settings.WakeBackend) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if m.ID == e.model.ID {
+	if kind == e.kind {
 		return nil
 	}
-	det, err := e.build(m)
+	b, err := newBackend(kind)
 	if err != nil {
 		return err
 	}
-	e.det.close()
-	e.det, e.model = det, m
 
-	slog.Info("wake word loaded", "phrase", m.Phrase, "id", m.ID, "engine", m.Kind)
+	e.backend.close()
+	e.backend, e.kind = b, kind
+	for i := range e.slots {
+		e.slots[i] = slot{}
+	}
+
+	slog.Info("wake backend changed", "backend", kind)
 	return nil
 }
 
-// feed scores one frame. The lock is held across the whole call rather than only while reading the
-// detector: openWakeWord's front end is shared with whatever Use installs next, and it is not safe
-// to swap a wake word out from under an inference.
-func (e *Engine) feed(frame []int16) (float64, bool) {
+// Use loads a wake word into a slot. A model of the wrong kind is refused rather than run: the
+// backends cannot share a front end, and loading one under the other would score noise.
+func (e *Engine) Use(n int, m Model) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.det.feed(frame)
+
+	if n < 0 || n >= len(e.slots) {
+		return fmt.Errorf("wake: slot %d out of range", n)
+	}
+	if m.Kind != e.kind {
+		return fmt.Errorf("wake: %s is a %s model, backend is %s", m.ID, m.Kind, e.kind)
+	}
+	if s := e.slots[n]; s.loaded && s.model.ID == m.ID {
+		return nil
+	}
+
+	if err := e.backend.load(m); err != nil {
+		return err
+	}
+	e.release(n)
+	e.slots[n] = slot{model: m, loaded: true}
+
+	slog.Info("wake word loaded", "slot", n+1, "phrase", m.Phrase, "id", m.ID, "backend", m.Kind)
+	return nil
+}
+
+// Clear switches a slot off.
+func (e *Engine) Clear(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if n < 0 || n >= len(e.slots) {
+		return
+	}
+	if e.slots[n].loaded {
+		slog.Info("wake word cleared", "slot", n+1, "id", e.slots[n].model.ID)
+	}
+	e.release(n)
+	e.slots[n] = slot{}
+}
+
+// release drops a slot's model from the backend, unless another slot is still using it. Held with mu.
+func (e *Engine) release(n int) {
+	if !e.slots[n].loaded {
+		return
+	}
+	id := e.slots[n].model.ID
+
+	for i, s := range e.slots {
+		if i != n && s.loaded && s.model.ID == id {
+			return
+		}
+	}
+	e.backend.unload(id)
+}
+
+// Loaded reports the wake word in a slot, and whether the slot is on.
+func (e *Engine) Loaded(n int) (Model, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if n < 0 || n >= len(e.slots) {
+		return Model{}, false
+	}
+	return e.slots[n].model, e.slots[n].loaded
+}
+
+// Listening reports whether any slot has a wake word.
+func (e *Engine) Listening() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for _, s := range e.slots {
+		if s.loaded {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) Close() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.backend.close()
 }
 
 // Run consumes frames until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context, source *mic.Source) {
 	frames, unlisten := source.Listen()
 	defer unlisten()
-
-	var (
-		quiet      time.Time
-		peak       float64
-		peakAt     time.Time
-		suppressed int
-
-		// While holding, a detection has already fired and scoring continues only to find the
-		// peak the utterance reached, so hits and misses are both reported as peaks.
-		holding  bool
-		holdEnds time.Time
-		crossing float64
-	)
 
 	for {
 		select {
@@ -146,71 +214,102 @@ func (e *Engine) Run(ctx context.Context, source *mic.Source) {
 			if !ok {
 				return
 			}
-			if e.Enabled != nil && !e.Enabled() {
-				continue
-			}
-
-			// Always feed the detector. It is a streaming model: a gap in its input is a gap in
-			// its history, and the next utterance gets scored from a cold state. The refractory
-			// below suppresses reporting, not audio.
-			score, scored := e.feed(frame)
-			if !scored {
-				// openWakeWord produces a score every 80 ms, so most frames only advance it.
-				continue
-			}
-			now := time.Now()
-
-			cutoff := DefaultCutoff
-			if e.Cutoff != nil {
-				cutoff = e.Cutoff()
-			}
-			hit := score >= cutoff
-
-			if now.Before(quiet) {
-				suppressed++
-				continue
-			}
-			if suppressed > 0 {
-				slog.Debug("detections suppressed while settling", "frames", suppressed)
-				suppressed = 0
-			}
-
-			if holding {
-				if score > peak {
-					peak = score
-				}
-				if now.Before(holdEnds) {
-					continue
-				}
-
-				slog.Info("wake detected", "peak", peak, "crossing", crossing,
-					"cutoff", cutoff, "dropped", source.Dropped())
-				holding, peak = false, 0
-				quiet = now.Add(Refractory)
-				continue
-			}
-
-			if !hit {
-				if score > peak {
-					peak, peakAt = score, now
-				}
-				// The utterance peaked and fell away without firing.
-				if peak >= NearMiss && now.Sub(peakAt) > NearMissSettle {
-					slog.Info("wake near miss", "peak", peak,
-						"cutoff", cutoff, "dropped", source.Dropped())
-					peak = 0
-				}
-				continue
-			}
-
-			// Feedback fires now; the peak is only for the log, and the detector is reset when the
-			// hold ends rather than here.
-			holding, holdEnds = true, now.Add(Hold)
-			crossing, peak = score, score
-
-			if e.OnDetect != nil {
-				go alog.Safely("wake detected", e.OnDetect)
-			}
+			e.score(frame, source)
 		}
+	}
+}
+
+// score feeds one frame and acts on what came back. The lock is held across the whole of it: the
+// backend is shared with whatever Use installs next, and it is not safe to swap a wake word out from
+// under an inference.
+func (e *Engine) score(frame []int16, source *mic.Source) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Always feed. These are streaming models: a gap in the input is a gap in their history, and the
+	// next utterance gets scored from a cold state. The refractory below suppresses reporting, not
+	// audio. Nothing loaded is the one case where there is nothing to feed.
+	if !e.anyLoaded() {
+		return
+	}
+	scores, fresh := e.backend.feed(frame)
+	if !fresh {
+		// openWakeWord produces a score every 80 ms, so most frames only advance it.
+		return
+	}
+
+	now := time.Now()
+	for i := range e.slots {
+		s := &e.slots[i]
+		if !s.loaded {
+			continue
+		}
+		score, ok := scores[s.model.ID]
+		if !ok {
+			continue
+		}
+		e.judge(i, s, score, now, source)
+	}
+}
+
+func (e *Engine) anyLoaded() bool {
+	for _, s := range e.slots {
+		if s.loaded {
+			return true
+		}
+	}
+	return false
+}
+
+// judge turns one slot's score into a detection, a near miss, or nothing. Held with mu.
+func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic.Source) {
+	cutoff := settings.DefaultThreshold
+	if e.Threshold != nil {
+		cutoff = e.Threshold(n)
+	}
+
+	if now.Before(s.quiet) {
+		s.suppressed++
+		return
+	}
+	if s.suppressed > 0 {
+		slog.Debug("detections suppressed while settling", "slot", n+1, "frames", s.suppressed)
+		s.suppressed = 0
+	}
+
+	if s.holding {
+		if score > s.peak {
+			s.peak = score
+		}
+		if now.Before(s.holdEnds) {
+			return
+		}
+
+		slog.Info("wake detected", "slot", n+1, "id", s.model.ID, "peak", s.peak,
+			"crossing", s.crossing, "cutoff", cutoff, "dropped", source.Dropped())
+		s.holding, s.peak = false, 0
+		s.quiet = now.Add(Refractory)
+		return
+	}
+
+	if score < cutoff {
+		if score > s.peak {
+			s.peak, s.peakAt = score, now
+		}
+		// The utterance peaked and fell away without firing.
+		if s.peak >= NearMiss && now.Sub(s.peakAt) > NearMissSettle {
+			slog.Info("wake near miss", "slot", n+1, "id", s.model.ID, "peak", s.peak,
+				"cutoff", cutoff, "dropped", source.Dropped())
+			s.peak = 0
+		}
+		return
+	}
+
+	// Feedback fires now; the peak is only for the log, and the slot settles when the hold ends.
+	s.holding, s.holdEnds = true, now.Add(Hold)
+	s.crossing, s.peak = score, score
+
+	if e.OnDetect != nil {
+		go alog.Safely("wake detected", func() { e.OnDetect(n) })
 	}
 }

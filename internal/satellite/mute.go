@@ -6,8 +6,8 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/gpio"
+	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
-	"github.com/ygelfand/echolocal/internal/state"
 )
 
 // The two levels the mute LED has. The pin is a plain GPIO, so there is no range between them.
@@ -43,7 +43,7 @@ func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSw
 	s.sw.OnCommand = s.set
 
 	// The mute line does not survive a reboot, so the saved value is applied rather than read.
-	saved := state.Get().Settings
+	saved := settings.Get()
 	if muted, err := m.Get(); err != nil {
 		slog.Error("reading mute state failed", "err", err)
 	} else if want := saved.Microphone.MutedOr(muted); want != muted {
@@ -93,7 +93,7 @@ func brightnessLabel(bright bool) string {
 func (s *muteSwitch) setBrightness(v string) {
 	bright := v == ledBright
 	s.applyBrightness(bright)
-	if err := state.SetMicLEDBright(bright); err != nil {
+	if err := settings.SetMicLEDBright(bright); err != nil {
 		slog.Error("saving mute LED brightness failed", "err", err)
 	}
 }
@@ -111,7 +111,7 @@ func (s *muteSwitch) applyBrightness(bright bool) {
 // set drives the line and remembers the new state. apply is the quiet version, for start-up.
 func (s *muteSwitch) set(muted bool) {
 	s.apply(muted)
-	if err := state.SetMicMuted(s.sw.Get()); err != nil {
+	if err := settings.SetMicMuted(s.sw.Get()); err != nil {
 		slog.Error("saving mute state failed", "err", err)
 	}
 
@@ -145,7 +145,7 @@ func (s *muteSwitch) toggle() {
 	} else {
 		chime(s.speaker, toneUnmute)
 	}
-	if err := state.SetMicMuted(muted); err != nil {
+	if err := settings.SetMicMuted(muted); err != nil {
 		slog.Error("saving mute state failed", "err", err)
 	}
 }
