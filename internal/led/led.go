@@ -31,7 +31,7 @@ const Segments = 12
 //   - Increasing segment index runs clockwise, 30 degrees per segment.
 //   - Each channel is a linear 0-255 brightness, 0 being dark.
 
-// Color is one segment's colour.
+// Color is one segment's color.
 type Color struct{ R, G, B byte }
 
 // SetSegments writes all 12 segments at once.
@@ -56,7 +56,7 @@ func (r *Ring) SetSegment(n int, c Color) error {
 	return r.SetSegments(all)
 }
 
-// SetAll paints every segment the same colour.
+// SetAll paints every segment the same color.
 func (r *Ring) SetAll(c Color) error {
 	all := make([]Color, Segments)
 	for i := range all {
@@ -82,7 +82,7 @@ func (r *Ring) path() string {
 func (r *Ring) attr(name string) string { return r.path() + "/" + name }
 
 // SetFrame writes all 36 channel brightnesses. The mapping from channel index to physical
-// segment and colour is not yet established — see task #30's LED counterpart.
+// segment and color is not yet established — see task #30's LED counterpart.
 func (r *Ring) SetFrame(vals []byte) error {
 	if len(vals) != Channels {
 		return fmt.Errorf("led: need %d channels, got %d", Channels, len(vals))

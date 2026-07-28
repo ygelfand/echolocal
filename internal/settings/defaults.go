@@ -7,6 +7,11 @@ const (
 	DefaultEffect    = "Pulse"
 	DefaultTone      = ToneChirp
 	DefaultBackend   = BackendOpenWakeWord
+	DefaultDelivery  = DeliveryWhole
+
+	// Seconds. Nobody speaks for fifteen, and a pipeline with a model in it can take a while.
+	DefaultMaxListen = 15
+	DefaultMaxThink  = 90
 )
 
 // VolumeOr reports the stored volume step, or def if it has never been set.
@@ -83,6 +88,29 @@ func (w Wake) Slots(n int) []WakeWord {
 		out[i] = w.Slot(i)
 	}
 	return out
+}
+
+// DeliveryOr reports how a reply reaches the device.
+func (w WakeWord) DeliveryOr(def Delivery) Delivery {
+	if w.Delivery == nil {
+		return def
+	}
+	return *w.Delivery
+}
+
+// MaxListenOr and MaxThinkOr report the limits in seconds.
+func (w WakeWord) MaxListenOr(def int) int {
+	if w.MaxListen == nil {
+		return def
+	}
+	return *w.MaxListen
+}
+
+func (w WakeWord) MaxThinkOr(def int) int {
+	if w.MaxThink == nil {
+		return def
+	}
+	return *w.MaxThink
 }
 
 // ThresholdOr reports the score a detection has to reach.

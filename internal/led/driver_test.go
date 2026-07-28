@@ -23,7 +23,7 @@ func ringInDir(t *testing.T) *Ring {
 	return &Ring{Path: dir}
 }
 
-// shown is the colour of segment 0 as it reached the hardware.
+// shown is the color of segment 0 as it reached the hardware.
 func shown(t *testing.T, r *Ring) Color {
 	t.Helper()
 

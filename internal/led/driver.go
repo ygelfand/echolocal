@@ -43,7 +43,7 @@ type Content struct {
 	// Frame is a still image, used when Effect is empty.
 	Frame []Color
 
-	// Effect is a named animation, and Base the colour it works from.
+	// Effect is a named animation, and Base the color it works from.
 	Effect  string
 	Base    Color
 	Reverse bool

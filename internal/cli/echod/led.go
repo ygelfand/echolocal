@@ -86,7 +86,7 @@ func newLEDCmd() *cobra.Command {
 	parseColor := func(s string) (led.Color, error) {
 		b, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(s), "#"))
 		if err != nil || len(b) != 3 {
-			return led.Color{}, fmt.Errorf("colour must be 6 hex digits like ff8000, got %q", s)
+			return led.Color{}, fmt.Errorf("color must be 6 hex digits like ff8000, got %q", s)
 		}
 		return led.Color{R: b[0], G: b[1], B: b[2]}, nil
 	}
@@ -110,7 +110,7 @@ func newLEDCmd() *cobra.Command {
 
 	all := &cobra.Command{
 		Use:   "all <rrggbb>",
-		Short: "Paint every segment one colour",
+		Short: "Paint every segment one color",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			col, err := parseColor(args[0])

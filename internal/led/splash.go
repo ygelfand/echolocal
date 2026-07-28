@@ -58,7 +58,7 @@ func Arc(fraction float64, c Color) []Color {
 }
 
 // effect returns the frame function for a named effect, or nil if there is no such effect.
-// base is the colour Home Assistant set, which effects use where it makes sense.
+// base is the color Home Assistant set, which effects use where it makes sense.
 func effect(name string, base Color) func(time.Duration) []Color {
 	switch name {
 	case EffectComet:
@@ -246,7 +246,7 @@ func scale(c Color, f float64) Color {
 	return Color{R: clamp(c.R), G: clamp(c.G), B: clamp(c.B)}
 }
 
-// hue converts a 0-1 position on the colour wheel to full-saturation RGB.
+// hue converts a 0-1 position on the color wheel to full-saturation RGB.
 func hue(h float64) Color {
 	x := math.Mod(h*6, 6)
 	ramp := func(v float64) byte { return byte(math.Round(math.Max(0, math.Min(1, v)) * 255)) }

@@ -33,7 +33,7 @@ func newAnalyzeCmd() *cobra.Command {
 			"Is any channel a hardware mix rather than its own microphone? Independent mics\n" +
 			"and preamps have independent noise, so in silence they correlate near zero. A\n" +
 			"channel summed from others correlates strongly with all of them.\n\n" +
-			"Which channel is the centre mic? A true centre correlates about equally with\n" +
+			"Which channel is the center mic? A true center correlates about equally with\n" +
 			"every perimeter mic; a perimeter mic favours its neighbours.\n\n" +
 			"ch7/ch8 are the playback loopback, so they read as zero when nothing is playing.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -60,8 +60,8 @@ func newAnalyzeCmd() *cobra.Command {
 
 			if chans >= 7 {
 				t := audio.AnalyzeTopology(ch, []int{0, 1, 2, 3, 4, 5}, 6)
-				fmt.Fprintln(w, "\n=== topology (assumes ring 0-5, centre 6) ===")
-				fmt.Fprintf(w, "centre ch6 spread:  %.4f\n", t.CentreSpread)
+				fmt.Fprintln(w, "\n=== topology (assumes ring 0-5, center 6) ===")
+				fmt.Fprintf(w, "center ch6 spread:  %.4f\n", t.CenterSpread)
 				for i, s := range t.Spreads {
 					fmt.Fprintf(w, "perimeter ch%d spread: %.4f\n", i, s)
 				}
@@ -102,10 +102,10 @@ func newDirectionCmd() *cobra.Command {
 		Use:   "direction",
 		Short: "Estimate which mic faced the source in a directional capture",
 		Long: "For a recording made with a sound source at one known bearing, reports each\n" +
-			"perimeter mic's level and its arrival time relative to the centre mic (ch6).\n\n" +
+			"perimeter mic's level and its arrival time relative to the center mic (ch6).\n\n" +
 			"The mic facing the source should be loudest and earliest. With a ring radius of\n" +
 			"36 mm the expected lag range is +/-1.7 samples at 16 kHz, so lags are measured to\n" +
-			"sub-sample precision; a negative lag means that mic heard it before the centre.\n\n" +
+			"sub-sample precision; a negative lag means that mic heard it before the center.\n\n" +
 			"Repeat at a few known bearings to pin the array's absolute rotation.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if in == "" {
@@ -129,7 +129,7 @@ func newDirectionCmd() *cobra.Command {
 			for _, v := range ch[6] {
 				st.Add(int32(v))
 			}
-			fmt.Fprintf(w, "centre ch6 rms: %.1f dBFS\n\n", audio.DBFS(st.RMS()))
+			fmt.Fprintf(w, "center ch6 rms: %.1f dBFS\n\n", audio.DBFS(st.RMS()))
 
 			fmt.Fprintf(w, "%4s  %10s  %12s  %12s  %8s\n",
 				"mic", "rms dBFS", "rel dB", "lag samples", "path mm")

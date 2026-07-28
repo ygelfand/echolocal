@@ -40,7 +40,7 @@ func newRingLight(d *led.Driver) *ringLight {
 
 	// Start from white at full brightness so the first command has something to turn on. Nothing is
 	// shown yet: the claim stays empty until Home Assistant or a restore says otherwise, so the boot
-	// animation is not competing with a resting colour it would have to outrank.
+	// animation is not competing with a resting color it would have to outrank.
 	r.light.Set(esphome.LightState{
 		ColorMode:  esphome.ColorModeRGB,
 		Brightness: 1, Red: 1, Green: 1, Blue: 1,
@@ -118,10 +118,10 @@ func (r *ringLight) applySegment(i int, seg *esphome.Light, s esphome.LightState
 }
 
 // Effect is the animation Home Assistant set on the ring, empty when it set none. A conversation runs
-// the user's chosen wake effect, but the colour it runs in comes from here.
+// the user's chosen wake effect, but the color it runs in comes from here.
 func (r *ringLight) Base() led.Color { return colorOf(r.light.Get()) }
 
-// colorOf is the light's colour with its brightness folded in.
+// colorOf is the light's color with its brightness folded in.
 func colorOf(s esphome.LightState) led.Color {
 	return led.Color{
 		R: scale(s.Red, s.Brightness),
@@ -135,7 +135,7 @@ func scale(v, brightness float32) byte {
 }
 
 // usable fills in what a bare on command leaves out. Commands are partial and folded onto current
-// state, so "on" with no brightness or colour would otherwise light the ring black.
+// state, so "on" with no brightness or color would otherwise light the ring black.
 func usable(s esphome.LightState) esphome.LightState {
 	if !s.On {
 		return s

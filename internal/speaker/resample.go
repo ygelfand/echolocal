@@ -20,9 +20,9 @@ var voiceFilter = func() [voiceLength]float32 {
 	var h [voiceLength]float32
 	// Cutoff is half the input rate expressed against the output rate, and the sinc's amplitude
 	// already carries the gain that zero stuffing would otherwise lose.
-	centre := float64(voiceLength-1) / 2
+	center := float64(voiceLength-1) / 2
 	for i := range h {
-		x := (float64(i) - centre) / voicePhases
+		x := (float64(i) - center) / voicePhases
 		s := 1.0
 		if x != 0 {
 			s = math.Sin(math.Pi*x) / (math.Pi * x)

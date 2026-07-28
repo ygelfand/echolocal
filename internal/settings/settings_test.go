@@ -34,6 +34,26 @@ func TestDefaultsWhenUnset(t *testing.T) {
 	if v := got.Wake.Slot(1).ThresholdOr(DefaultThreshold); v != DefaultThreshold {
 		t.Errorf("ThresholdOr = %v", v)
 	}
+	if v := got.Wake.Slot(0).DeliveryOr(DefaultDelivery); v != DeliveryWhole {
+		t.Errorf("DeliveryOr = %q, want the whole file by default", v)
+	}
+}
+
+// Delivery is per slot, so one assistant can stream while the other fetches.
+func TestDeliveryIsPerSlot(t *testing.T) {
+	st := load(t)
+
+	if err := st.SetWakeDelivery(1, DeliveryStream); err != nil {
+		t.Fatalf("SetWakeDelivery: %v", err)
+	}
+
+	got := st.Get().Wake
+	if v := got.Slot(1).DeliveryOr(DefaultDelivery); v != DeliveryStream {
+		t.Errorf("slot 2 delivery = %q", v)
+	}
+	if v := got.Slot(0).DeliveryOr(DefaultDelivery); v != DeliveryWhole {
+		t.Errorf("slot 1 delivery = %q, want the default untouched", v)
+	}
 }
 
 // A zero value has to survive, or turning something off would read as never having been set and the
@@ -129,7 +149,7 @@ func TestReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if err := st.SetMicMixing(MixCentre); err != nil {
+	if err := st.SetMicMixing(MixCenter); err != nil {
 		t.Fatalf("SetMicMixing: %v", err)
 	}
 	if err := st.SetSpeakerResampling(ResampleLinear); err != nil {
@@ -145,7 +165,7 @@ func TestReload(t *testing.T) {
 	}
 	got := again.Get()
 
-	if v := got.Microphone.MixingOr(MixDelaySum); v != MixCentre {
+	if v := got.Microphone.MixingOr(MixDelaySum); v != MixCenter {
 		t.Errorf("MixingOr = %q after reload", v)
 	}
 	if v := got.Speaker.ResamplingOr(ResampleSinc); v != ResampleLinear {
@@ -158,9 +178,9 @@ func TestReload(t *testing.T) {
 
 // Labels are what Home Assistant sends back, so the mapping has to round trip.
 func TestByLabelRoundTrips(t *testing.T) {
-	values := []Mixing{MixCentre, MixDelaySum}
+	values := []Mixing{MixCenter, MixDelaySum}
 
-	if got := Labels(values); got[0] != "Centre mic" || got[1] != "Delay and sum" {
+	if got := Labels(values); got[0] != "Center mic" || got[1] != "Delay and sum" {
 		t.Fatalf("Labels = %q", got)
 	}
 	for _, want := range values {

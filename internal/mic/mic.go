@@ -33,9 +33,9 @@ const (
 // Mics is how many of the nine channels are microphones. ch7 and ch8 are the playback loopback.
 const Mics = 7
 
-// CentreMic is the middle microphone: no arrival delay relative to the array, and usable with no
+// CenterMic is the middle microphone: no arrival delay relative to the array, and usable with no
 // beamformer at all.
-const CentreMic = 6
+const CenterMic = 6
 
 // FrameSamples is the frame size handed to listeners, 20 ms at 16 kHz.
 const FrameSamples = Rate / 50
@@ -310,14 +310,14 @@ func (s *Source) Close() error {
 	return pcm.Close()
 }
 
-// Mono takes the centre microphone alone, narrowed from 24 bits to 16. The beamformed mix is what
+// Mono takes the center microphone alone, narrowed from 24 bits to 16. The beamformed mix is what
 // listeners get; this is for tools that need one microphone as it comes off the hardware.
 func Mono(raw []byte) []int16 {
 	const frameBytes = Channels * Bits / 8
 
 	out := make([]int16, len(raw)/frameBytes)
 	for i := range out {
-		o := i*frameBytes + CentreMic*3
+		o := i*frameBytes + CenterMic*3
 		out[i] = int16(audio.DecodeS24LE3(raw[o:o+3]) >> 8)
 	}
 	return out

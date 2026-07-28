@@ -15,9 +15,6 @@ import (
 // EffectNone is the option that turns the wake animation off.
 const EffectNone = "None"
 
-// wakeFlash is how long a detection shows on the ring.
-const wakeFlash = 1200 * time.Millisecond
-
 // wakeControl is the wake words' settings and their feedback. Detection itself runs elsewhere and
 // calls Detected.
 //
@@ -42,6 +39,9 @@ type wakeSlot struct {
 	threshold *esphome.Number
 	tone      *esphome.Select
 	effect    *esphome.Select
+	delivery  *esphome.Select
+	maxListen *esphome.Number
+	maxThink  *esphome.Number
 }
 
 func newWakeControl(spk *speaker.Player, backends []settings.WakeBackend, slots int) *wakeControl {
@@ -86,10 +86,12 @@ func newWakeControl(spk *speaker.Player, backends []settings.WakeBackend, slots 
 	return w
 }
 
-// newSlot builds one slot's entities. They are numbered from one and named to match Home Assistant's
-// own wake word selects, which is what the user is pairing them with.
+// newSlot builds one slot's entities. The name leads with the assistant so that everything belonging
+// to one of them reads together, beside Home Assistant's own Assistant and Wake word selects for the
+// same slot. The object ids stay as they are: they set the entity id, and renaming those would orphan
+// entities to no purpose.
 func (w *wakeControl) newSlot(n int) wakeSlot {
-	prefix := fmt.Sprintf("Wake word %d", n+1)
+	prefix := fmt.Sprintf("Assistant %d wake word", n+1)
 
 	s := wakeSlot{
 		threshold: &esphome.Number{
@@ -120,6 +122,35 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 			},
 			Options: append([]string{EffectNone}, led.EffectNames()...),
 		},
+		delivery: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("reply_delivery_%d", n+1),
+				Name:     fmt.Sprintf("Assistant %d reply delivery", n+1),
+				Icon:     "mdi:download-network",
+				Category: esphome.CategoryConfig,
+			},
+			Options: settings.Labels(deliveries()),
+		},
+		maxListen: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("max_listen_%d", n+1),
+				Name:     fmt.Sprintf("Assistant %d max listening time", n+1),
+				Icon:     "mdi:timer-outline",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 5, Max: 60, Step: 1, Unit: "s",
+			Mode: esphome.NumberBox,
+		},
+		maxThink: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("max_think_%d", n+1),
+				Name:     fmt.Sprintf("Assistant %d max thinking time", n+1),
+				Icon:     "mdi:timer-sand",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 5, Max: 300, Step: 5, Unit: "s",
+			Mode: esphome.NumberBox,
+		},
 	}
 
 	s.threshold.OnCommand = func(v float32) {
@@ -146,7 +177,36 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 			slog.Error("saving the wake effect failed", "slot", n+1, "err", err)
 		}
 	}
+	s.delivery.OnCommand = func(label string) {
+		how, ok := settings.ByLabel(deliveries(), label)
+		if !ok {
+			slog.Warn("unknown reply delivery", "slot", n+1, "value", label)
+			return
+		}
+		s.delivery.Set(how.Label())
+		if err := settings.SetWakeDelivery(n, how); err != nil {
+			slog.Error("saving the reply delivery failed", "slot", n+1, "err", err)
+		}
+		slog.Info("reply delivery", "slot", n+1, "using", how)
+	}
+	s.maxListen.OnCommand = func(v float32) {
+		s.maxListen.Set(v)
+		if err := settings.SetWakeMaxListen(n, int(v)); err != nil {
+			slog.Error("saving the listening limit failed", "slot", n+1, "err", err)
+		}
+	}
+	s.maxThink.OnCommand = func(v float32) {
+		s.maxThink.Set(v)
+		if err := settings.SetWakeMaxThink(n, int(v)); err != nil {
+			slog.Error("saving the thinking limit failed", "slot", n+1, "err", err)
+		}
+	}
 	return s
+}
+
+// deliveries is how a reply can arrive, in the order it is offered.
+func deliveries() []settings.Delivery {
+	return []settings.Delivery{settings.DeliveryWhole, settings.DeliveryStream}
 }
 
 // restoreSlots publishes what the selected backend was last used with.
@@ -158,6 +218,9 @@ func (w *wakeControl) restoreSlots() {
 		s.threshold.Set(float32(saved.ThresholdOr(settings.DefaultThreshold)))
 		s.tone.Set(saved.ToneOr(settings.DefaultTone).Label())
 		s.effect.Set(saved.EffectOr(settings.DefaultEffect))
+		s.delivery.Set(saved.DeliveryOr(settings.DefaultDelivery).Label())
+		s.maxListen.Set(float32(saved.MaxListenOr(settings.DefaultMaxListen)))
+		s.maxThink.Set(float32(saved.MaxThinkOr(settings.DefaultMaxThink)))
 	}
 
 	slog.Info("wake settings restored", "backend", wake.BackendOr(settings.DefaultBackend),
@@ -167,38 +230,48 @@ func (w *wakeControl) restoreSlots() {
 func (w *wakeControl) entities() []esphome.Entity {
 	ents := []esphome.Entity{w.backend}
 	for _, s := range w.slots {
-		ents = append(ents, s.threshold, s.tone, s.effect)
+		ents = append(ents, s.threshold, s.tone, s.effect, s.delivery, s.maxListen, s.maxThink)
 	}
 	return ents
 }
 
+// What a slot is set to is read from the settings, never back out of the entity. The entities are a
+// view: a command writes the setting and then republishes it, so there is one direction of travel and
+// labels only ever have to be resolved on the way in.
+
+// saved is a slot's configuration.
+func (w *wakeControl) saved(slot int) settings.WakeWord {
+	return settings.Get().Wake.Slot(slot)
+}
+
 // Threshold is the score a slot's detection has to reach.
 func (w *wakeControl) Threshold(slot int) float64 {
-	if slot < 0 || slot >= len(w.slots) {
-		return settings.DefaultThreshold
-	}
-	return float64(w.slots[slot].threshold.Get())
+	return w.saved(slot).ThresholdOr(settings.DefaultThreshold)
 }
 
 // Chime sounds a detection in whatever the slot is set to.
 func (w *wakeControl) Chime(slot int) {
-	if slot < 0 || slot >= len(w.slots) {
-		return
-	}
-	tone, ok := settings.ByLabel(WakeTones(), w.slots[slot].tone.Get())
-	if !ok {
-		return
-	}
-	chime(w.speaker, wakeTones[tone])
+	chime(w.speaker, wakeTones[w.saved(slot).ToneOr(settings.DefaultTone)])
+}
+
+// Delivery is how a slot's reply should reach the device.
+func (w *wakeControl) Delivery(slot int) settings.Delivery {
+	return w.saved(slot).DeliveryOr(settings.DefaultDelivery)
+}
+
+// MaxListen and MaxThink are how long a slot's turn may spend in each phase.
+func (w *wakeControl) MaxListen(slot int) time.Duration {
+	return time.Duration(w.saved(slot).MaxListenOr(settings.DefaultMaxListen)) * time.Second
+}
+
+func (w *wakeControl) MaxThink(slot int) time.Duration {
+	return time.Duration(w.saved(slot).MaxThinkOr(settings.DefaultMaxThink)) * time.Second
 }
 
 // Effect is the animation a slot plays, empty when it is turned off. The conversation runs it: this
 // only says which one, because which one is a setting.
 func (w *wakeControl) Effect(slot int) string {
-	if slot < 0 || slot >= len(w.slots) {
-		return ""
-	}
-	if e := w.slots[slot].effect.Get(); e != EffectNone {
+	if e := w.saved(slot).EffectOr(settings.DefaultEffect); e != EffectNone {
 		return e
 	}
 	return ""

@@ -58,7 +58,7 @@ func NewBeamformer() *Beamformer {
 	for i := range Beams {
 		bearing := float64(i) * 2 * math.Pi / Beams
 		for m := range Mics {
-			if m == CentreMic {
+			if m == CenterMic {
 				b.delays[i][m] = spread
 				continue
 			}

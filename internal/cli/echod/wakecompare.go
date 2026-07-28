@@ -17,7 +17,7 @@ type variant struct {
 	name string
 	gain float64
 
-	// sum says whether to average all seven microphones instead of taking the centre one.
+	// sum says whether to average all seven microphones instead of taking the center one.
 	sum bool
 
 	det  *microwakeword.Detector
@@ -30,8 +30,8 @@ type variant struct {
 // nothing.
 func compareMixes(ctx context.Context, out io.Writer, source *mic.Source, m wake.Model, frames int) error {
 	variants := []*variant{
-		{name: "centre", gain: 1},
-		{name: "centre x4", gain: 4},
+		{name: "center", gain: 1},
+		{name: "center x4", gain: 4},
 		{name: "mean of 7", gain: 1, sum: true},
 		{name: "mean of 7 x4", gain: 4, sum: true},
 	}
@@ -60,7 +60,7 @@ func compareMixes(ctx context.Context, out io.Writer, source *mic.Source, m wake
 			chans := mic.Decode(frame)
 
 			for _, v := range variants {
-				samples := chans[mic.CentreMic]
+				samples := chans[mic.CenterMic]
 				if v.sum {
 					samples = meanOf(chans)
 				}

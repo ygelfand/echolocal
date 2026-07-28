@@ -61,7 +61,7 @@ func Correlation(a, b []float64) float64 {
 //
 //   - independent microphones correlate near zero, because each preamp's noise is its own
 //   - a channel that is a hardware sum of others correlates strongly with all of them
-//   - a true centre mic correlates about equally with every perimeter mic, while a
+//   - a true center mic correlates about equally with every perimeter mic, while a
 //     perimeter mic correlates most with its immediate neighbours
 func CorrelationMatrix(w io.Writer, ch [][]float64) {
 	n := len(ch)
@@ -99,8 +99,8 @@ func MeanAbsCorrelation(ch [][]float64, i int) float64 {
 
 // Topology summarises array structure from a correlation matrix, without assuming geometry.
 //
-// CentreSpread is the max-min range of a channel's correlations to the other perimeter
-// mics. A centre mic is equidistant from all of them, so its spread is small; a perimeter
+// CenterSpread is the max-min range of a channel's correlations to the other perimeter
+// mics. A center mic is equidistant from all of them, so its spread is small; a perimeter
 // mic favours neighbours and so spreads wider.
 //
 // ByDistance is mean correlation grouped by separation around the ring: 1 = adjacent,
@@ -108,16 +108,16 @@ func MeanAbsCorrelation(ch [][]float64, i int) float64 {
 // r, r*sqrt(3) and 2r, so correlation must fall monotonically as distance grows for any
 // direction of arrival. If it does not, the assumed ring order is wrong.
 type Topology struct {
-	Centre       int
-	CentreSpread float64
+	Center       int
+	CenterSpread float64
 	Spreads      []float64
 	ByDistance   [4]float64
 }
 
-// AnalyzeTopology treats perimeter as the assumed ring order and centre as the candidate
-// centre channel, and reports how well the data supports that arrangement.
-func AnalyzeTopology(ch [][]float64, perimeter []int, centre int) Topology {
-	t := Topology{Centre: centre}
+// AnalyzeTopology treats perimeter as the assumed ring order and center as the candidate
+// center channel, and reports how well the data supports that arrangement.
+func AnalyzeTopology(ch [][]float64, perimeter []int, center int) Topology {
+	t := Topology{Center: center}
 
 	spread := func(i int) float64 {
 		lo, hi := math.Inf(1), math.Inf(-1)
@@ -131,7 +131,7 @@ func AnalyzeTopology(ch [][]float64, perimeter []int, centre int) Topology {
 		return hi - lo
 	}
 
-	t.CentreSpread = spread(centre)
+	t.CenterSpread = spread(center)
 	for _, i := range perimeter {
 		t.Spreads = append(t.Spreads, spread(i))
 	}
@@ -291,7 +291,7 @@ func FitBearing(offsets []float64) (bearingDeg, amplitude float64) {
 	return deg, math.Hypot(cx, cy)
 }
 
-// InPlaneLag is the expected arrival offset in samples between the ring edge and its centre
+// InPlaneLag is the expected arrival offset in samples between the ring edge and its center
 // for a source in the plane of the array.
 func InPlaneLag(radiusMM float64, rate int) float64 {
 	return radiusMM / 1000 / SpeedOfSound * float64(rate)

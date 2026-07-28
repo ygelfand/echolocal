@@ -77,7 +77,7 @@ func newWakeCmd() *cobra.Command {
 			frames, unlisten := source.Listen()
 			defer unlisten()
 
-			fmt.Fprintf(out, "listening on the centre mic for %.0fs: %q (%s), cutoff %.2f, window %d, step %dms\n",
+			fmt.Fprintf(out, "listening on the center mic for %.0fs: %q (%s), cutoff %.2f, window %d, step %dms\n",
 				secs, m.Phrase, m.ID, m.Config.ProbabilityCutoff, m.Config.SlidingWindowSize, m.Config.FeaturesStepMs)
 
 			deadline := time.Now().Add(time.Duration(secs * float64(time.Second)))

@@ -20,14 +20,14 @@ type Mixer interface {
 	Mix(mics [][]int16) []int16
 }
 
-// Centre is the middle microphone alone.
-type Centre struct{}
+// Center is the middle microphone alone.
+type Center struct{}
 
-func (Centre) Mix(mics [][]int16) []int16 {
-	if len(mics) <= CentreMic {
+func (Center) Mix(mics [][]int16) []int16 {
+	if len(mics) <= CenterMic {
 		return nil
 	}
-	return mics[CentreMic]
+	return mics[CenterMic]
 }
 
 // A mixer that needs more than belongs here — the device's own beamformer wants a filter bank and
@@ -36,10 +36,10 @@ func (Centre) Mix(mics [][]int16) []int16 {
 var (
 	mixersMu sync.RWMutex
 	mixers   = map[settings.Mixing]func() Mixer{
-		settings.MixCentre:   func() Mixer { return Centre{} },
+		settings.MixCenter:   func() Mixer { return Center{} },
 		settings.MixDelaySum: func() Mixer { return NewBeamformer() },
 	}
-	order = []settings.Mixing{settings.MixCentre, settings.MixDelaySum}
+	order = []settings.Mixing{settings.MixCenter, settings.MixDelaySum}
 )
 
 // Register adds a way to combine the array.

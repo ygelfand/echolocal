@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// arrival is how far behind the centre microphone a source at bearing reaches microphone m, in
+// arrival is how far behind the center microphone a source at bearing reaches microphone m, in
 // samples. A microphone facing the source hears it first, so its arrival is negative.
 func arrival(m int, bearing float64) float64 {
-	if m == CentreMic {
+	if m == CenterMic {
 		return 0
 	}
 	spread := ringRadius / speedOfSound * float64(Rate)
@@ -58,7 +58,7 @@ func rms(x []int16) float64 {
 }
 
 // Seven microphones that agree on the source and disagree on the noise should come out with a
-// better ratio between the two than any one of them has alone. Compared against the centre
+// better ratio between the two than any one of them has alone. Compared against the center
 // microphone, which is what the single channel path uses.
 func TestBeamformerImprovesSignalToNoise(t *testing.T) {
 	const (
@@ -84,7 +84,7 @@ func TestBeamformerImprovesSignalToNoise(t *testing.T) {
 		for i := range got {
 			d := float64(got[i]) - float64(want[i])
 			beamErr += d * d
-			d = float64(noisy[CentreMic][i]) - float64(clean[CentreMic][i])
+			d = float64(noisy[CenterMic][i]) - float64(clean[CenterMic][i])
 			micErr += d * d
 		}
 		beamErr, micErr = math.Sqrt(beamErr/float64(n)), math.Sqrt(micErr/float64(n))

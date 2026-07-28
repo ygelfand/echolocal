@@ -61,6 +61,14 @@ type WakeWord struct {
 
 	Tone   *Tone   `json:"tone,omitempty"`
 	Effect *string `json:"effect,omitempty"`
+
+	// Delivery is how the reply from this slot's pipeline reaches the device.
+	Delivery *Delivery `json:"delivery,omitempty"`
+
+	// Seconds before giving up. Listening holds the microphone open and Home Assistant normally ends
+	// it, so that one is a backstop; thinking holds only the ring, and a model can take a minute.
+	MaxListen *int `json:"max_listen,omitempty"`
+	MaxThink  *int `json:"max_think,omitempty"`
 }
 
 // The process-wide store, at layout.StatePath. There is one device and one file, so callers use the
@@ -114,6 +122,9 @@ func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(sl
 func SetWakeThreshold(slot int, v float64) error { return store().SetWakeThreshold(slot, v) }
 func SetWakeTone(slot int, v Tone) error         { return store().SetWakeTone(slot, v) }
 func SetWakeEffect(slot int, v string) error     { return store().SetWakeEffect(slot, v) }
+func SetWakeDelivery(slot int, v Delivery) error { return store().SetWakeDelivery(slot, v) }
+func SetWakeMaxListen(slot, seconds int) error   { return store().SetWakeMaxListen(slot, seconds) }
+func SetWakeMaxThink(slot, seconds int) error    { return store().SetWakeMaxThink(slot, seconds) }
 
 // Store reads and writes one file.
 type Store struct {
@@ -221,6 +232,18 @@ func (st *Store) SetWakeTone(slot int, v Tone) error {
 
 func (st *Store) SetWakeEffect(slot int, v string) error {
 	return st.updateWord(slot, func(w *WakeWord) { w.Effect = &v })
+}
+
+func (st *Store) SetWakeDelivery(slot int, v Delivery) error {
+	return st.updateWord(slot, func(w *WakeWord) { w.Delivery = &v })
+}
+
+func (st *Store) SetWakeMaxListen(slot, seconds int) error {
+	return st.updateWord(slot, func(w *WakeWord) { w.MaxListen = &seconds })
+}
+
+func (st *Store) SetWakeMaxThink(slot, seconds int) error {
+	return st.updateWord(slot, func(w *WakeWord) { w.MaxThink = &seconds })
 }
 
 func (st *Store) updateWord(slot int, f func(*WakeWord)) error {

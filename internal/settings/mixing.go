@@ -4,9 +4,9 @@ package settings
 type Mixing string
 
 const (
-	// MixCentre is the middle microphone alone: no arrival delay, nothing computed, and the baseline
+	// MixCenter is the middle microphone alone: no arrival delay, nothing computed, and the baseline
 	// anything else has to beat.
-	MixCentre Mixing = "centre"
+	MixCenter Mixing = "center"
 
 	// MixDelaySum aligns all seven microphones to a steered direction and averages them.
 	MixDelaySum Mixing = "delay-sum"
@@ -19,8 +19,8 @@ const (
 // Label is how the setting is shown.
 func (m Mixing) Label() string {
 	switch m {
-	case MixCentre:
-		return "Centre mic"
+	case MixCenter:
+		return "Center mic"
 	case MixDelaySum:
 		return "Delay and sum"
 	case MixBeamformer:

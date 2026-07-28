@@ -18,10 +18,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
-// turnTimeout ends a turn that Home Assistant never closes, so a lost reply cannot leave the device
-// streaming the room indefinitely.
-const turnTimeout = 30 * time.Second
-
 // troubleFlash is how long the ring shows a failure, and troubleColor what it shows. Red is not used
 // anywhere else, so it never has to be told apart from an effect or a volume arc.
 const troubleFlash = 1500 * time.Millisecond
@@ -67,14 +63,16 @@ const (
 	evHeard                        // Home Assistant has heard enough
 	evReplyText                    // a reply is coming
 	evReplyURL                     // the reply can be fetched whole
-	evStreamAudio                  // reply audio over the API, the fallback path
-	evStreamEnd
-	evFlush   // play whatever is held back, for a reply shorter than the cushion
-	evPlayed  // the reply has finished playing
-	evRunEnd  // Home Assistant closed the run
-	evError   // the pipeline failed
-	evCancel  // the user gave up on it
-	evTimeout // Home Assistant never closed the run
+	evStreamStart                  // reply audio is about to arrive over the API
+	evStreamAudio                  // a chunk of it
+	evStreamEnd                    // all of it has been sent
+	evPlayed                       // the reply has finished playing
+	evRunEnd                       // Home Assistant closed the run
+	evError                        // the pipeline failed
+	evCancel                       // the user gave up on it
+	evTimeout                      // Home Assistant never closed the run
+	evPending                      // a turn held back for the last one to close has waited long enough
+	evPlaying                      // the reply has audio, so the pipeline owes nothing more
 )
 
 type event struct {
@@ -85,6 +83,7 @@ type event struct {
 	audio []byte
 	code  string
 	msg   string
+	at    time.Time
 }
 
 // conversation runs one turn at a time: microphone audio up, pipeline events back, spoken reply out.
@@ -121,8 +120,20 @@ type conversation struct {
 	stopAudio func()
 	deadline  *time.Timer
 
+	// pending is a slot whose turn is waiting for the previous one to finish closing, or -1.
+	//
+	// Home Assistant's events carry no run identifier, so a turn started while the last one is still
+	// ending cannot tell that one's events from its own — and the first thing to arrive is the old
+	// run's RUN_END, which would end the new turn instead. Waiting for the old run to close makes
+	// that event the go-ahead rather than a stray.
+	pending int
+	grace   *time.Timer
+
 	reply reply
 }
+
+// graceStart is how long to wait for a stopped run to close before starting the next one anyway.
+const graceStart = 750 * time.Millisecond
 
 // reply is the state of the answer being spoken. It only means anything in phaseReplying.
 type reply struct {
@@ -135,6 +146,10 @@ type reply struct {
 	bytes     int
 	peak      int
 	splicesAt uint64 // seam count when the reply started, so only this reply's are reported
+
+	// playingAt is when playback began, once the cushion had filled. Wall clock from here to the queue
+	// running dry is what measures gapping; a starved buffer is silence the seam count never sees.
+	playingAt time.Time
 }
 
 func newConversation(vs *esphome.VoiceSatellite, source *mic.Source, spk *speaker.Player,
@@ -149,6 +164,7 @@ func newConversation(vs *esphome.VoiceSatellite, source *mic.Source, spk *speake
 		ring:    ring,
 		leds:    leds,
 		events:  make(chan event, 32),
+		pending: -1,
 	}
 
 	vs.OnPipelineEvent = c.pipeline
@@ -187,9 +203,12 @@ func (c *conversation) Run(ctx context.Context) {
 	defer c.claim.Release()
 
 	for {
-		var expired <-chan time.Time
+		var expired, waited <-chan time.Time
 		if c.deadline != nil {
 			expired = c.deadline.C
+		}
+		if c.grace != nil {
+			waited = c.grace.C
 		}
 
 		select {
@@ -198,6 +217,8 @@ func (c *conversation) Run(ctx context.Context) {
 			return
 		case <-expired:
 			c.handle(event{kind: evTimeout})
+		case <-waited:
+			c.handle(event{kind: evPending})
 		case e := <-c.events:
 			c.handle(e)
 		}
@@ -226,12 +247,26 @@ func (c *conversation) handle(e event) {
 		}
 		c.player.mp.SetState(esphome.MediaPlayerAnnouncing)
 
+	case evStreamStart:
+		// The turn has to be claimed before the audio arrives: Home Assistant closes the run as soon
+		// as it has handed over the text, and a turn still only thinking would take that as the end
+		// and go idle, discarding everything that followed.
+		if c.phase != phaseIdle && c.wake.Delivery(c.slot) == settings.DeliveryStream {
+			c.speak("")
+		}
+
 	case evReplyURL:
 		// Home Assistant serves the reply whole as well as streaming it over the API, and this
 		// arrives before the first streamed byte. Fetching cannot gap: the streamed copy arrives at
 		// about the rate it plays out, so any hiccup empties the queue and silence lands in the
 		// middle of a word. HTTP also says when the audio has ended, which the stream does not.
+		//
+		// Which of the two runs is the slot's setting, so ignoring the url here leaves the streamed
+		// copy to arrive on its own, exactly as it would have if Home Assistant had sent no url.
 		if c.phase == phaseIdle {
+			return
+		}
+		if c.wake.Delivery(c.slot) == settings.DeliveryStream {
 			return
 		}
 		c.speak(e.url)
@@ -247,24 +282,35 @@ func (c *conversation) handle(e event) {
 		c.queue(e.audio)
 
 	case evStreamEnd:
+		// Everything Home Assistant is going to send has been sent, so whatever is still held back
+		// waiting for the cushion will never be joined by more and should just play.
 		if c.phase == phaseReplying && c.reply.url == "" {
+			c.flush()
 			go alog.Safely("reply drain", c.awaitPlayback)
 		}
 
-	case evFlush:
-		c.flush()
-
 	case evPlayed:
-		c.reported()
+		c.reported(e.at)
 		if c.phase == phaseReplying {
 			c.idle("spoken")
 		}
 
 	case evRunEnd:
+		// While idle this is the stopped run closing, which is what a held-back turn is waiting for.
+		if c.phase == phaseIdle {
+			c.startPending()
+			return
+		}
 		// A reply is on its way or playing and owns the ring and the player until it has been heard.
 		if c.phase != phaseReplying {
 			c.idle("ended")
 		}
+
+	case evPending:
+		c.startPending()
+
+	case evPlaying:
+		c.disarm()
 
 	case evError:
 		slog.Error("pipeline error", "code", e.code, "message", e.msg)
@@ -272,6 +318,7 @@ func (c *conversation) handle(e event) {
 		c.trouble()
 
 	case evCancel:
+		c.clearPending()
 		if c.phase == phaseIdle {
 			return
 		}
@@ -283,7 +330,14 @@ func (c *conversation) handle(e event) {
 		chime(c.speaker, toneCancel)
 
 	case evTimeout:
-		slog.Warn("turn timed out", "phase", c.phase)
+		// Which phase ran out says whose fault it is: listening means Home Assistant stopped
+		// answering, thinking means its pipeline is slower than the slot allows for.
+		switch c.phase {
+		case phaseListening:
+			slog.Warn("gave up listening", "slot", c.slot+1, "after", c.wake.MaxListen(c.slot))
+		case phaseThinking:
+			slog.Warn("gave up waiting for an answer", "slot", c.slot+1, "after", c.wake.MaxThink(c.slot))
+		}
 		c.idle("timed out")
 		c.trouble()
 	}
@@ -300,12 +354,16 @@ func (c *conversation) start(slot int) {
 	}
 
 	if c.phase != phaseIdle {
-		slog.Info("conversation interrupted", "was", c.phase, "wasslot", c.slot+1, "slot", slot+1)
-		if c.speaker != nil {
-			c.speaker.Drain()
-		}
+		slog.Info("conversation interrupted", "was", c.phase, "from", c.slot+1, "slot", slot+1)
+		c.speaker.Drain()
 		c.idle("interrupted")
+
+		// The stopped run has yet to close, and its last events are still on their way.
+		c.pending = slot
+		c.grace = time.NewTimer(graceStart)
+		return
 	}
+	c.clearPending()
 
 	if !c.vs.Subscribed() {
 		slog.Warn("no voice pipeline subscribed, ignoring wake")
@@ -341,7 +399,7 @@ func (c *conversation) start(slot int) {
 		c.claim.Play(effect, c.ring.Base())
 	}
 
-	c.deadline = time.NewTimer(turnTimeout)
+	c.arm(c.wake.MaxListen(slot))
 	c.startAudio()
 	slog.Info("turn started", "slot", slot+1, "phrase", phrase)
 }
@@ -351,6 +409,7 @@ func (c *conversation) start(slot int) {
 func (c *conversation) think() {
 	c.stopStreaming()
 	c.enter(phaseThinking)
+	c.arm(c.wake.MaxThink(c.slot))
 
 	if effect := c.wake.Effect(c.slot); effect != "" {
 		c.claim.PlayReversed(effect, c.ring.Base())
@@ -367,17 +426,14 @@ func (c *conversation) speak(url string) {
 		c.claim.PlayReversed(effect, c.ring.Base())
 	}
 	c.player.mp.SetState(esphome.MediaPlayerAnnouncing)
+	c.reply.splicesAt = c.speaker.Splices()
 
-	// The turn's own deadline no longer applies: how long a reply takes is not the device's business.
-	c.stopDeadline()
-
+	// The deadline is left as it was. Text arriving is not the pipeline delivering: it still owes the
+	// audio, and the limit it was given when the device stopped listening goes on running until some
+	// of that audio turns up.
 	if url == "" {
-		c.reply.splicesAt = c.speaker.Splices()
-		go alog.Safely("reply report", c.report)
 		return
 	}
-
-	c.reply.splicesAt = c.speaker.Splices()
 	go alog.Safely("reply", func() {
 		if err := c.play(url); err != nil {
 			slog.Error("fetching the reply failed", "url", url, "err", err)
@@ -390,7 +446,7 @@ func (c *conversation) speak(url string) {
 func (c *conversation) idle(why string) {
 	was := c.phase
 	c.stopStreaming()
-	c.stopDeadline()
+	c.disarm()
 
 	if was != phaseIdle {
 		_ = c.vs.StopTurn()
@@ -411,7 +467,33 @@ func (c *conversation) enter(p phase) {
 	c.visible.Store(int32(p))
 }
 
-func (c *conversation) stopDeadline() {
+// startPending opens the turn that was held back, if there is one.
+func (c *conversation) startPending() {
+	slot := c.pending
+	c.clearPending()
+
+	if slot >= 0 {
+		c.start(slot)
+	}
+}
+
+func (c *conversation) clearPending() {
+	c.pending = -1
+	if c.grace != nil {
+		c.grace.Stop()
+		c.grace = nil
+	}
+}
+
+// arm gives the current phase a limit; disarm removes it. Each phase sets its own, so a slow model
+// does not eat the time the microphone was meant to have and a live microphone is not bounded by how
+// long an answer may take.
+func (c *conversation) arm(d time.Duration) {
+	c.disarm()
+	c.deadline = time.NewTimer(d)
+}
+
+func (c *conversation) disarm() {
 	if c.deadline != nil {
 		c.deadline.Stop()
 		c.deadline = nil
@@ -461,6 +543,13 @@ func (c *conversation) pipeline(e esphome.PipelineEvent) {
 		if url := e.Data["url"]; url != "" {
 			c.post(event{kind: evReplyURL, url: url})
 		}
+
+	// Home Assistant brackets the streamed audio with these, and calls the reply finished after the
+	// end. They are the reliable signals: the per-message end flag is not.
+	case api.VoiceAssistantEvent_VOICE_ASSISTANT_TTS_STREAM_START:
+		c.post(event{kind: evStreamStart})
+	case api.VoiceAssistantEvent_VOICE_ASSISTANT_TTS_STREAM_END:
+		c.post(event{kind: evStreamEnd})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_RUN_END:
 		c.post(event{kind: evRunEnd})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_ERROR:
@@ -473,9 +562,9 @@ func (c *conversation) tts(data []byte, end bool) {
 	if len(data) > 0 {
 		c.post(event{kind: evStreamAudio, audio: data})
 	}
-	if end {
-		c.post(event{kind: evStreamEnd})
-	}
+	// The per-message end flag is not depended on: TTS_STREAM_END is what Home Assistant sends when it
+	// has finished, and it arrives whether or not this was ever set.
+	_ = end
 }
 
 // Start asks for a turn on a slot's pipeline. Wake detection and the buttons both use it.
@@ -584,20 +673,36 @@ func (c *conversation) stream(ctx context.Context) {
 	}
 }
 
-// replyCushion is how much of a reply to hold before starting to play it. The reply arrives over the
-// network at roughly the rate it plays, so without a cushion every hiccup empties the queue and
-// silence gets spliced into the middle of a word. It is added latency, so it is only as large as it
-// needs to be to cover the jitter actually seen.
-const replyCushion = 500 * time.Millisecond
+// How much of a reply to hold before playing it: the full cushion to begin with, and only enough to
+// ride out jitter after a dip.
+//
+// Home Assistant sends 512-sample chunks and sleeps to stay 384 ms ahead of a device it assumes plays
+// everything the moment it arrives — ESPHome's own firmware has no threshold at all, just a 512 ms
+// buffer it drains continuously. Rebuilding the whole cushion after every dip turns a shortfall of a
+// few milliseconds into a third of a second of silence, so recovery gets its own, smaller figure.
+const (
+	replyCushion = 384 * time.Millisecond
+	replyResume  = 80 * time.Millisecond
+)
 
-// queue hands streamed audio to the speaker once enough has arrived to play through a gap. Whenever
-// the queue does run empty the cushion is rebuilt, rather than dribbling out what little has arrived.
+// heldSamples is a duration as a count of 16 kHz samples.
+func heldSamples(d time.Duration) int {
+	return int(d/time.Millisecond) * speaker.VoiceRate / 1000
+}
+
+// queue hands streamed audio to the speaker once enough has arrived to play through a dip.
 func (c *conversation) queue(data []byte) {
 	samples := make([]int16, len(data)/2)
 	peak := 0
 	for i := range samples {
 		samples[i] = int16(uint16(data[i*2]) | uint16(data[i*2+1])<<8)
 		peak = max(peak, int(samples[i]), -int(samples[i]))
+	}
+
+	// The first chunk is the pipeline delivering, so its limit is done with.
+	if c.reply.bytes == 0 {
+		slog.Info("reply audio started", "slot", c.slot+1, "bytes", len(data))
+		c.disarm()
 	}
 
 	// How loud the reply arrives decides whether interpolating it can overflow, and the byte count
@@ -610,11 +715,17 @@ func (c *conversation) queue(data []byte) {
 		c.reply.flowing = false
 	}
 
-	cushion := int(replyCushion/time.Millisecond) * speaker.VoiceRate / 1000
-	if !c.reply.flowing && len(c.reply.held) < cushion {
+	want := replyCushion
+	if !c.reply.playingAt.IsZero() {
+		want = replyResume
+	}
+	if !c.reply.flowing && len(c.reply.held) < heldSamples(want) {
 		return
 	}
 
+	if c.reply.playingAt.IsZero() {
+		c.reply.playingAt = time.Now()
+	}
 	c.reply.flowing = true
 	out := c.reply.held
 	c.reply.held = nil
@@ -630,46 +741,48 @@ func (c *conversation) flush() {
 	}
 }
 
-// report follows a streamed reply to the end and says how it went.
-func (c *conversation) report() {
-	// A reply shorter than the cushion would otherwise sit there unplayed.
-	time.Sleep(replyCushion)
-	c.post(event{kind: evFlush})
-
-	c.awaitPlayback()
-}
-
 // awaitPlayback waits for the speaker to stay empty, then says the reply is done. Chunks arrive with
-// gaps, so the queue emptying once does not mean the reply is over.
+// gaps, so the queue emptying once does not mean the reply is over. It only runs once audio has
+// arrived, so an empty queue cannot be mistaken for a reply that has already finished.
 func (c *conversation) awaitPlayback() {
 	if c.speaker == nil {
 		c.post(event{kind: evPlayed})
 		return
 	}
 
+	// dry is when the queue first ran out. Confirming that is not part of how long the reply took.
+	var dry time.Time
+
 	const idleFor = 8
 	for idle := 0; idle < idleFor; {
 		if c.speaker.Queued() == 0 {
+			if idle == 0 {
+				dry = time.Now()
+			}
 			idle++
 		} else {
 			idle = 0
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	c.post(event{kind: evPlayed})
+	c.post(event{kind: evPlayed, at: dry})
 }
 
-// reported logs how the reply went. One seam is the reply running out at its end; more than that is
-// silence spliced into the middle of speech, which is what a reply arriving over the network slower
-// than it plays out sounds like.
-func (c *conversation) reported() {
-	if c.reply.bytes == 0 {
+// reported logs how the reply went. gap is silence the device had nothing to fill with.
+func (c *conversation) reported(dry time.Time) {
+	if c.reply.bytes == 0 || c.reply.playingAt.IsZero() {
 		return
 	}
 
+	seconds := float64(c.reply.bytes) / float64(2*mic.Rate)
+	took := dry.Sub(c.reply.playingAt).Seconds()
+
 	slog.Info("reply played",
+		"via", c.wake.Delivery(c.slot),
 		"bytes", c.reply.bytes,
-		"seconds", float64(c.reply.bytes)/float64(2*mic.Rate),
+		"seconds", math.Round(seconds*100)/100,
+		"took", math.Round(took*100)/100,
+		"gap", math.Round(max(took-seconds, 0)*100)/100,
 		"peak", c.reply.peak,
 		"seams", c.speaker.Splices()-c.reply.splicesAt,
 		"clipped", c.speaker.Clipped(),
