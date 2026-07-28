@@ -12,7 +12,7 @@ import (
 const FormatS16_LE = 2
 
 var (
-	ioctlWritei = ioc(1, 'A', 0x50, 12)
+	ioctlWritei = ioc(1, 'A', 0x50, xferiSize)
 	ioctlDrain  = ioc(0, 'A', 0x44, 0)
 )
 

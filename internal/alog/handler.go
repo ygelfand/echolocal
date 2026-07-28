@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,6 +136,18 @@ func level(l slog.Level) string {
 	default:
 		return "D"
 	}
+}
+
+// Safely runs f, turning a panic into a log line rather than a dead process. Every goroutine needs
+// its own: a panic in one cannot be recovered anywhere else, and init discards our stderr, so an
+// uncaught one looks like a silent restart.
+func Safely(what string, f func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("recovered from a panic", "in", what, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	f()
 }
 
 // Uptime is seconds since boot.

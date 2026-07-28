@@ -1,0 +1,278 @@
+// Package mic owns the microphone array: one capture stream, held for the life of the process,
+// with 16 kHz mono frames fanned out to whoever is listening.
+package mic
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/ygelfand/echolocal/internal/alsa"
+	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/prop"
+)
+
+// The capture codec accepts one format only: 16 kHz, S24_3LE, 9 channels.
+const (
+	Rate     = 16000
+	Channels = 9
+	Bits     = 24
+
+	Card          = 0
+	CaptureDevice = 24
+
+	period  = 256
+	periods = 10
+)
+
+// Mics is how many of the nine channels are microphones. ch7 and ch8 are the playback loopback.
+const Mics = 7
+
+// CentreMic is the middle microphone: no arrival delay relative to the array, and usable with no
+// beamformer at all.
+const CentreMic = 6
+
+// FrameSamples is the frame size handed to listeners, 20 ms at 16 kHz.
+const FrameSamples = Rate / 50
+
+// MediaService is the init service that holds the capture device on a fresh boot.
+const MediaService = "media"
+
+const (
+	acquireRetry    = 250 * time.Millisecond
+	acquireAttempts = 8
+)
+
+// Source is the capture stream. Listeners receive mono frames; a listener that cannot keep up
+// misses frames rather than stalling the reader.
+type Source struct {
+	pcm *alsa.Capture
+
+	mu        sync.Mutex
+	listeners map[int]chan []int16
+	raw       map[int]chan []byte
+	next      int
+
+	// dropped counts frames a listener was too slow to take. It matters more than it looks: the
+	// wake model is streaming, so a missing frame corrupts its state rather than just losing audio.
+	dropped atomic.Uint64
+
+	history history
+
+	// mixer is read by the reader and replaced from Home Assistant, both under mu.
+	mixer  Mixer
+	mixing audio.Mixing
+}
+
+// SetMixing chooses how the microphones are combined. It takes effect on the next frame, and reports
+// what it settled on, which differs from the request only when this build cannot do it.
+func (s *Source) SetMixing(m audio.Mixing) audio.Mixing {
+	mixer, settled := NewMixer(m)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mixer, s.mixing = mixer, settled
+	return settled
+}
+
+// Mixing is the combination in use.
+func (s *Source) Mixing() audio.Mixing {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mixing
+}
+
+// Acquire opens the capture device, taking it off Android if it got there first, the same way the
+// speaker does.
+func Acquire() (*Source, error) {
+	s, err := open()
+	if err == nil || !errors.Is(err, alsa.ErrBusy) {
+		return s, err
+	}
+
+	slog.Warn("capture device busy, stopping "+MediaService+" to take it", "err", err)
+	if err := prop.Stop(MediaService); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := prop.Start(MediaService); err != nil {
+			slog.Error("restarting "+MediaService+" failed", "err", err)
+		}
+	}()
+
+	for range acquireAttempts {
+		time.Sleep(acquireRetry)
+
+		s, err = open()
+		if err == nil {
+			slog.Info("capture device acquired")
+			return s, nil
+		}
+		if !errors.Is(err, alsa.ErrBusy) {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
+func open() (*Source, error) {
+	pcm, err := alsa.Open(Card, CaptureDevice, alsa.Config{
+		Channels:   Channels,
+		Rate:       Rate,
+		Format:     alsa.FormatS24_3LE,
+		Bits:       Bits,
+		PeriodSize: period,
+		Periods:    periods,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mic: opening capture: %w", err)
+	}
+	mixer, mixing := NewMixer(audio.MixDelaySum)
+	return &Source{
+		pcm:       pcm,
+		listeners: map[int]chan []int16{},
+		raw:       map[int]chan []byte{},
+		mixer:     mixer,
+		mixing:    mixing,
+	}, nil
+}
+
+// Listen returns a channel of mono frames and a function that stops the subscription.
+func (s *Source) Listen() (<-chan []int16, func()) {
+	ch := make(chan []int16, 8)
+
+	s.mu.Lock()
+	id := s.next
+	s.next++
+	s.listeners[id] = ch
+	s.mu.Unlock()
+
+	return ch, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if c, ok := s.listeners[id]; ok {
+			delete(s.listeners, id)
+			close(c)
+		}
+	}
+}
+
+// ListenRaw returns a channel of interleaved frames, all nine channels as the hardware gives them.
+// For characterising the array; the mono path is what detection and the pipeline use.
+func (s *Source) ListenRaw() (<-chan []byte, func()) {
+	ch := make(chan []byte, 8)
+
+	s.mu.Lock()
+	id := s.next
+	s.next++
+	s.raw[id] = ch
+	s.mu.Unlock()
+
+	return ch, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if c, ok := s.raw[id]; ok {
+			delete(s.raw, id)
+			close(c)
+		}
+	}
+}
+
+// Decode splits an interleaved frame into one slice per microphone, narrowed to 16 bits.
+func Decode(raw []byte) [][]int16 {
+	const frameBytes = Channels * Bits / 8
+
+	frames := len(raw) / frameBytes
+	out := make([][]int16, Mics)
+	for c := range out {
+		out[c] = make([]int16, frames)
+	}
+	for f := range frames {
+		off := f * frameBytes
+		for c := range Mics {
+			out[c][f] = int16(audio.DecodeS24LE3(raw[off+c*3:off+c*3+3]) >> 8)
+		}
+	}
+	return out
+}
+
+// Run reads until ctx is cancelled. It reads whether or not anyone is listening, because a stream
+// left unread overruns and the hardware ring is only 160 ms deep.
+func (s *Source) Run(ctx context.Context) error {
+	raw := make([]byte, FrameSamples*Channels*Bits/8)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		n, err := s.pcm.Read(raw)
+		if err != nil {
+			if errors.Is(err, alsa.ErrOverrun) {
+				slog.Warn("capture overrun")
+				continue
+			}
+			return err
+		}
+		s.broadcast(raw[:n])
+	}
+}
+
+// broadcast hands the frame to every listener, dropping it for any that is behind. The mono mix is
+// only computed when something wants it.
+func (s *Source) broadcast(raw []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Everything downstream reads the same single channel, whichever way it was made: wake detection
+	// and what Home Assistant transcribes should never disagree about what was heard.
+	//
+	// The recent history is kept whether or not anyone is listening: a wake word is only recognised
+	// once it has been said, so by the time a turn starts, the words after it are already past.
+	frame := s.mixer.Mix(Decode(raw))
+	s.remember(frame)
+
+	for _, ch := range s.listeners {
+		select {
+		case ch <- frame:
+		default:
+			s.dropped.Add(1)
+		}
+	}
+
+	if len(s.raw) == 0 {
+		return
+	}
+
+	// The reader reuses its buffer, so raw listeners get their own copy.
+	interleaved := make([]byte, len(raw))
+	copy(interleaved, raw)
+	for _, ch := range s.raw {
+		select {
+		case ch <- interleaved:
+		default:
+		}
+	}
+}
+
+// Dropped is how many frames a listener has missed.
+func (s *Source) Dropped() uint64 { return s.dropped.Load() }
+
+func (s *Source) Close() error { return s.pcm.Close() }
+
+// Mono takes the centre microphone alone, narrowed from 24 bits to 16. The beamformed mix is what
+// listeners get; this is for tools that need one microphone as it comes off the hardware.
+func Mono(raw []byte) []int16 {
+	const frameBytes = Channels * Bits / 8
+
+	out := make([]int16, len(raw)/frameBytes)
+	for i := range out {
+		o := i*frameBytes + CentreMic*3
+		out[i] = int16(audio.DecodeS24LE3(raw[o:o+3]) >> 8)
+	}
+	return out
+}

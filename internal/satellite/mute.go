@@ -10,15 +10,21 @@ import (
 	"github.com/ygelfand/echolocal/internal/state"
 )
 
+// The two levels the mute LED has. The pin is a plain GPIO, so there is no range between them.
+const (
+	ledDim    = "Dim"
+	ledBright = "Bright"
+)
+
 // muteSwitch is the microphone mute, drivable from Home Assistant and from the button on top of
 // the device. gpio444 is a real cut rather than a software flag, so "muted" in Home Assistant
 // means the microphones are disconnected.
 type muteSwitch struct {
-	sw      *esphome.Switch
-	bright  *esphome.Switch
-	mute    *gpio.Mute
-	led     *gpio.MuteLED
-	speaker *speaker.Player
+	sw         *esphome.Switch
+	brightness *esphome.Select
+	mute       *gpio.Mute
+	led        *gpio.MuteLED
+	speaker    *speaker.Player
 }
 
 func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSwitch {
@@ -26,7 +32,7 @@ func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSw
 		sw: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "mic_mute",
-				Name:     "Microphone Mute",
+				Name:     "Microphone mute",
 				Icon:     "mdi:microphone-off",
 			},
 		},
@@ -40,7 +46,7 @@ func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSw
 	saved := state.Get().Settings
 	if muted, err := m.Get(); err != nil {
 		slog.Error("reading mute state failed", "err", err)
-	} else if want := saved.MicMutedOr(muted); want != muted {
+	} else if want := saved.Microphone.MutedOr(muted); want != muted {
 		s.apply(want)
 	} else {
 		s.sw.Set(muted)
@@ -49,47 +55,56 @@ func newMuteSwitch(m *gpio.Mute, led *gpio.MuteLED, spk *speaker.Player) *muteSw
 	if led == nil {
 		return s
 	}
-	s.bright = &esphome.Switch{
+	s.brightness = &esphome.Select{
 		Base: esphome.Base{
-			ObjectID: "mute_led_bright",
-			Name:     "Mute LED Bright",
+			ObjectID: "mute_led_brightness",
+			Name:     "Mute LED brightness",
 			Icon:     "mdi:brightness-6",
 			Category: esphome.CategoryConfig,
 		},
+		Options: []string{ledDim, ledBright},
 	}
-	s.bright.OnCommand = s.setBright
+	s.brightness.OnCommand = s.setBrightness
 	if bright, err := led.Bright(); err != nil {
 		slog.Error("reading mute LED brightness failed", "err", err)
-	} else if want := saved.MuteLEDBrightOr(bright); want != bright {
-		s.applyBright(want)
+	} else if want := saved.Microphone.LEDBrightOr(bright); want != bright {
+		s.applyBrightness(want)
 	} else {
-		s.bright.Set(bright)
+		s.brightness.Set(brightnessLabel(bright))
 	}
 	return s
 }
 
 // entities lists what the mute control exposes.
 func (s *muteSwitch) entities() []esphome.Entity {
-	if s.bright == nil {
+	if s.brightness == nil {
 		return []esphome.Entity{s.sw}
 	}
-	return []esphome.Entity{s.sw, s.bright}
+	return []esphome.Entity{s.sw, s.brightness}
 }
 
-func (s *muteSwitch) setBright(bright bool) {
-	s.applyBright(bright)
-	if err := state.SetMuteLEDBright(bright); err != nil {
+func brightnessLabel(bright bool) string {
+	if bright {
+		return ledBright
+	}
+	return ledDim
+}
+
+func (s *muteSwitch) setBrightness(v string) {
+	bright := v == ledBright
+	s.applyBrightness(bright)
+	if err := state.SetMicLEDBright(bright); err != nil {
 		slog.Error("saving mute LED brightness failed", "err", err)
 	}
 }
 
-func (s *muteSwitch) applyBright(bright bool) {
+func (s *muteSwitch) applyBrightness(bright bool) {
 	if err := s.led.SetBright(bright); err != nil {
 		slog.Error("setting mute LED brightness failed", "bright", bright, "err", err)
 		return
 	}
 	if now, err := s.led.Bright(); err == nil {
-		s.bright.Set(now)
+		s.brightness.Set(brightnessLabel(now))
 	}
 }
 

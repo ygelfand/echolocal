@@ -76,6 +76,13 @@ const MACPath = "/sys/class/net/wlan0/address"
 // comes up around 10s, so the MAC is remembered here rather than read fresh every time.
 const StatePath = StateDir + "/state.json"
 
+// Wake word models live in /data, not /system: Home Assistant can offer new ones at runtime and
+// /system is mounted read-only.
+const (
+	ModelDir         = StateDir + "/models"
+	DefaultWakeModel = ModelDir + "/hey_jarvis.tflite"
+)
+
 // NameFromMAC builds the fallback display name, unique per device.
 func NameFromMAC(mac string) string {
 	var hex strings.Builder

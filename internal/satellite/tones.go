@@ -15,6 +15,11 @@ var (
 
 	toneAction     = []speaker.Note{{Freq: 1046, Ms: 70}}
 	toneActionHold = []speaker.Note{{Freq: 1046, Ms: 70}, {Freq: 1568, Ms: 130}}
+
+	// toneTrouble falls twice and ends low, which no acknowledgement does. A request that cannot be
+	// served has to sound different from one that was, or a failure is indistinguishable from the
+	// device having ignored the person entirely.
+	toneTrouble = []speaker.Note{{Freq: 622, Ms: 90}, {Freq: 466, Ms: 90}, {Freq: 349, Ms: 180}}
 )
 
 func chime(spk *speaker.Player, notes []speaker.Note) {

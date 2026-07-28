@@ -10,7 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/alsa"
+	"github.com/ygelfand/echolocal/internal/audio"
 )
 
 // The playback codec accepts one format only: 48 kHz, S16_LE, stereo.
@@ -25,6 +27,13 @@ const (
 	// codecSettle is how long the codec sits powered and idle before the amplifier is enabled,
 	// measured from the vendor HAL doing the same thing on a route change.
 	codecSettle = 1100 * time.Millisecond
+)
+
+// VoiceRate is the rate Home Assistant's pipeline works at, and VoiceUpsample how many playback
+// samples each of its samples becomes.
+const (
+	VoiceRate     = 16000
+	VoiceUpsample = Rate / VoiceRate
 )
 
 const (
@@ -49,6 +58,11 @@ type Player struct {
 
 	pathMu sync.Mutex
 	out    Output
+
+	voiceMu    sync.Mutex
+	voice      Resampler
+	resampling audio.Resampling
+	splices    atomic.Uint64
 
 	mu      sync.Mutex
 	pending []int16 // interleaved stereo waiting to go out
@@ -76,6 +90,7 @@ func NewPlayer() (*Player, error) {
 
 	// Mixer writes happen in Run: the first one enumerates the card, which takes over a second.
 	p := &Player{pb: pb, mixer: m, out: DetectOutput()}
+	p.voice, p.resampling = NewResampler(audio.ResampleSinc)
 	p.SetVolume(VolumeSteps)
 	return p, nil
 }
@@ -186,7 +201,7 @@ func (p *Player) Run(ctx context.Context) error {
 	if p.OnOutput != nil {
 		p.OnOutput(out)
 	}
-	go p.watchJack(ctx)
+	go alog.Safely("jack watcher", func() { p.watchJack(ctx) })
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -215,6 +230,13 @@ func (p *Player) fill(buf []byte) {
 	}
 	p.mu.Unlock()
 
+	// The queue emptied part way through this buffer, so silence is spliced into whatever was
+	// playing. At the end of a reply that is expected; repeatedly during one means audio is
+	// arriving slower than it plays out.
+	if take > 0 && take < period*Channels {
+		p.splices.Add(1)
+	}
+
 	gain := p.Volume()
 	for i := range period * Channels {
 		var s int16
@@ -230,6 +252,63 @@ func (p *Player) Play(samples []int16) {
 	p.mu.Lock()
 	p.pending = append(p.pending, samples...)
 	p.mu.Unlock()
+}
+
+// PlayVoice queues 16 kHz mono audio, which is what Home Assistant's pipeline sends. The codec
+// only accepts 48 kHz stereo, so it is interpolated up and duplicated across both channels. The
+// resampler carries state between calls, so a reply delivered in chunks is one continuous signal.
+func (p *Player) PlayVoice(mono []int16) {
+	p.voiceMu.Lock()
+	out := p.voice.Run(mono, make([]int16, 0, len(mono)*VoiceUpsample*Channels))
+	p.voiceMu.Unlock()
+
+	p.Play(out)
+}
+
+// Drain discards anything queued but not yet played, for a barge-in. The resampler's history goes
+// with it: whatever comes next is a different utterance.
+func (p *Player) Drain() {
+	p.mu.Lock()
+	p.pending = nil
+	p.mu.Unlock()
+
+	p.voiceMu.Lock()
+	p.voice.Reset()
+	p.voiceMu.Unlock()
+}
+
+// SetResampling picks how voice is stretched to the playback rate and reports what it settled on,
+// which is the filter for anything this build does not have. It takes effect on the next reply.
+func (p *Player) SetResampling(r audio.Resampling) audio.Resampling {
+	p.voiceMu.Lock()
+	defer p.voiceMu.Unlock()
+
+	p.voice, p.resampling = NewResampler(r)
+	return p.resampling
+}
+
+// Resampling is the one in use.
+func (p *Player) Resampling() audio.Resampling {
+	p.voiceMu.Lock()
+	defer p.voiceMu.Unlock()
+	return p.resampling
+}
+
+// Splices counts how many times the queue has run dry part way through a buffer.
+func (p *Player) Splices() uint64 { return p.splices.Load() }
+
+// Clipped counts voice samples that came out of the resampler past full scale.
+func (p *Player) Clipped() uint64 {
+	p.voiceMu.Lock()
+	defer p.voiceMu.Unlock()
+	return p.voice.Clipped()
+}
+
+// Queued reports how many frames are waiting, so a caller can tell when playback has finished.
+func (p *Player) Queued() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.pending) / Channels
 }
 
 // Note is one tone in a chime. A zero frequency is a rest.

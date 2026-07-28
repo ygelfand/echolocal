@@ -10,6 +10,18 @@ import (
 // HomeAssistant is Home Assistant's brand blue.
 var HomeAssistant = Color{R: 0x18, G: 0xBC, B: 0xF2}
 
+// Until Home Assistant subscribes a voice pipeline the device hears a wake word perfectly well and
+// can do nothing with it, so booting and ready have to look different. The wait steps around the
+// ring; being ready glides once and stops.
+const (
+	// WalkStep is how long each position of the boot walk holds. Six positions around the ring, so a
+	// revolution takes six of these.
+	WalkStep = 250 * time.Millisecond
+
+	// SplashConfirm is how long the comet runs once the pipeline is listening.
+	SplashConfirm = 2 * time.Second
+)
+
 // FrameInterval paces animations at 25 fps. Each frame is one 36-byte i2c write, which the
 // driver absorbs comfortably at this rate.
 const FrameInterval = 40 * time.Millisecond
@@ -68,17 +80,80 @@ func RunEffect(ctx context.Context, r *Ring, name string, base Color) error {
 	return play(ctx, r, 0, frame)
 }
 
-// Splash spins a Home Assistant blue comet until ctx is cancelled, then fades out. echod runs it
-// from start-up until everything is online.
-func Splash(ctx context.Context, r *Ring) error {
-	if err := play(ctx, r, 0, comet(HomeAssistant)); err != nil {
+// RunEffectReversed animates the same effect the other way round the ring, which is how the device
+// says it has stopped listening and is now waiting on an answer.
+func RunEffectReversed(ctx context.Context, r *Ring, name string, base Color) error {
+	frame := effect(name, base)
+	if frame == nil {
+		return fmt.Errorf("led: no effect %q", name)
+	}
+	return play(ctx, r, 0, reverse(frame))
+}
+
+// reverse mirrors a frame around the ring, turning clockwise motion into anticlockwise without an
+// effect having to know anything about it. Segment 0 stays put so the reversal is a change of
+// direction rather than a jump to somewhere else.
+func reverse(frame func(time.Duration) []Color) func(time.Duration) []Color {
+	return func(elapsed time.Duration) []Color {
+		in := frame(elapsed)
+		out := make([]Color, len(in))
+		for i, c := range in {
+			out[(len(in)-i)%len(in)] = c
+		}
+		return out
+	}
+}
+
+// Splash animates the ring while the device comes up, then fades out. It steps around the ring
+// until ready reports true, then runs the comet for SplashConfirm, so the ring says whether the
+// device is merely running or actually able to answer. A nil ready goes straight to the comet.
+//
+// ctx cancellation ends it wherever it has got to, so a device Home Assistant never talks to does
+// not step around forever.
+func Splash(ctx context.Context, r *Ring, ready func() bool) error {
+	if ready != nil {
+		if err := until(ctx, r, walk(HomeAssistant), ready); err != nil {
+			return err
+		}
+	}
+	if err := play(ctx, r, SplashConfirm, comet(HomeAssistant)); err != nil {
 		return err
 	}
 
-	// ctx is done by now, so the fade needs its own.
+	// ctx may be done by now, so the fade needs its own.
 	fade, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
 	return fadeOut(fade, r, 250*time.Millisecond)
+}
+
+// until animates frame until ready reports true, or ctx is cancelled.
+func until(ctx context.Context, r *Ring, frame func(time.Duration) []Color, ready func() bool) error {
+	t := time.NewTicker(FrameInterval)
+	defer t.Stop()
+
+	start := time.Now()
+	for !ready() {
+		if err := r.SetSegments(frame(time.Since(start))); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+	}
+	return nil
+}
+
+// walk lights one segment at a time, hopping two positions per step so it lands on every other
+// segment. Holding each position and skipping the one between reads as stepping, where the comet
+// glides and has a tail: waiting should not look like a slow version of being ready.
+func walk(base Color) func(time.Duration) []Color {
+	return func(elapsed time.Duration) []Color {
+		out := make([]Color, Segments)
+		out[2*int(elapsed/WalkStep)%Segments] = base
+		return out
+	}
 }
 
 // play runs an animation for d, or until ctx is cancelled when d is zero.

@@ -4,28 +4,36 @@
 // the subset a capture-only client needs is small, so the whole thing is a few hundred
 // lines of Go and echod stays a static, cgo-free binary — no NDK image, no C toolchain.
 //
-// Layouts below are for 32-bit userspace (GOARCH=arm), where the kernel's unsigned long
-// is 4 bytes. They are wrong on 64-bit and the package is not intended to build there.
+// Several of these structures embed the kernel's unsigned long, so their size — and with it the
+// ioctl number, which encodes that size — depends on the word size. The layouts below derive from
+// it rather than assuming one, because a mismatch is not a subtle bug: the kernel rejects the call
+// outright, or worse, reads the wrong bytes.
 package alsa
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
 	"unsafe"
 )
 
-// struct snd_pcm_hw_params: flags, 8 masks, 21 intervals, then scalars.
-const (
-	hwParamsSize = 604
+// longSize is the kernel's unsigned long. These layouts are the 64-bit ABI.
+const longSize = 8
 
+// struct snd_pcm_hw_params: flags, 8 masks of 32 bytes, 21 intervals of 12, six 32-bit scalars,
+// fifo_size as an unsigned long, reserved[64]. Only fifo_size is word sized, so all the offsets
+// hold on either ABI and only the total differs: 604 on 32-bit, 608 here.
+const (
 	maskOff     = 4
 	maskSize    = 32
 	intervalOff = maskOff + 8*maskSize // 260
 	intervalLen = 12
 	rmaskOff    = intervalOff + 21*intervalLen // 512
 	infoOff     = rmaskOff + 8
+
+	hwParamsSize = rmaskOff + 6*4 + longSize + 64 // 608
 )
 
 // Parameter indices. Masks are 0..2, intervals 8..19.
@@ -65,7 +73,7 @@ var (
 	ioctlPrepare  = ioc(0, 'A', 0x40, 0)
 	ioctlStart    = ioc(0, 'A', 0x42, 0)
 	ioctlDrop     = ioc(0, 'A', 0x43, 0)
-	ioctlReadi    = ioc(2, 'A', 0x51, 12)
+	ioctlReadi    = ioc(2, 'A', 0x51, xferiSize)
 )
 
 type hwParams [hwParamsSize]byte
@@ -112,12 +120,14 @@ func (p *hwParams) intervalMin(param int) uint32 {
 	return p.get(intervalOff + (param-firstInterval)*intervalLen)
 }
 
-// snd_xferi
+// snd_xferi: a signed long, a pointer and an unsigned long, so 24 bytes here.
 type xferi struct {
-	result int32
+	result int64
 	buf    uintptr
 	frames uintptr
 }
+
+const xferiSize = 3 * longSize // 24
 
 type Config struct {
 	Channels   int

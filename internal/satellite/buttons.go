@@ -50,16 +50,19 @@ type button struct {
 // buttons builds the set, with an event entity each so Home Assistant can automate on presses
 // even where the device does nothing itself — the action button, until there is a voice turn to
 // start.
-func newButtons(player *mediaPlayer, mute *muteSwitch) map[uint16]*button {
+func newButtons(player *mediaPlayer, mute *muteSwitch, converse func()) map[uint16]*button {
 	spk := player.speaker
 
 	out := map[uint16]*button{
 		keyVolumeUp:   {name: "volume_up", repeats: true, press: func() { player.adjust(1) }},
 		keyVolumeDown: {name: "volume_down", repeats: true, press: func() { player.adjust(-1) }},
 		keyAction: {
-			name:  "action",
-			press: func() { chime(spk, toneAction) },
-			hold:  func() { chime(spk, toneActionHold) },
+			name: "action",
+			press: func() {
+				chime(spk, toneAction)
+				converse()
+			},
+			hold: func() { chime(spk, toneActionHold) },
 		},
 	}
 	if mute != nil {
@@ -72,26 +75,21 @@ func newButtons(player *mediaPlayer, mute *muteSwitch) map[uint16]*button {
 
 	for _, b := range out {
 		b.event = &esphome.Event{
-			Base:  esphome.Base{ObjectID: "button_" + b.name, Name: title(b.name) + " Button"},
+			Base:  esphome.Base{ObjectID: "button_" + b.name, Name: label(b.name) + " button"},
 			Types: []string{EventPress, EventHold},
 		}
 	}
 	return out
 }
 
-func title(name string) string {
+func label(name string) string {
 	out := []rune(name)
-	upper := true
 	for i, r := range out {
-		switch {
-		case r == '_':
+		if r == '_' {
 			out[i] = ' '
-			upper = true
-		case upper:
-			out[i] = r - 32
-			upper = false
 		}
 	}
+	out[0] -= 32
 	return string(out)
 }
 

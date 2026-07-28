@@ -36,10 +36,12 @@ func newMediaPlayer(ring *ringLight, spk *speaker.Player) *mediaPlayer {
 			Base: esphome.Base{ObjectID: "speaker", Name: "Speaker", Icon: "mdi:speaker"},
 			Features: esphome.MediaPlayerFeatureVolumeSet |
 				esphome.MediaPlayerFeatureVolumeStep |
-				esphome.MediaPlayerFeatureVolumeMute,
+				esphome.MediaPlayerFeatureVolumeMute |
+				esphome.MediaPlayerFeatureAnnounce,
+			SupportedFormats: announceFormat,
 		},
 		jack: &esphome.BinarySensor{
-			Base:        esphome.Base{ObjectID: "headphones", Name: "Headphones", Icon: "mdi:headphones"},
+			Base:        esphome.Base{ObjectID: "headphones", Name: "Headphones", Icon: "mdi:headphones", Category: esphome.CategoryDiagnostic},
 			DeviceClass: "plug",
 		},
 		ring:    ring,
@@ -54,7 +56,7 @@ func newMediaPlayer(ring *ringLight, spk *speaker.Player) *mediaPlayer {
 		p.jack.Set(spk.Output() == speaker.OutputHeadphone)
 	}
 
-	p.apply(state.Get().Settings.VolumeOr(VolumeSteps / 2))
+	p.apply(state.Get().Settings.Speaker.VolumeOr(VolumeSteps / 2))
 	p.mp.SetState(esphome.MediaPlayerIdle)
 	return p
 }
@@ -90,7 +92,7 @@ func (p *mediaPlayer) command(c esphome.MediaCommand) {
 // set applies a level and remembers it.
 func (p *mediaPlayer) set(step int) {
 	applied := p.apply(step)
-	if err := state.SetVolume(applied); err != nil {
+	if err := state.SetSpeakerVolume(applied); err != nil {
 		slog.Error("saving volume failed", "err", err)
 	}
 }

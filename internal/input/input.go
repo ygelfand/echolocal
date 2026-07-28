@@ -19,13 +19,21 @@ const (
 	EvRep = 0x14
 )
 
-// eventSize is sizeof(struct input_event) on 32-bit Linux: two longs of timeval, then
-// u16 type, u16 code, s32 value.
-const eventSize = 16
+// sizeof(struct input_event): a timeval of two kernel longs, then u16 type, u16 code, s32 value,
+// with the tail padded back out to the timeval's alignment. evdev rejects a read shorter than one
+// whole event with EINVAL rather than returning a truncated one, so this has to be right.
+const (
+	longSize  = 8
+	eventSize = 2*longSize + 8
 
-// Event is one evdev record.
+	evType  = 2 * longSize
+	evCode  = evType + 2
+	evValue = evCode + 2
+)
+
+// Event is one evdev record. The timestamp is kept at the width the kernel reports it.
 type Event struct {
-	Sec, Usec uint32
+	Sec, Usec uint64
 	Type      uint16
 	Code      uint16
 	Value     int32
@@ -104,11 +112,11 @@ func (d *Device) Read() (Event, error) {
 		return Event{}, err
 	}
 	return Event{
-		Sec:   binary.LittleEndian.Uint32(buf[0:]),
-		Usec:  binary.LittleEndian.Uint32(buf[4:]),
-		Type:  binary.LittleEndian.Uint16(buf[8:]),
-		Code:  binary.LittleEndian.Uint16(buf[10:]),
-		Value: int32(binary.LittleEndian.Uint32(buf[12:])),
+		Sec:   binary.LittleEndian.Uint64(buf[0:]),
+		Usec:  binary.LittleEndian.Uint64(buf[longSize:]),
+		Type:  binary.LittleEndian.Uint16(buf[evType:]),
+		Code:  binary.LittleEndian.Uint16(buf[evCode:]),
+		Value: int32(binary.LittleEndian.Uint32(buf[evValue:])),
 	}, nil
 }
 

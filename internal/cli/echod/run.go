@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,9 +18,12 @@ import (
 	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/prop"
 	"github.com/ygelfand/echolocal/internal/satellite"
 	"github.com/ygelfand/echolocal/internal/speaker"
+	"github.com/ygelfand/echolocal/internal/state"
+	"github.com/ygelfand/echolocal/internal/wake"
 )
 
 func newRunCmd() *cobra.Command {
@@ -42,6 +47,16 @@ func newRunCmd() *cobra.Command {
 			defer h.Close()
 			slog.SetDefault(slog.New(h))
 
+			// init discards our stderr, so a panic would otherwise vanish and look like a silent
+			// restart. Log it, then let it kill the process as it would have.
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("panic", "panic", r, "stack", string(debug.Stack()))
+					h.Close()
+					panic(r)
+				}
+			}()
+
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
@@ -49,6 +64,7 @@ func newRunCmd() *cobra.Command {
 			signal.Ignore(syscall.SIGHUP)
 
 			slog.Info("echod starting", "version", Version, "pid", os.Getpid(), "uid", os.Getuid(), "context", selinuxContext())
+
 			_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", alog.Uptime()))
 			_ = prop.Set(layout.StateProp, "starting")
 
@@ -72,14 +88,26 @@ func newRunCmd() *cobra.Command {
 				}
 			}
 
-			// The ring spins from here until everything is up.
+			// The ring spins from here until Home Assistant has a pipeline listening, which is the
+			// point the device can actually answer. The satellite does not exist yet, so readiness
+			// is asked through a pointer that is filled in once it does.
+			var ready atomic.Pointer[satellite.Satellite]
+
 			splashCtx, online := context.WithCancel(ctx)
 			defer online()
-			go func() {
-				if err := led.Splash(splashCtx, ring); err != nil && ctx.Err() == nil {
+			go alog.Safely("splash", func() {
+				linked := func() bool {
+					s := ready.Load()
+					return s != nil && s.PipelineReady()
+				}
+				if err := led.Splash(splashCtx, ring, linked); err != nil && ctx.Err() == nil {
 					slog.Error("splash failed", "err", err)
 				}
-			}()
+				// The ring is the light entity's from here.
+				if s := ready.Load(); s != nil {
+					s.ReleaseRing()
+				}
+			})
 
 			mute, err := gpio.NewMute()
 			if err != nil {
@@ -100,11 +128,25 @@ func newRunCmd() *cobra.Command {
 				slog.Error("speaker unavailable", "err", err)
 			} else {
 				defer spk.Close()
-				go func() {
+				go alog.Safely("speaker", func() {
 					if err := spk.Run(ctx); err != nil && ctx.Err() == nil {
 						slog.Error("speaker stopped", "err", err)
 					}
-				}()
+				})
+			}
+
+			// The array is held for the life of the process for the same reason as the speaker:
+			// whatever is free, Android takes.
+			source, err := mic.Acquire()
+			if err != nil {
+				slog.Error("microphones unavailable", "err", err)
+			} else {
+				defer source.Close()
+				go alog.Safely("capture", func() {
+					if err := source.Run(ctx); err != nil && ctx.Err() == nil {
+						slog.Error("capture stopped", "err", err)
+					}
+				})
 			}
 
 			sat, err := satellite.New(satellite.Config{
@@ -115,20 +157,27 @@ func newRunCmd() *cobra.Command {
 				Mute:    mute,
 				MuteLED: muteLED,
 				Speaker: spk,
+				Mic:     source,
 			})
 			if err != nil {
 				slog.Error("satellite unavailable", "err", err)
 			} else {
-				go func() {
+				ready.Store(sat)
+				go alog.Safely("satellite", func() {
 					slog.Info("serving esphome api", "addr", addr)
 					if err := sat.Serve(ctx); err != nil && ctx.Err() == nil {
 						slog.Error("satellite stopped", "err", err)
 					}
-				}()
+				})
 			}
 
+			// No model installed is not fatal: the device works, it just cannot be woken.
+			if source != nil && sat != nil {
+				startWake(ctx, source, sat)
+			}
 
-			online()
+			// The ring keeps stepping until Home Assistant subscribes, which is a different thing
+			// from the process being up, so it is not stopped here.
 			slog.Info("resident")
 			_ = prop.Set(layout.StateProp, "resident")
 			idle(ctx, heartbeat)
@@ -166,6 +215,35 @@ func idle(ctx context.Context, every time.Duration) {
 	}
 }
 
+// startWake runs detection on whichever installed model Home Assistant last selected. Nothing
+// installed means the device simply cannot be woken; everything else still works.
+func startWake(ctx context.Context, source *mic.Source, sat *satellite.Satellite) {
+	models, err := wake.Installed(layout.ModelDir)
+	if err != nil {
+		slog.Warn("no wake word models", "dir", layout.ModelDir, "err", err)
+		return
+	}
+
+	model := wake.Pick(models, state.Get().Settings.Wake.WordID())
+	engine, err := wake.New(model)
+	if err != nil {
+		slog.Error("loading wake word failed", "model", model.ID, "err", err)
+		return
+	}
+
+	engine.Enabled = sat.WakeEnabled
+	engine.Cutoff = sat.WakeSensitivity
+	engine.OnDetect = sat.WakeDetected
+	go engine.Run(ctx, source)
+
+	// Home Assistant owns the choice, and it takes effect without a restart.
+	sat.OnWakeWord(func(id string) error {
+		return engine.Use(wake.Pick(models, id))
+	})
+
+	slog.Info("wake word ready", "phrase", model.Phrase, "id", model.ID, "installed", len(models))
+}
+
 // satelliteName prefers the name echoctl recorded at install, since Home Assistant keys the
 // device on it.
 func satelliteName(override string) string {
@@ -192,4 +270,3 @@ func selinuxContext() string {
 	}
 	return strings.TrimRight(string(b), "\x00\n")
 }
-

@@ -9,20 +9,23 @@ import (
 	"unsafe"
 )
 
-// Control structure layouts, 32-bit userspace. The ioctl number encodes each struct's size, so
-// these have to match the kernel's exactly or the call is rejected outright.
+// Control structure layouts. The ioctl number encodes each struct's size, so these have to match
+// the kernel's exactly or the call is rejected outright.
 //
-//	snd_ctl_elem_id     numid, iface, device, subdevice, name[44], index      = 64
+//	snd_ctl_elem_id     numid, iface, device, subdevice, name[44], index       = 64
 //	snd_ctl_elem_info   id, type, access, count, owner, value[128], dimen[8],
-//	                    reserved[56]                                          = 272
-//	snd_ctl_elem_value  id, indirect, pad, value[512], tstamp[8], reserved[120] = 712
+//	                    reserved[56]                                           = 272
+//	snd_ctl_elem_value  id, indirect, pad, value[128 longs], tstamp, reserved   = 1224
 //
 // The value union holds a long long array, so it is 8-byte aligned and the word before it is
-// padded to match.
+// padded to match. snd_ctl_elem_info is the same size either way, because its own value union is
+// dominated by a 128-byte reserved member; snd_ctl_elem_value is not, because it stores integers
+// as an array of longs, and its trailing timespec is word sized too.
 const (
-	elemIDSize    = 64
-	elemInfoSize  = 272
-	elemValueSize = 712
+	elemIDSize   = 64
+	elemInfoSize = 272
+
+	elemValueSize = valueDataOff + 128*longSize + 128 // 1224
 
 	idNumidOff = 0
 	idNameOff  = 16
@@ -44,6 +47,8 @@ const (
 	TypeBoolean    = 1
 	TypeInteger    = 2
 	TypeEnumerated = 3
+	TypeBytes      = 4
+	TypeInteger64  = 5
 )
 
 var (
@@ -165,19 +170,34 @@ func (m *Mixer) Get(c Control) ([]uint32, error) {
 		return nil, fmt.Errorf("alsa: reading %q: %w", c.Name, err)
 	}
 
+	w := valueWidth(c.Type)
 	out := make([]uint32, c.Count)
 	for i := range out {
-		out[i] = binary.LittleEndian.Uint32(buf[valueDataOff+i*4:])
+		out[i] = binary.LittleEndian.Uint32(buf[valueDataOff+i*w:])
 	}
 	return out, nil
+}
+
+// valueWidth is the stride between a control's values in snd_ctl_elem_value, which is whichever
+// member of the union the control's type selects. Reading an integer control with a 32-bit stride
+// returns the high half of the previous value instead of the next one.
+func valueWidth(typ uint32) int {
+	switch typ {
+	case TypeEnumerated:
+		return 4 // unsigned int item[128]
+	case TypeBytes:
+		return 1 // unsigned char data[512]
+	}
+	return longSize // long value[128], and long long for TypeInteger64
 }
 
 // Set writes the same value to every channel of a control.
 func (m *Mixer) Set(c Control, v uint32) error {
 	var buf [elemValueSize]byte
 	binary.LittleEndian.PutUint32(buf[idNumidOff:], c.Numid)
+	w := uint32(valueWidth(c.Type))
 	for i := uint32(0); i < c.Count; i++ {
-		binary.LittleEndian.PutUint32(buf[valueDataOff+i*4:], v)
+		binary.LittleEndian.PutUint32(buf[valueDataOff+i*w:], v)
 	}
 	if err := ioctl(m.f.Fd(), ioctlElemWrite, unsafe.Pointer(&buf)); err != nil {
 		return fmt.Errorf("alsa: writing %q: %w", c.Name, err)

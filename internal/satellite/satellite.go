@@ -19,8 +19,10 @@ import (
 	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
-	"github.com/ygelfand/echolocal/internal/state"
+	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/speaker"
+	"github.com/ygelfand/echolocal/internal/state"
+	"github.com/ygelfand/echolocal/internal/wake"
 )
 
 // Config is what a satellite needs to come up.
@@ -34,6 +36,9 @@ type Config struct {
 	Mute    *gpio.Mute
 	MuteLED *gpio.MuteLED
 	Speaker *speaker.Player
+
+	// Mic is the array. Without it there is nothing to send Home Assistant, so no voice.
+	Mic *mic.Source
 }
 
 // Satellite is the running server and the entities Home Assistant drives.
@@ -42,6 +47,9 @@ type Satellite struct {
 	ring    *ringLight
 	mute    *muteSwitch
 	player  *mediaPlayer
+	wake    *wakeControl
+	voice   *esphome.VoiceSatellite
+	turn    *voiceTurn
 	buttons map[uint16]*button
 	name    string
 }
@@ -70,10 +78,20 @@ func New(cfg Config) (*Satellite, error) {
 	player := newMediaPlayer(ring, cfg.Speaker)
 	ents.Add(player.entities()...)
 
-	buttons := newButtons(player, mute)
+	wakeCtl := newWakeControl(ring, cfg.Speaker)
+	ents.Add(wakeCtl.entities()...)
+
+	ents.Add(newOptions(cfg.Mic, cfg.Speaker).entities()...)
+
+	// The action button starts a conversation, which needs the satellite that is built below.
+	s := &Satellite{ring: ring, mute: mute, player: player, wake: wakeCtl}
+
+	buttons := newButtons(player, mute, s.StartConversation)
 	for _, b := range buttons {
 		ents.Add(b.event)
 	}
+
+	ents.Add(newDiagnostics(cfg.Speaker, s.WakeSlot).entities()...)
 
 	node := layout.Slug(cfg.Name)
 	srv := &esphome.Server{
@@ -92,10 +110,149 @@ func New(cfg Config) (*Satellite, error) {
 		OnSetEncryptionKey: func(k esphome.PSK) error { return writePSK(layout.KeyPath, k) },
 		Handler:            ents,
 	}
-	return &Satellite{
-		srv: srv, ring: ring, mute: mute, player: player, buttons: buttons,
-		name: node,
-	}, nil
+
+	s.srv, s.buttons, s.name = srv, buttons, node
+
+	// Voice needs microphones. Announce and StartConversation go together and both need a
+	// media_player.
+	if cfg.Mic != nil {
+		srv.Info.VoiceFeatures = esphome.DefaultVoiceFeatures |
+			esphome.FeatureSpeaker |
+			esphome.FeatureAnnounce |
+			esphome.FeatureStartConversation
+		s.voice = newVoiceSatellite()
+		s.turn = newVoiceTurn(s.voice, cfg.Mic, cfg.Speaker, ring, player, s.wake.Effect)
+		srv.Handler = esphome.Chain(ents, s.voice)
+	}
+	return s, nil
+}
+
+// newVoiceSatellite advertises what is installed and follows Home Assistant's selection.
+func newVoiceSatellite() *esphome.VoiceSatellite {
+	models, err := wake.Installed(layout.ModelDir)
+	if err != nil {
+		slog.Warn("no wake word models to advertise", "err", err)
+	}
+
+	available, active := wakeWords(models)
+	vs := &esphome.VoiceSatellite{
+		AvailableWakeWords: available,
+		ActiveWakeWords:    active,
+		MaxActiveWakeWords: 1,
+	}
+	slog.Info("advertising wake words", "count", len(available), "active", active)
+	return vs
+}
+
+// OnWakeWord is called when Home Assistant picks a different wake word, so the engine can load it.
+func (s *Satellite) OnWakeWord(load func(id string) error) {
+	if s.voice == nil {
+		return
+	}
+
+	s.voice.OnSetActiveWakeWords = func(ids []string) {
+		if len(ids) == 0 {
+			return
+		}
+		s.voice.ActiveWakeWords = ids
+
+		if err := load(ids[0]); err != nil {
+			slog.Error("loading the selected wake word failed", "id", ids[0], "err", err)
+			return
+		}
+		if err := state.SetWakeWord(ids[0]); err != nil {
+			slog.Error("saving the wake word failed", "err", err)
+		}
+	}
+}
+
+// WakeEnabled reports whether the user wants wake detection running.
+func (s *Satellite) WakeEnabled() bool { return s.wake.Enabled() }
+
+// WakeSensitivity is the detection threshold, as set from Home Assistant.
+func (s *Satellite) WakeSensitivity() float64 { return s.wake.Sensitivity() }
+
+// PipelineReady reports whether Home Assistant has a voice pipeline listening. Wake detection runs
+// before that happens, but nothing can be done with a detection until it does, so this is what the
+// device shows on the ring while it comes up.
+func (s *Satellite) PipelineReady() bool { return s.voice != nil && s.voice.Subscribed() }
+
+// ReleaseRing hands the ring to the light entity, applying whatever it was told while the boot
+// animation had it. The ring is held from the moment the satellite is built, so this is the only
+// half of the pair a caller needs.
+func (s *Satellite) ReleaseRing() { s.ring.release() }
+
+// StartConversation opens a turn without a wake word, for the action button.
+func (s *Satellite) StartConversation() {
+	if s.turn == nil {
+		slog.Warn("no voice pipeline; the action button has nothing to start")
+		return
+	}
+	s.turn.Start("")
+}
+
+// WakeDetected shows and sounds a detection, then starts a conversation. The engine calls it.
+func (s *Satellite) WakeDetected() {
+	// Saying the wake word while the device is still listening is part of the sentence, not a new
+	// request: acting on it would cut off what the user is in the middle of saying. Once the
+	// pipeline is replying, a wake word is a deliberate interruption and does start a turn.
+	// Detection keeps running throughout either way, because a detector starved of audio scores
+	// the next utterance from a cold state.
+	if s.turn != nil && s.turn.sending() {
+		slog.Info("wake word ignored, still listening")
+		return
+	}
+
+	slog.Info("wake word detected")
+	phrase, _ := s.phraseFor(0)
+	s.startWake(phrase)
+}
+
+// WakeSlot starts a turn as if the wake word in one of Home Assistant's slots had fired, for trying
+// a pipeline without saying anything, or for waking the device by hand.
+func (s *Satellite) WakeSlot(slot int) {
+	phrase, ok := s.phraseFor(slot)
+	if !ok {
+		slog.Warn("nothing to wake: no wake word in that slot", "slot", slot+1)
+		return
+	}
+	slog.Info("wake requested", "slot", slot+1, "phrase", phrase)
+	s.startWake(phrase)
+}
+
+// startWake is the detection itself, once the phrase to report is known.
+func (s *Satellite) startWake(phrase string) {
+	s.wake.Chime()
+
+	// The animation starts on the wake either way. A turn stops it when it ends; without one there
+	// is nothing to stop it, so it gets a duration instead.
+	if s.turn == nil {
+		s.wake.Flash()
+		return
+	}
+	s.wake.Hold()
+
+	if !s.turn.Start(phrase) {
+		s.ring.still()
+		s.ring.restore()
+	}
+}
+
+// phraseFor is what Home Assistant expects a turn to report for one of its wake word slots: the
+// spoken phrase, not the model's id. Which pipeline runs is resolved by comparing that phrase
+// against each slot's select, so a turn from slot n has to report slot n's own phrase.
+func (s *Satellite) phraseFor(slot int) (string, bool) {
+	if slot < 0 || slot >= len(s.voice.ActiveWakeWords) {
+		return "", false
+	}
+
+	id := s.voice.ActiveWakeWords[slot]
+	for _, w := range s.voice.AvailableWakeWords {
+		if w.ID == id {
+			return w.Phrase, true
+		}
+	}
+	return id, true
 }
 
 // Serve listens until ctx is cancelled, advertising over mDNS so Home Assistant finds the
@@ -141,12 +298,21 @@ type ringLight struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	frame  []led.Color
+
+	// booting means the boot animation owns the ring. Home Assistant syncs entity state as soon as
+	// it connects, which lands before it subscribes a pipeline, and the light entity restoring its
+	// saved effect would otherwise start a second animation over the top of the first.
+	booting bool
 }
 
 func newRingLight(ring *led.Ring) *ringLight {
 	r := &ringLight{
+		// Held from birth. Restoring the saved volume paints a white arc while the satellite is
+		// still being built, and Home Assistant syncs entity state as soon as it connects — both
+		// land in the middle of the boot animation unless the ring is withheld until it is done.
+		booting: true,
 		light: &esphome.Light{
-			Base:                esphome.Base{ObjectID: "ring", Name: "LED Ring"},
+			Base:                esphome.Base{ObjectID: "ring", Name: "LED ring"},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
 			Effects:             led.EffectNames(),
 		},
@@ -165,7 +331,7 @@ func newRingLight(ring *led.Ring) *ringLight {
 		seg := &esphome.Light{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("segment_%d", i+1),
-				Name:     fmt.Sprintf("Segment %d", i+1),
+				Name:     fmt.Sprintf("LED ring segment %d", i+1),
 				// Twelve extra entities is a lot for anyone who just wants the ring.
 				DisabledByDefault: true,
 			},
@@ -186,9 +352,14 @@ func (r *ringLight) entities() []esphome.Entity {
 	return out
 }
 
-// animate replaces whatever is driving the ring with f, which runs until cancelled.
+// animate replaces whatever is driving the ring with f, which runs until cancelled. While the boot
+// animation owns the ring, nothing else gets to drive it.
 func (r *ringLight) animate(f func(context.Context)) {
 	r.mu.Lock()
+	if r.booting {
+		r.mu.Unlock()
+		return
+	}
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -197,6 +368,26 @@ func (r *ringLight) animate(f func(context.Context)) {
 	r.mu.Unlock()
 
 	go f(ctx)
+}
+
+// hold gives the ring to the boot animation. Entity state is still tracked while it is held, so
+// Home Assistant sees the right values; only the writes are withheld.
+func (r *ringLight) hold() {
+	r.mu.Lock()
+	r.booting = true
+	r.mu.Unlock()
+}
+
+// release hands the ring back and applies whatever state arrived while it was held.
+func (r *ringLight) release() {
+	r.mu.Lock()
+	was := r.booting
+	r.booting = false
+	r.mu.Unlock()
+
+	if was {
+		r.restore()
+	}
 }
 
 // Flash shows something briefly and then puts back whatever the ring was showing, so a volume
@@ -212,6 +403,53 @@ func (r *ringLight) Flash(frame []led.Color, d time.Duration) {
 			// Something else took the ring; it owns what happens next.
 			return
 		case <-time.After(d):
+		}
+		r.restore()
+	})
+}
+
+// colorOf is the light's colour with its brightness folded in.
+func colorOf(s esphome.LightState) led.Color {
+	return led.Color{R: scale(s.Red, s.Brightness), G: scale(s.Green, s.Brightness), B: scale(s.Blue, s.Brightness)}
+}
+
+// HoldEffect runs an effect until something else takes the ring. Nothing restores afterwards: the
+// caller decides when it is over.
+func (r *ringLight) HoldEffect(effect string) {
+	base := colorOf(r.light.Get())
+
+	r.animate(func(ctx context.Context) {
+		if err := led.RunEffect(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
+			slog.Error("effect failed", "effect", effect, "err", err)
+		}
+	})
+}
+
+// HoldEffectReversed is HoldEffect the other way round the ring, for when the device has stopped
+// listening and is waiting on an answer.
+func (r *ringLight) HoldEffectReversed(effect string) {
+	base := colorOf(r.light.Get())
+
+	r.animate(func(ctx context.Context) {
+		if err := led.RunEffectReversed(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
+			slog.Error("effect failed", "effect", effect, "err", err)
+		}
+	})
+}
+
+// FlashEffect runs an effect for d and then puts back whatever the ring was showing.
+func (r *ringLight) FlashEffect(effect string, d time.Duration) {
+	base := colorOf(r.light.Get())
+
+	r.animate(func(ctx context.Context) {
+		done, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+
+		if err := led.RunEffect(done, r.ring, effect, base); err != nil && ctx.Err() == nil {
+			slog.Error("effect failed", "effect", effect, "err", err)
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		r.restore()
 	})
@@ -243,7 +481,7 @@ func (r *ringLight) apply(s esphome.LightState) {
 	s = usable(s)
 
 	if s.On && s.Effect != "" && s.Effect != "None" {
-		base := led.Color{R: scale(s.Red, s.Brightness), G: scale(s.Green, s.Brightness), B: scale(s.Blue, s.Brightness)}
+		base := colorOf(s)
 		effect := s.Effect
 		r.animate(func(ctx context.Context) {
 			if err := led.RunEffect(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
@@ -315,8 +553,12 @@ func (r *ringLight) paint(s esphome.LightState) error {
 	for i := range r.frame {
 		r.frame[i] = c
 	}
+	booting := r.booting
 	r.mu.Unlock()
 
+	if booting {
+		return nil
+	}
 	return r.ring.SetAll(c)
 }
 
