@@ -5,17 +5,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 	"github.com/ygelfand/go-esphome-device/mdns"
 
+	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
@@ -32,7 +31,10 @@ type Config struct {
 
 	Version string
 	Addr    string
-	Ring    *led.Ring
+
+	// Ring is the driver, not the hardware: everything that wants the ring takes a claim on it, so
+	// the satellite is one of several holders rather than the owner.
+	Ring    *led.Driver
 	Mute    *gpio.Mute
 	MuteLED *gpio.MuteLED
 	Speaker *speaker.Player
@@ -49,8 +51,8 @@ type Satellite struct {
 	player  *mediaPlayer
 	wake    *wakeControl
 	voice   *esphome.VoiceSatellite
-	turn    *voiceTurn
-	buttons map[uint16]*button
+	turn    *conversation
+	buttons *buttonEvents
 	name    string
 
 	// models is everything installed, of either backend. What is advertised is filtered from it.
@@ -85,21 +87,19 @@ func New(cfg Config) (*Satellite, error) {
 		ents.Add(mute.entities()...)
 	}
 
-	player := newMediaPlayer(ring, cfg.Speaker)
+	player := newMediaPlayer(cfg.Ring, cfg.Speaker)
 	ents.Add(player.entities()...)
 
-	wakeCtl := newWakeControl(ring, cfg.Speaker, wake.Backends(models), WakeSlots)
+	wakeCtl := newWakeControl(cfg.Speaker, wake.Backends(models), WakeSlots)
 	ents.Add(wakeCtl.entities()...)
 
 	ents.Add(newOptions(cfg.Mic, cfg.Speaker).entities()...)
 
-	// The action button starts a conversation, which needs the satellite that is built below.
+	// The action button drives the conversation, which needs the satellite that is built below.
 	s := &Satellite{ring: ring, mute: mute, player: player, wake: wakeCtl, models: models}
 
-	buttons := newButtons(player, mute, s.StartConversation)
-	for _, b := range buttons {
-		ents.Add(b.event)
-	}
+	s.buttons = newButtonEvents()
+	ents.Add(s.buttons.entities()...)
 
 	ents.Add(newDiagnostics(cfg.Speaker, s.WakeSlot).entities()...)
 
@@ -121,7 +121,7 @@ func New(cfg Config) (*Satellite, error) {
 		Handler:            ents,
 	}
 
-	s.srv, s.buttons, s.name = srv, buttons, node
+	s.srv, s.name = srv, node
 
 	// Voice needs microphones. Announce and StartConversation go together and both need a
 	// media_player.
@@ -131,10 +131,7 @@ func New(cfg Config) (*Satellite, error) {
 			esphome.FeatureAnnounce |
 			esphome.FeatureStartConversation
 		s.voice = newVoiceSatellite(s.backendModels())
-
-		// The turn's animation is the one the wake word that started it is set to.
-		s.turn = newVoiceTurn(s.voice, cfg.Mic, cfg.Speaker, ring, player,
-			func() string { return s.wake.Effect(s.turn.slot()) })
+		s.turn = newConversation(s.voice, cfg.Mic, cfg.Speaker, ring, cfg.Ring, player, wakeCtl)
 		srv.Handler = esphome.Chain(ents, s.voice)
 	}
 	return s, nil
@@ -241,86 +238,58 @@ func (s *Satellite) OnWakeBackend(reload func(settings.WakeBackend) []string) {
 // device shows on the ring while it comes up.
 func (s *Satellite) PipelineReady() bool { return s.voice != nil && s.voice.Subscribed() }
 
-// ReleaseRing hands the ring to the light entity, applying whatever it was told while the boot
-// animation had it. The ring is held from the moment the satellite is built, so this is the only
-// half of the pair a caller needs.
-func (s *Satellite) ReleaseRing() { s.ring.release() }
-
-// StartConversation opens a turn without a wake word, for the action button.
-func (s *Satellite) StartConversation() {
+// RunConversation owns the voice conversation until ctx is cancelled. Nothing happens on a wake word
+// until it is running.
+func (s *Satellite) RunConversation(ctx context.Context) {
 	if s.turn == nil {
-		slog.Warn("no voice pipeline; the action button has nothing to start")
+		return
+	}
+	s.turn.Run(ctx)
+}
+
+// Action is the action button: it gives up on whatever is happening, or starts something if nothing
+// is. Cancelling is the more useful half — it is the way out of a turn that is waiting on a pipeline
+// that is not going to answer.
+func (s *Satellite) Action() {
+	if s.turn == nil {
+		slog.Warn("no voice pipeline; the action button has nothing to do")
+		chime(s.player.speaker, toneTrouble)
+		return
+	}
+
+	if s.turn.Busy() {
+		s.turn.Cancel()
 		return
 	}
 	// No wake word, so no slot to pair with: the first pipeline is the one Home Assistant falls back
 	// to for anything that reports no phrase.
-	s.turn.Start(0, "")
+	s.turn.Start(0)
 }
 
-// WakeDetected shows and sounds a detection in one of Home Assistant's slots, then starts a
-// conversation on the pipeline that slot is paired with. The engine calls it.
-func (s *Satellite) WakeDetected(slot int) {
-	// Saying the wake word while the device is still listening is part of the sentence, not a new
-	// request: acting on it would cut off what the user is in the middle of saying. Once the
-	// pipeline is replying, a wake word is a deliberate interruption and does start a turn.
-	// Detection keeps running throughout either way, because a detector starved of audio scores
-	// the next utterance from a cold state.
-	if s.turn != nil && s.turn.sending() {
-		slog.Info("wake word ignored, still listening")
-		return
-	}
-
-	phrase, _ := s.phraseFor(slot)
-	slog.Info("wake word detected", "slot", slot+1, "phrase", phrase)
-	s.startWake(slot, phrase)
-}
-
-// WakeSlot starts a turn as if the wake word in one of Home Assistant's slots had fired, for trying
-// a pipeline without saying anything, or for waking the device by hand.
-func (s *Satellite) WakeSlot(slot int) {
-	phrase, ok := s.phraseFor(slot)
-	if !ok {
-		slog.Warn("nothing to wake: no wake word in that slot", "slot", slot+1)
-		return
-	}
-	slog.Info("wake requested", "slot", slot+1, "phrase", phrase)
-	s.startWake(slot, phrase)
-}
-
-// startWake is the detection itself, once the phrase to report is known. The tone and the animation
-// are the slot's own.
-func (s *Satellite) startWake(slot int, phrase string) {
-	s.wake.Chime(slot)
-
-	// The animation starts on the wake either way. A turn stops it when it ends; without one there
-	// is nothing to stop it, so it gets a duration instead.
+// ActionHold is holding the action button, which reaches the second assistant. Holding does not
+// cancel: a press is the way out of a turn, so holding while one is running interrupts it with the
+// other assistant instead, which is the same thing saying the other wake word would do.
+func (s *Satellite) ActionHold() {
 	if s.turn == nil {
-		s.wake.Flash(slot)
+		slog.Warn("no voice pipeline; the action button has nothing to hold")
+		chime(s.player.speaker, toneTrouble)
 		return
 	}
-	s.wake.Hold(slot)
-
-	if !s.turn.Start(slot, phrase) {
-		s.ring.still()
-		s.ring.restore()
-	}
+	s.turn.Start(1)
 }
 
-// phraseFor is what Home Assistant expects a turn to report for one of its wake word slots: the
-// spoken phrase, not the model's id. Which pipeline runs is resolved by comparing that phrase
-// against each slot's select, so a turn from slot n has to report slot n's own phrase.
-func (s *Satellite) phraseFor(slot int) (string, bool) {
-	if slot < 0 || slot >= len(s.voice.ActiveWakeWords) {
-		return "", false
-	}
+// WakeDetected starts a conversation on the pipeline paired with the slot whose wake word fired. What
+// that means from the phase the conversation is already in is its decision, not the engine's.
+func (s *Satellite) WakeDetected(slot int) { s.WakeSlot(slot) }
 
-	id := s.voice.ActiveWakeWords[slot]
-	for _, w := range s.voice.AvailableWakeWords {
-		if w.ID == id {
-			return w.Phrase, true
-		}
+// WakeSlot asks for a turn as if that slot's wake word had fired, which is also how the buttons in
+// Home Assistant reach a pipeline without anything being said.
+func (s *Satellite) WakeSlot(slot int) {
+	if s.turn == nil {
+		slog.Warn("no voice pipeline; nothing to wake", "slot", slot+1)
+		return
 	}
-	return id, true
+	s.turn.Start(slot)
 }
 
 // Serve listens until ctx is cancelled, advertising over mDNS so Home Assistant finds the
@@ -331,304 +300,54 @@ func (s *Satellite) Serve(ctx context.Context) error {
 		return fmt.Errorf("satellite: listen %s: %w", s.srv.Addr, err)
 	}
 
-	watchButtons(ctx, s.buttons)
-
-	adv, err := mdns.Advertise(mdns.Config{
-		Name:         s.name,
-		FriendlyName: s.srv.Info.FriendlyName,
-		Port:         ln.Addr().(*net.TCPAddr).Port,
-		MACAddress:   s.srv.Info.MACAddress,
-		Version:      s.srv.Info.Version,
-		Platform:     layout.Platform,
-		Board:        layout.Board,
-		Encrypted:    s.srv.PSK != nil,
-	})
-	if err != nil {
-		// Discovery is a convenience; a device reachable by address still works.
-		slog.Warn("mdns advertise failed", "err", err)
-	} else {
-		defer adv.Close()
-	}
+	go alog.Safely("mdns", func() { s.advertise(ctx, ln.Addr().(*net.TCPAddr).Port) })
 
 	return s.srv.Serve(ctx, ln)
 }
 
-// ringLight maps Home Assistant's light entities onto the 12-segment ring: one light for the
-// whole ring, plus a light per segment for people who want them.
-//
-// Everything that writes the ring goes through here, because an animation and a command
-// writing frames at the same time produce nonsense. Starting anything cancels what was running.
-type ringLight struct {
-	light *esphome.Light
-	segs  []*esphome.Light
-	ring  *led.Ring
-
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	frame  []led.Color
-
-	// booting means the boot animation owns the ring. Home Assistant syncs entity state as soon as
-	// it connects, which lands before it subscribes a pipeline, and the light entity restoring its
-	// saved effect would otherwise start a second animation over the top of the first.
-	booting bool
-}
-
-func newRingLight(ring *led.Ring) *ringLight {
-	r := &ringLight{
-		// Held from birth. Restoring the saved volume paints a white arc while the satellite is
-		// still being built, and Home Assistant syncs entity state as soon as it connects — both
-		// land in the middle of the boot animation unless the ring is withheld until it is done.
-		booting: true,
-		light: &esphome.Light{
-			Base:                esphome.Base{ObjectID: "ring", Name: "LED ring"},
-			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
-			Effects:             led.EffectNames(),
-		},
-		ring:  ring,
-		frame: make([]led.Color, led.Segments),
-	}
-	r.light.OnCommand = r.apply
-
-	// Start from white at full brightness so the first command has something to turn on.
-	r.light.Set(esphome.LightState{
-		ColorMode:  esphome.ColorModeRGB,
-		Brightness: 1, Red: 1, Green: 1, Blue: 1,
-	})
-
-	for i := range led.Segments {
-		seg := &esphome.Light{
-			Base: esphome.Base{
-				ObjectID: fmt.Sprintf("segment_%d", i+1),
-				Name:     fmt.Sprintf("LED ring segment %d", i+1),
-				// Twelve extra entities is a lot for anyone who just wants the ring.
-				DisabledByDefault: true,
-			},
-			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
-		}
-		seg.OnCommand = func(s esphome.LightState) { r.applySegment(i, seg, s) }
-		r.segs = append(r.segs, seg)
-	}
-	return r
-}
-
-// entities lists everything the ring exposes.
-func (r *ringLight) entities() []esphome.Entity {
-	out := []esphome.Entity{r.light}
-	for _, s := range r.segs {
-		out = append(out, s)
-	}
-	return out
-}
-
-// animate replaces whatever is driving the ring with f, which runs until cancelled. While the boot
-// animation owns the ring, nothing else gets to drive it.
-func (r *ringLight) animate(f func(context.Context)) {
-	r.mu.Lock()
-	if r.booting {
-		r.mu.Unlock()
-		return
-	}
-	if r.cancel != nil {
-		r.cancel()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	r.cancel = cancel
-	r.mu.Unlock()
-
-	go f(ctx)
-}
-
-// hold gives the ring to the boot animation. Entity state is still tracked while it is held, so
-// Home Assistant sees the right values; only the writes are withheld.
-func (r *ringLight) hold() {
-	r.mu.Lock()
-	r.booting = true
-	r.mu.Unlock()
-}
-
-// release hands the ring back and applies whatever state arrived while it was held.
-func (r *ringLight) release() {
-	r.mu.Lock()
-	was := r.booting
-	r.booting = false
-	r.mu.Unlock()
-
-	if was {
-		r.restore()
-	}
-}
-
-// Flash shows something briefly and then puts back whatever the ring was showing, so a volume
-// arc does not leave the ring stuck on it or drop an effect that was running.
-func (r *ringLight) Flash(frame []led.Color, d time.Duration) {
-	r.animate(func(ctx context.Context) {
-		if err := r.ring.SetSegments(frame); err != nil {
-			slog.Error("flash write failed", "err", err)
+// advertise keeps trying until it works. echod starts from init, well before wifi has associated, so
+// the first attempt on a cold boot fails with no usable interface — registering needs one with an
+// address. Discovery is a convenience and a device reachable by address works without it, which is
+// why this only logs, but giving up after one go means a device is undiscoverable for the rest of the
+// run over a few seconds of boot ordering.
+func (s *Satellite) advertise(ctx context.Context, port int) {
+	for attempt := 1; ; attempt++ {
+		adv, err := mdns.Advertise(mdns.Config{
+			Name:         s.name,
+			FriendlyName: s.srv.Info.FriendlyName,
+			Port:         port,
+			MACAddress:   s.srv.Info.MACAddress,
+			Version:      s.srv.Info.Version,
+			Platform:     layout.Platform,
+			Board:        layout.Board,
+			Encrypted:    s.srv.PSK != nil,
+		})
+		if err == nil {
+			slog.Info("advertising over mdns", "name", s.name, "port", port, "attempts", attempt)
+			<-ctx.Done()
+			adv.Close()
 			return
 		}
+
+		// Only the first failure is worth a warning: after that it is the expected state of a device
+		// waiting for its network, and saying so every few seconds buries everything else.
+		if attempt == 1 {
+			slog.Warn("mdns advertise failed, retrying", "err", err)
+		} else {
+			slog.Debug("mdns advertise failed", "attempt", attempt, "err", err)
+		}
+
 		select {
 		case <-ctx.Done():
-			// Something else took the ring; it owns what happens next.
 			return
-		case <-time.After(d):
+		case <-time.After(mdnsRetry):
 		}
-		r.restore()
-	})
-}
-
-// colorOf is the light's colour with its brightness folded in.
-func colorOf(s esphome.LightState) led.Color {
-	return led.Color{R: scale(s.Red, s.Brightness), G: scale(s.Green, s.Brightness), B: scale(s.Blue, s.Brightness)}
-}
-
-// HoldEffect runs an effect until something else takes the ring. Nothing restores afterwards: the
-// caller decides when it is over.
-func (r *ringLight) HoldEffect(effect string) {
-	base := colorOf(r.light.Get())
-
-	r.animate(func(ctx context.Context) {
-		if err := led.RunEffect(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
-			slog.Error("effect failed", "effect", effect, "err", err)
-		}
-	})
-}
-
-// HoldEffectReversed is HoldEffect the other way round the ring, for when the device has stopped
-// listening and is waiting on an answer.
-func (r *ringLight) HoldEffectReversed(effect string) {
-	base := colorOf(r.light.Get())
-
-	r.animate(func(ctx context.Context) {
-		if err := led.RunEffectReversed(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
-			slog.Error("effect failed", "effect", effect, "err", err)
-		}
-	})
-}
-
-// FlashEffect runs an effect for d and then puts back whatever the ring was showing.
-func (r *ringLight) FlashEffect(effect string, d time.Duration) {
-	base := colorOf(r.light.Get())
-
-	r.animate(func(ctx context.Context) {
-		done, cancel := context.WithTimeout(ctx, d)
-		defer cancel()
-
-		if err := led.RunEffect(done, r.ring, effect, base); err != nil && ctx.Err() == nil {
-			slog.Error("effect failed", "effect", effect, "err", err)
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		r.restore()
-	})
-}
-
-// restore re-applies the light's own state, which is the ring's resting appearance.
-func (r *ringLight) restore() {
-	s := r.light.Get()
-	if s.On && s.Effect != "" && s.Effect != "None" {
-		r.apply(s)
-		return
-	}
-	if err := r.paint(s); err != nil {
-		slog.Error("ring restore failed", "err", err)
 	}
 }
 
-// still stops any animation, leaving the ring as it is.
-func (r *ringLight) still() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.cancel != nil {
-		r.cancel()
-		r.cancel = nil
-	}
-}
-
-func (r *ringLight) apply(s esphome.LightState) {
-	s = usable(s)
-
-	if s.On && s.Effect != "" && s.Effect != "None" {
-		base := colorOf(s)
-		effect := s.Effect
-		r.animate(func(ctx context.Context) {
-			if err := led.RunEffect(ctx, r.ring, effect, base); err != nil && ctx.Err() == nil {
-				slog.Error("effect failed", "effect", effect, "err", err)
-			}
-		})
-		r.light.Set(s)
-		return
-	}
-
-	r.still()
-	if err := r.paint(s); err != nil {
-		slog.Error("ring write failed", "err", err)
-		return
-	}
-	r.light.Set(s)
-}
-
-// applySegment paints one segment, leaving the others as they are.
-func (r *ringLight) applySegment(i int, seg *esphome.Light, s esphome.LightState) {
-	s = usable(s)
-	r.still()
-
-	r.mu.Lock()
-	if s.On {
-		r.frame[i] = led.Color{R: scale(s.Red, s.Brightness), G: scale(s.Green, s.Brightness), B: scale(s.Blue, s.Brightness)}
-	} else {
-		r.frame[i] = led.Color{}
-	}
-	frame := append([]led.Color(nil), r.frame...)
-	r.mu.Unlock()
-
-	if err := r.ring.SetSegments(frame); err != nil {
-		slog.Error("segment write failed", "segment", i, "err", err)
-		return
-	}
-	seg.Set(s)
-}
-
-func scale(v, brightness float32) byte {
-	return byte(math.Round(float64(v) * float64(brightness) * 255))
-}
-
-// usable fills in what a bare on command leaves out. Commands are partial and folded onto
-// current state, so "on" with no brightness or colour would otherwise light the ring black.
-func usable(s esphome.LightState) esphome.LightState {
-	if !s.On {
-		return s
-	}
-	if s.Brightness == 0 {
-		s.Brightness = 1
-	}
-	if s.Red == 0 && s.Green == 0 && s.Blue == 0 {
-		s.Red, s.Green, s.Blue = 1, 1, 1
-	}
-	if s.ColorMode == 0 {
-		s.ColorMode = esphome.ColorModeRGB
-	}
-	return s
-}
-
-func (r *ringLight) paint(s esphome.LightState) error {
-	c := led.Color{}
-	if s.On {
-		c = led.Color{R: scale(s.Red, s.Brightness), G: scale(s.Green, s.Brightness), B: scale(s.Blue, s.Brightness)}
-	}
-
-	r.mu.Lock()
-	for i := range r.frame {
-		r.frame[i] = c
-	}
-	booting := r.booting
-	r.mu.Unlock()
-
-	if booting {
-		return nil
-	}
-	return r.ring.SetAll(c)
-}
+// mdnsRetry is how long to wait between attempts. There is no attempt limit: wifi can come back long
+// after boot, and an advert that never reappears is a device that has to be found by address.
+const mdnsRetry = 3 * time.Second
 
 // loadPSK reads the key echoctl wrote at install. With no key the device runs unprovisioned —
 // Noise with the reserved zero key — so Home Assistant can push a real one, which is what

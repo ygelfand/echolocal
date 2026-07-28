@@ -28,7 +28,6 @@ type wakeControl struct {
 	backend *esphome.Select
 	slots   []wakeSlot
 
-	ring    *ringLight
 	speaker *speaker.Player
 
 	// onBackend is called after the backend changes, to reload the wake words that backend was last
@@ -45,7 +44,7 @@ type wakeSlot struct {
 	effect    *esphome.Select
 }
 
-func newWakeControl(ring *ringLight, spk *speaker.Player, backends []settings.WakeBackend, slots int) *wakeControl {
+func newWakeControl(spk *speaker.Player, backends []settings.WakeBackend, slots int) *wakeControl {
 	w := &wakeControl{
 		backend: &esphome.Select{
 			Base: esphome.Base{
@@ -56,7 +55,6 @@ func newWakeControl(ring *ringLight, spk *speaker.Player, backends []settings.Wa
 			},
 			Options: settings.Labels(backends),
 		},
-		ring:    ring,
 		speaker: spk,
 	}
 
@@ -194,22 +192,8 @@ func (w *wakeControl) Chime(slot int) {
 	chime(w.speaker, wakeTones[tone])
 }
 
-// Flash shows a detection on the ring briefly, for one that starts no conversation.
-func (w *wakeControl) Flash(slot int) {
-	if effect := w.Effect(slot); effect != "" {
-		w.ring.FlashEffect(effect, wakeFlash)
-	}
-}
-
-// Hold starts the animation and leaves it running. A conversation uses this: the same animation runs
-// from the wake word to the end of the reply, and the turn stops it.
-func (w *wakeControl) Hold(slot int) {
-	if effect := w.Effect(slot); effect != "" {
-		w.ring.HoldEffect(effect)
-	}
-}
-
-// Effect is the animation a slot plays, empty when it is turned off.
+// Effect is the animation a slot plays, empty when it is turned off. The conversation runs it: this
+// only says which one, because which one is a setting.
 func (w *wakeControl) Effect(slot int) string {
 	if slot < 0 || slot >= len(w.slots) {
 		return ""

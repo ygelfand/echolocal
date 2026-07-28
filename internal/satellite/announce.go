@@ -26,7 +26,7 @@ const fetchTimeout = 30 * time.Second
 
 // announce plays what Home Assistant asks for, then reports back. It runs off the connection's
 // read loop: fetching and playing must not block it.
-func (t *voiceTurn) announce(a esphome.Announce) {
+func (t *conversation) announce(a esphome.Announce) {
 	slog.Info("announce", "text", a.Text, "start_conversation", a.StartConversation)
 
 	go alog.Safely("announce", func() {
@@ -50,13 +50,13 @@ func (t *voiceTurn) announce(a esphome.Announce) {
 
 		// Home Assistant uses this to open a conversation without a wake word.
 		if a.StartConversation {
-			t.Start(0, "")
+			t.Start(0)
 		}
 	})
 }
 
 // play fetches audio and queues it. Home Assistant serves it converted to announceFormat.
-func (t *voiceTurn) play(url string) error {
+func (t *conversation) play(url string) error {
 	if t.speaker == nil {
 		return fmt.Errorf("no speaker")
 	}

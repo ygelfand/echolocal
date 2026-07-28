@@ -172,7 +172,9 @@ func play(ctx context.Context, r *Ring, d time.Duration, frame func(time.Duratio
 		}
 		select {
 		case <-ctx.Done():
-			return r.Off()
+			// Left as it is rather than blanked: the driver repaints whatever layer is underneath,
+			// and a blank in between shows through as a flicker.
+			return nil
 		case <-t.C:
 		}
 	}

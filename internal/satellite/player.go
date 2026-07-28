@@ -24,13 +24,13 @@ const volumeFlash = 2 * time.Second
 type mediaPlayer struct {
 	mp      *esphome.MediaPlayer
 	jack    *esphome.BinarySensor
-	ring    *ringLight
+	leds    *led.Driver
 	speaker *speaker.Player
 
 	step int
 }
 
-func newMediaPlayer(ring *ringLight, spk *speaker.Player) *mediaPlayer {
+func newMediaPlayer(leds *led.Driver, spk *speaker.Player) *mediaPlayer {
 	p := &mediaPlayer{
 		mp: &esphome.MediaPlayer{
 			Base: esphome.Base{ObjectID: "speaker", Name: "Speaker", Icon: "mdi:speaker"},
@@ -44,7 +44,7 @@ func newMediaPlayer(ring *ringLight, spk *speaker.Player) *mediaPlayer {
 			Base:        esphome.Base{ObjectID: "headphones", Name: "Headphones", Icon: "mdi:headphones", Category: esphome.CategoryDiagnostic},
 			DeviceClass: "plug",
 		},
-		ring:    ring,
+		leds:    leds,
 		speaker: spk,
 	}
 	p.mp.OnCommand = p.command
@@ -129,9 +129,10 @@ func (p *mediaPlayer) adjust(delta int) {
 	chime(p.speaker, toneVolume)
 }
 
-// show lights the level as a clockwise arc, the leading segment dimmed by the fraction of a
-// segment the level does not fill.
+// show lights the level as a clockwise arc, the leading segment dimmed by the fraction of a segment
+// the level does not fill. It takes its own claim each time and lets it expire, which is what puts
+// back whatever was underneath — including a conversation that is still running.
 func (p *mediaPlayer) show(step int) {
 	frame := led.Arc(float64(step)/VolumeSteps, led.Color{R: 0xFF, G: 0xFF, B: 0xFF})
-	p.ring.Flash(frame, volumeFlash)
+	p.leds.Claim(led.PriorityNotice).PaintFor(frame, volumeFlash)
 }

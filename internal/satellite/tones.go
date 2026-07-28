@@ -16,13 +16,14 @@ var (
 	toneUnmute   = []speaker.Note{{Freq: 587, Ms: 70}, {Freq: 880, Ms: 110}}
 	toneMuteHold = []speaker.Note{{Freq: 587, Ms: 70}, {Freq: 440, Ms: 130}}
 
-	toneAction     = []speaker.Note{{Freq: 1046, Ms: 70}}
-	toneActionHold = []speaker.Note{{Freq: 1046, Ms: 70}, {Freq: 1568, Ms: 130}}
-
 	// toneTrouble falls twice and ends low, which no acknowledgement does. A request that cannot be
 	// served has to sound different from one that was, or a failure is indistinguishable from the
 	// device having ignored the person entirely.
 	toneTrouble = []speaker.Note{{Freq: 622, Ms: 90}, {Freq: 466, Ms: 90}, {Freq: 349, Ms: 180}}
+
+	// toneCancel is one short falling pair: the request was dropped, which is neither a failure nor
+	// an answer.
+	toneCancel = []speaker.Note{{Freq: 698, Ms: 60}, {Freq: 466, Ms: 90}}
 )
 
 // wakeTones is what a detection can sound like. They are told apart by shape rather than pitch, so

@@ -3,6 +3,7 @@ package wake
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -43,6 +44,8 @@ const (
 // own pipeline, and a detection has to say which one fired so the right pipeline runs. A slot with
 // no model is off, and all slots off is detection off — there is nothing else to switch.
 type Engine struct {
+	source *mic.Source
+
 	mu      sync.Mutex
 	backend backend
 	kind    settings.WakeBackend
@@ -54,6 +57,11 @@ type Engine struct {
 
 	// OnDetect runs on a detection, off the audio path.
 	OnDetect func(slot int)
+
+	// Load puts the wake words in once the engine is up. It runs on every start, including a restart,
+	// because an engine that came back empty would leave the device deaf while claiming otherwise.
+	// Which words those are depends on what the user last chose, which is not this package's business.
+	Load func() error
 }
 
 // slot is one wake word and how its scores are being read. The tracking is per slot: two wake words
@@ -74,13 +82,44 @@ type slot struct {
 	crossing float64
 }
 
-// New brings up an engine with no wake words loaded. Use puts them in.
-func New(kind settings.WakeBackend, slots int) (*Engine, error) {
-	b, err := newBackend(kind)
+// New describes an engine. Nothing is built until Start.
+func New(kind settings.WakeBackend, slots int, source *mic.Source) *Engine {
+	return &Engine{kind: kind, slots: make([]slot, slots), source: source}
+}
+
+func (e *Engine) Name() string { return "wake" }
+
+// Start builds the backend and loads the wake words. A restart comes back through here, so a detector
+// that broke is rebuilt from scratch rather than resumed from whatever state it died in.
+func (e *Engine) Start(context.Context) error {
+	e.mu.Lock()
+	b, err := newBackend(e.kind)
 	if err != nil {
-		return nil, err
+		e.mu.Unlock()
+		return err
 	}
-	return &Engine{backend: b, kind: kind, slots: make([]slot, slots)}, nil
+	e.backend = b
+	for i := range e.slots {
+		e.slots[i] = slot{}
+	}
+	e.mu.Unlock()
+
+	if e.Load == nil {
+		return nil
+	}
+	return e.Load()
+}
+
+// Close drops the backend and everything loaded in it.
+func (e *Engine) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.backend != nil {
+		e.backend.close()
+		e.backend = nil
+	}
+	return nil
 }
 
 // Kind reports which backend is running.
@@ -195,26 +234,21 @@ func (e *Engine) Listening() bool {
 	return false
 }
 
-func (e *Engine) Close() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.backend.close()
-}
-
-// Run consumes frames until ctx is cancelled.
-func (e *Engine) Run(ctx context.Context, source *mic.Source) {
-	frames, unlisten := source.Listen()
+// Run scores frames until ctx is cancelled. The microphones going away is reported rather than
+// returned quietly: detection stopping is the device going deaf, which should not be silent.
+func (e *Engine) Run(ctx context.Context) error {
+	frames, unlisten := e.source.Listen()
 	defer unlisten()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case frame, ok := <-frames:
 			if !ok {
-				return
+				return errors.New("wake: the microphones stopped")
 			}
-			e.score(frame, source)
+			e.score(frame, e.source)
 		}
 	}
 }
