@@ -24,14 +24,25 @@ type ringLight struct {
 
 	mu    sync.Mutex
 	frame []led.Color
+
+	// followers want to know when the colour changes, because they show something in it: the room
+	// reaction inherits the colour the same way an effect does, and its claim holds the colour it was
+	// last given rather than looking it up.
+	followers []func()
 }
+
+// OnColor registers something to tell when the light's colour changes.
+func (r *ringLight) OnColor(f func()) { r.followers = append(r.followers, f) }
 
 func newRingLight(k *kit) *ringLight {
 	r := &ringLight{
 		light: &esphome.Light{
 			Base:                esphome.Base{ObjectID: "ring", Name: "LED ring"},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
-			Effects:             led.EffectNames(),
+
+			// None comes first, because an effect list with no way out of it is a light that can be
+			// animated and never made to hold still again.
+			Effects: append([]string{EffectNone}, led.EffectNames()...),
 		},
 		base:  k.LEDs.Claim(led.PriorityBase),
 		frame: make([]led.Color, led.Segments),
@@ -76,6 +87,10 @@ func (r *ringLight) apply(s esphome.LightState) {
 	s = usable(s)
 	r.light.Set(s)
 	r.show(s)
+
+	for _, f := range r.followers {
+		f()
+	}
 }
 
 // show puts the light's state on the base layer.

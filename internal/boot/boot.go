@@ -21,6 +21,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/satellite"
 	"github.com/ygelfand/echolocal/internal/service"
 	"github.com/ygelfand/echolocal/internal/settings"
+	"github.com/ygelfand/echolocal/internal/setup"
 	"github.com/ygelfand/echolocal/internal/speaker"
 )
 
@@ -47,6 +48,8 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := settings.LoadError(); err != nil {
 		slog.Error("reading saved settings failed, continuing with defaults", "err", err)
 	}
+
+	setup.Apply()
 
 	ring := prepareRing()
 	defer func() {

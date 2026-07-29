@@ -285,8 +285,16 @@ func (s *Source) broadcast(raw []byte) {
 	switch {
 	case on:
 		s.leveler.apply(frame)
-	case s.wasLeveling:
-		s.leveler.forget()
+	default:
+		// Measured even with the gain switched off, because how loud the room is has watchers of its
+		// own: the ring can be set to react to it, and that should not depend on a setting about what
+		// Home Assistant hears.
+		if s.wasLeveling {
+			s.leveler.forget()
+		}
+		if len(frame) > 0 {
+			s.leveler.observe(frame)
+		}
 	}
 	s.wasLeveling = on
 	s.remember(frame)

@@ -28,7 +28,20 @@ const (
 
 	// Home Assistant no longer levels what a satellite sends, so the device does.
 	DefaultLeveling = true
+
+	// The ring does not follow the room until asked. A device that lights up whenever anyone speaks is
+	// a choice, not a default: in a bedroom it is the opposite of what you want.
+	DefaultReaction = ""
 )
+
+// ReactionOr reports the animation that follows the room, or def if it has never been set. Empty is
+// a deliberate none, which is why this cannot be a plain string.
+func (r Ring) ReactionOr(def string) string {
+	if r.Reaction == nil {
+		return def
+	}
+	return *r.Reaction
+}
 
 // VolumeOr reports the stored volume step, or def if it has never been set.
 func (s Speaker) VolumeOr(def int) int {

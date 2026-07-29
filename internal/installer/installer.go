@@ -58,6 +58,7 @@ type step struct {
 var steps = []step{
 	{"check device", checkDevice},
 	{"hide Amazon packages", hidePackages},
+	{"gate Amazon init services", gateProps},
 	{"device name", installName},
 	{"encryption key", installKey},
 	{"remount /system rw", remountRW},
@@ -240,6 +241,19 @@ func hidePackages(r *run) (string, bool, error) {
 		return fmt.Sprintf("%d already hidden, none running", len(services.Hidden)), true, nil
 	}
 	return fmt.Sprintf("hid %d of %d, stopped %d", len(hid), len(services.Hidden), len(stopped)), false, nil
+}
+
+// gateProps stops init from starting the vendor services that hiding a package leaves stranded.
+// The properties persist, so this lands on the next boot rather than now.
+func gateProps(r *run) (string, bool, error) {
+	changed, err := services.Gate(r.d)
+	if err != nil {
+		return "", false, err
+	}
+	if len(changed) == 0 {
+		return fmt.Sprintf("%d already set", len(services.Gated)), true, nil
+	}
+	return fmt.Sprintf("set %d of %d, effective next boot", len(changed), len(services.Gated)), false, nil
 }
 
 // startService hands control back to init and waits for echod to report itself, since

@@ -21,6 +21,12 @@ const (
 	// PriorityBase is the light entity: what the ring shows when nothing is happening.
 	PriorityBase Priority = iota
 
+	// PriorityRoom is the ring reacting to the room, if that has been chosen. It sits over the light's
+	// resting colour because it is a resting appearance too and the user asked for this one, and under
+	// everything else because it is the least urgent thing the ring can be doing: it says nothing has
+	// happened, only that the room is here.
+	PriorityRoom
+
 	// PriorityTurn is a conversation, which holds the ring from the wake word to the end of the reply.
 	PriorityTurn
 
@@ -47,6 +53,10 @@ type Content struct {
 	Effect  string
 	Base    Color
 	Reverse bool
+
+	// Level is how loud the room is, for an effect that reacts to it. Whoever claims the ring for one
+	// supplies it, because the driver has no business knowing where the microphone is.
+	Level Level
 
 	// Animate replaces both, for something with a timeline of its own such as the boot animation. It
 	// runs until the context is cancelled.
@@ -168,9 +178,9 @@ func (d *Driver) show(ctx context.Context, c Content) {
 	case c.Effect != "":
 		var err error
 		if c.Reverse {
-			err = RunEffectReversed(ctx, d.ring, c.Effect, c.Base)
+			err = RunEffectReversed(ctx, d.ring, c.Effect, c.Base, c.Level)
 		} else {
-			err = RunEffect(ctx, d.ring, c.Effect, c.Base)
+			err = RunEffect(ctx, d.ring, c.Effect, c.Base, c.Level)
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Error("ring effect failed", "effect", c.Effect, "err", err)
@@ -271,6 +281,12 @@ func (c *Claim) PaintFor(frame []Color, d time.Duration) { c.ShowFor(Content{Fra
 
 // Play runs a named effect.
 func (c *Claim) Play(effect string, base Color) { c.Show(Content{Effect: effect, Base: base}) }
+
+// React runs an effect that watches the room, and keeps running it: what it shows changes with the
+// room rather than with the claim, so nothing has to come back and set it again.
+func (c *Claim) React(effect string, base Color, level Level) {
+	c.Show(Content{Effect: effect, Base: base, Level: level})
+}
 
 // PlayReversed runs it the other way round the ring, which is how the device says it has stopped
 // listening and is waiting on an answer.

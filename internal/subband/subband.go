@@ -73,4 +73,3 @@ func Load(dir string) (*Weights, error) {
 	}
 	return w, nil
 }
-

@@ -60,7 +60,6 @@ type Satellite struct {
 
 	// models is everything installed, of either backend. What is advertised is filtered from it.
 	models []wake.Model
-
 }
 
 // New builds the server and its entities. It does not listen; call Serve.
@@ -99,6 +98,12 @@ func New(cfg Config) (*Satellite, error) {
 		mute = newMuteSwitch(k)
 		ents.Add(mute.entities()...)
 	}
+
+	// The ring can be set to follow the room, which needs the light for its colour and the microphone
+	// for the room, so it is built after both.
+	room := newRoomReaction(k)
+	k.Ring.OnColor(room.Recolour)
+	ents.Add(room.entities()...)
 
 	k.Player = newMediaPlayer(k)
 	ents.Add(k.Player.entities()...)

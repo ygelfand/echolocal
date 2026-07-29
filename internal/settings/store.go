@@ -23,6 +23,15 @@ type Stored struct {
 	Speaker    Speaker    `json:"speaker,omitzero"`
 	Microphone Microphone `json:"microphone,omitzero"`
 	Wake       Wake       `json:"wake,omitzero"`
+	Ring       Ring       `json:"ring,omitzero"`
+}
+
+// Ring is the light, apart from what Home Assistant holds for the light entity itself.
+type Ring struct {
+	// Reaction is the animation that follows the room, by name, or empty for none. It is not part of
+	// the light's own state because it is not an appearance the light was set to: it outlives being
+	// switched off and comes back with it.
+	Reaction *string `json:"reaction,omitempty"`
 }
 
 type Speaker struct {
@@ -129,7 +138,10 @@ func SetMicMuted(v bool) error     { return store().SetMicMuted(v) }
 func SetMicLEDBright(v bool) error { return store().SetMicLEDBright(v) }
 func SetMicMixing(v Mixing) error  { return store().SetMicMixing(v) }
 func SetMicGain(db int) error      { return store().SetMicGain(db) }
-func SetMicLeveling(v bool) error  { return store().SetMicLeveling(v) }
+
+func SetMicLeveling(v bool) error { return store().SetMicLeveling(v) }
+
+func SetRingReaction(v string) error { return store().SetRingReaction(v) }
 
 func SetWakeBackend(v WakeBackend) error         { return store().SetWakeBackend(v) }
 func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(slot, id) }
@@ -234,6 +246,10 @@ func (st *Store) SetMicLeveling(v bool) error {
 
 func (st *Store) SetMicGain(db int) error {
 	return st.Update(func(s *Stored) { s.Microphone.Gain = &db })
+}
+
+func (st *Store) SetRingReaction(v string) error {
+	return st.Update(func(s *Stored) { s.Ring.Reaction = &v })
 }
 
 func (st *Store) SetWakeBackend(v WakeBackend) error {

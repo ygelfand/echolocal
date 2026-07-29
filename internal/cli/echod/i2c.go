@@ -108,20 +108,25 @@ func newI2CCmd() *cobra.Command {
 			}
 			defer func() { _ = b.Close() }()
 
-			before, _ := b.ReadReg(uint8(reg))
+			before, readable := b.ReadReg(uint8(reg))
 			if err := b.WriteReg(uint8(reg), uint8(val)); err != nil {
 				return err
 			}
-			after, err := b.ReadReg(uint8(reg))
-			if err != nil {
-				return err
-			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "0x%02x reg 0x%02x: %02x -> %02x", addr, reg, before, after)
-			if after != uint8(val) {
-				fmt.Fprintf(cmd.OutOrStdout(), "  (wanted %02x, write did not stick)", val)
+			// Some of these chips answer writes and refuse reads — the LED driver at 0x3f is one, and
+			// NAKs every read with ENXIO. So the write is the result, and reading it back is a bonus:
+			// failing here would report a write that landed as an error.
+			out := cmd.OutOrStdout()
+			after, err := b.ReadReg(uint8(reg))
+			switch {
+			case readable != nil || err != nil:
+				fmt.Fprintf(out, "0x%02x reg 0x%02x: wrote %02x (write only, cannot be read back)\n", addr, reg, val)
+			case after != uint8(val):
+				fmt.Fprintf(out, "0x%02x reg 0x%02x: %02x -> %02x  (wanted %02x, write did not stick)\n",
+					addr, reg, before, after, val)
+			default:
+				fmt.Fprintf(out, "0x%02x reg 0x%02x: %02x -> %02x\n", addr, reg, before, after)
 			}
-			fmt.Fprintln(cmd.OutOrStdout())
 			return nil
 		},
 	}

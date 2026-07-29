@@ -100,12 +100,12 @@ type conversation struct {
 
 	// sound is who may make one. Everything audible goes through it, so cancelling is one call
 	// wherever the sound came from.
-	sound *speaker.Driver
-	player  *mediaPlayer
-	wake    *wakeControl
-	ring    *ringLight
-	leds    *led.Driver
-	log     *activity
+	sound  *speaker.Driver
+	player *mediaPlayer
+	wake   *wakeControl
+	ring   *ringLight
+	leds   *led.Driver
+	log    *activity
 
 	events chan event
 

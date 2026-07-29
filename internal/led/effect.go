@@ -1,0 +1,293 @@
+package led
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// FrameInterval paces animations at 25 fps. Each frame is one 36-byte i2c write, which the
+// driver absorbs comfortably at this rate.
+const FrameInterval = 40 * time.Millisecond
+
+// Frame is one moment of an animation: what the twelve segments show at elapsed.
+//
+// A frame function is a pure function of elapsed and keeps nothing between calls. That is what lets
+// the driver interrupt an effect part way through, run it backwards, or start it again later with
+// nothing to reset, and what lets a test ask an effect what it looks like at a given moment.
+type Frame func(elapsed time.Duration) []Color
+
+// Kinds is where an effect may be used. It is a set rather than one answer, because most animations
+// are fit for more than one job: a comet loops perfectly well as the ring's resting appearance and
+// also works held for a second and a half to say that something happened. What an effect is good for
+// and what it is being used for are different questions.
+//
+// The kinds are not categories for tidiness. They differ in what an effect is allowed to do and in
+// who is allowed to pick it.
+type Kinds uint8
+
+const (
+	// KindLight is an animation Home Assistant sets on the ring light: it loops, and it is what the
+	// light's effect list offers.
+	KindLight Kinds = 1 << iota
+
+	// KindNotice is an animation an event can borrow for a moment — a wake word, a volume change, a
+	// failure. How long it runs is the event's business and not the animation's, so nothing here says.
+	// An effect only fit for this is one that reads as an announcement rather than as a state: three
+	// quick pulses say something happened, and say it just as clearly the fourth time.
+	KindNotice
+
+	// KindRoom reacts to the room instead of to the clock: it is handed how loud the room is and reads
+	// it every frame. It is chosen by its own control rather than from the light's effect list, and
+	// while it is chosen it is simply on — the resting appearance of a device that is listening, which
+	// a conversation covers and then gives back.
+	//
+	// It is exempt from the rule that a frame function is a pure function of elapsed, necessarily: the
+	// same moment looks different depending on the room. So reversing one means nothing, and starting
+	// one again does not give back what it showed the first time.
+	KindRoom
+)
+
+// Animations is the usual pair: a loop the light can be set to, which an event may also borrow.
+const Animations = KindLight | KindNotice
+
+// Has reports whether an effect may be used for a kind.
+func (k Kinds) Has(want Kinds) bool { return k&want != 0 }
+
+// Level is how loud the room is now, from 0 for quiet to 1 for someone talking close by, measured
+// against the room's own noise floor by internal/mic. An effect that senses the room reads it every
+// frame, which is why it is a function and not a number.
+type Level func() float64
+
+// Effect is one animation the ring can run: a motion, and the colours it runs in.
+//
+// The two are separate on purpose. Most animations are worth having both ways — in whatever colour
+// Home Assistant set the ring to, and in colours of their own that no single colour could give — so
+// the motion is a frame function and the colours are a palette, and one entry here is one pairing.
+type Effect struct {
+	// Name is what Home Assistant shows in the effect list, and what settings store: the wake
+	// animation is saved by name. So a name cannot change once it has shipped — a rename reads back
+	// as an effect that no longer exists, which silently turns the animation off.
+	Name string
+
+	// Palette is the colours this pairing uses. Empty means it inherits: the ring's own colour, as
+	// one palette of one colour, so the frame function cannot tell the difference.
+	Palette Palette
+
+	// Kinds is where this one may be used. Zero takes the default for the list it is in, which is how
+	// thirty-odd entries avoid repeating the same answer: an entry only says anything here when it
+	// differs from its neighbours.
+	Kinds Kinds
+
+	// New builds the motion from the palette. Exactly one of New and Senses is set.
+	New func(p Palette) Frame
+
+	// Senses builds a motion that watches the room. Only KindRoom effects have one, and having one is
+	// what makes an effect unable to be anything else: there is no sensible still frame to fall back
+	// on when nothing is listening for it.
+	Senses func(p Palette, l Level) Frame
+}
+
+// Effect names. A pairing that brings its own colours is named for the palette and the motion, so
+// that the list reads as what it is: the same handful of motions, in colours chosen for them.
+const (
+	// Ambient, in the ring's colour.
+	EffectPulse        = "Pulse"
+	EffectHeartbeat    = "Heartbeat"
+	EffectRipple       = "Ripple"
+	EffectStandingWave = "Standing Wave"
+	EffectTwinkle      = "Twinkle"
+
+	// Ambient, in their own.
+	EffectCrimsonHeartbeat = "Crimson Heartbeat"
+	EffectAuroraPulse      = "Aurora Pulse"
+	EffectCandle           = "Candle"
+	EffectFireplace        = "Fireplace"
+	EffectEmbers           = "Embers"
+	EffectAurora           = "Aurora"
+	EffectSunsetDrift      = "Sunset Drift"
+	EffectOceanRipple      = "Ocean Ripple"
+	EffectRainbowTwinkle   = "Rainbow Twinkle"
+	EffectForestTwinkle    = "Forest Twinkle"
+
+	// Motion, in the ring's colour.
+	EffectComet    = "Comet"
+	EffectChase    = "Chase"
+	EffectScanner  = "Scanner"
+	EffectPinwheel = "Pinwheel"
+	EffectSpiral   = "Spiral"
+	EffectWipe     = "Wipe"
+	EffectHelix    = "Helix"
+	EffectOrbits   = "Orbits"
+	EffectBounce   = "Bounce"
+	EffectSpring   = "Spring"
+
+	// Reacting to the room. Named for what they follow, not for the motion, because that is the part
+	// worth knowing: the ring is showing the room.
+	EffectRoomGlow    = "Room Glow"
+	EffectRoomMeter   = "Room Meter"
+	EffectRoomOcean   = "Room Ocean"
+	EffectRoomVU      = "Room VU"
+	EffectRoomFire    = "Room Fire"
+	EffectRoomSpin    = "Room Spin"
+	EffectRoomAurora  = "Room Aurora"
+	EffectRoomTwinkle = "Room Twinkle"
+	EffectRoomEmbers  = "Room Embers"
+
+	// Motion, in their own.
+	EffectRainbow         = "Rainbow"
+	EffectFireComet       = "Fire Comet"
+	EffectIceComet        = "Ice Comet"
+	EffectRainbowChase    = "Rainbow Chase"
+	EffectIceScanner      = "Ice Scanner"
+	EffectRainbowPinwheel = "Rainbow Pinwheel"
+	EffectSunsetSpiral    = "Sunset Spiral"
+	EffectRainbowOrbits   = "Rainbow Orbits"
+	EffectDNA             = "DNA"
+	EffectPacMan          = "Pac-Man"
+)
+
+// effects is the catalogue: every animation this build has, in the order Home Assistant offers
+// them. There will be many, so it is assembled from one list per kind, each kept in its own file
+// beside the frame functions it names — quiet ones in effect_ambient.go, travelling ones in
+// effect_motion.go. Adding an effect means writing it next to its relatives and joining that list;
+// giving an existing one a set of colours means only a line in that list; a new kind means a new
+// file and one more entry here.
+var (
+	effects []Effect
+	byName  = map[string]Effect{}
+)
+
+// catalogue is the lists in the order their contents are offered, each with what its entries are for
+// unless an entry says otherwise.
+var catalogue = []struct {
+	kinds   Kinds
+	entries []Effect
+}{
+	{Animations, ambientEffects},
+	{Animations, motionEffects},
+	{KindRoom, roomEffects},
+}
+
+func init() {
+	for _, list := range catalogue {
+		for _, e := range list.entries {
+			if e.Kinds == 0 {
+				e.Kinds = list.kinds
+			}
+			effects = append(effects, e)
+		}
+	}
+	for _, e := range effects {
+		byName[e.Name] = e
+	}
+}
+
+// Names lists what may be used for a kind, in catalogue order: the light's effect list is
+// Names(KindLight), what an event may borrow is Names(KindNotice), and what the ring can be set to
+// react to is Names(KindRoom).
+func Names(kinds Kinds) []string {
+	out := make([]string, 0, len(effects))
+	for _, e := range effects {
+		if e.Kinds.Has(kinds) {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
+// EffectNames lists what the ring light may be set to.
+func EffectNames() []string { return Names(KindLight) }
+
+// effect returns the frame function for a named effect. level is only needed by an effect that
+// senses the room, and asking for one of those without it is an error rather than a dark ring.
+func effect(name string, base Color, level Level) (Frame, error) {
+	e, ok := byName[name]
+	if !ok {
+		return nil, fmt.Errorf("led: no effect %q", name)
+	}
+
+	p := e.Palette
+	if len(p) == 0 {
+		p = Palette{base}
+	}
+
+	if e.Senses != nil {
+		if level == nil {
+			return nil, fmt.Errorf("led: effect %q reacts to the room and was given nothing to react to", name)
+		}
+		return e.Senses(p, level), nil
+	}
+	return e.New(p), nil
+}
+
+// RunEffect animates until ctx is cancelled.
+func RunEffect(ctx context.Context, r *Ring, name string, base Color, level Level) error {
+	frame, err := effect(name, base, level)
+	if err != nil {
+		return err
+	}
+	return play(ctx, r, 0, frame)
+}
+
+// RunEffectReversed animates the same effect the other way round the ring, which is how the device
+// says it has stopped listening and is now waiting on an answer.
+//
+// Reversing an effect that reacts to the room is allowed and means nothing: what it shows comes from
+// the room rather than from a direction of travel.
+func RunEffectReversed(ctx context.Context, r *Ring, name string, base Color, level Level) error {
+	frame, err := effect(name, base, level)
+	if err != nil {
+		return err
+	}
+	return play(ctx, r, 0, reverse(frame))
+}
+
+// reverse mirrors a frame around the ring, turning clockwise motion into anticlockwise without an
+// effect having to know anything about it. Segment 0 stays put so the reversal is a change of
+// direction rather than a jump to somewhere else.
+func reverse(frame Frame) Frame {
+	return func(elapsed time.Duration) []Color {
+		in := frame(elapsed)
+		out := make([]Color, len(in))
+		for i, c := range in {
+			out[(len(in)-i)%len(in)] = c
+		}
+		return out
+	}
+}
+
+// play runs an animation for d, or until ctx is cancelled when d is zero.
+func play(ctx context.Context, r *Ring, d time.Duration, frame Frame) error {
+	t := time.NewTicker(FrameInterval)
+	defer t.Stop()
+
+	start := time.Now()
+	for {
+		elapsed := time.Since(start)
+		if d > 0 && elapsed >= d {
+			return nil
+		}
+		if err := r.SetSegments(frame(elapsed)); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			// Left as it is rather than blanked: the driver repaints whatever layer is underneath,
+			// and a blank in between shows through as a flicker.
+			return nil
+		case <-t.C:
+		}
+	}
+}
+
+// around lays a palette round the ring at one brightness, which is what an effect that has no
+// motion of its own across the segments wants: with one colour it is the whole ring in that colour,
+// with a palette it is that palette spread evenly.
+func around(p Palette, f float64) []Color {
+	out := make([]Color, Segments)
+	for i := range out {
+		out[i] = scale(p.At(float64(i)/Segments), f)
+	}
+	return out
+}

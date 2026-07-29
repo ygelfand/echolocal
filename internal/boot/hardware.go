@@ -25,15 +25,14 @@ func prepareRing() *led.Ring {
 		slog.Error("disabling driver boot animation failed", "err", err)
 	}
 
-	// ledctrl leaves the global drive current at 0, where frame writes are accepted and read back
-	// correctly but nothing lights up. 3 is the driver's own default.
-	if cur, err := ring.Current(); err != nil {
-		slog.Error("reading led_current failed", "err", err)
-	} else if cur == 0 {
-		slog.Info("led_current is 0, raising to 3")
-		if err := ring.SetCurrent(3); err != nil {
-			slog.Error("setting led_current failed", "err", err)
-		}
+	// The global drive current is an attenuation index rather than a level: 0 is full current and 3 a
+	// quarter of it, which is where the driver leaves it at probe and does not survive a reboot. So the
+	// ring runs at a quarter of what the hardware can do unless this asks for the rest, every boot.
+	//
+	// Worth knowing which brightness is which, because they are not equivalent: current is a DC change
+	// and silent, where dimming by PWM duty makes the driver audible.
+	if err := ring.SetCurrent(0); err != nil {
+		slog.Error("setting led_current failed", "err", err)
 	}
 	return ring
 }
