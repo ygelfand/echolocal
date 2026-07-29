@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -208,5 +209,56 @@ func TestByLabelRoundTrips(t *testing.T) {
 	}
 	if _, ok := ByLabel(values, "Beamformer"); ok {
 		t.Error("ByLabel accepted a value this build does not offer")
+	}
+}
+
+// A file that could not be read must not be written over. Everything here is one document, so a store
+// that fell back to defaults would replace settings it merely failed to parse with settings that have
+// nothing in them — and the reboot that truncated the file would take the contents with it for good.
+func TestAnUnreadableFileIsNotOverwritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// Truncated, which is what losing power part way through a write leaves behind.
+	if err := os.WriteFile(path, []byte(`{"speaker": {"volu`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Load(path)
+	if err == nil {
+		t.Fatal("loading a truncated file succeeded, want an error")
+	}
+
+	if err := st.SetSpeakerVolume(7); err == nil {
+		t.Error("writing over an unreadable file succeeded, want a refusal")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(after), `{"speaker": {"volu`; got != want {
+		t.Errorf("the file is now %q, want it untouched as %q", got, want)
+	}
+}
+
+// A missing file is a different thing from an unreadable one: there is nothing to lose, and the first
+// change is what creates it.
+func TestAMissingFileIsWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	st, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading a missing file failed: %v", err)
+	}
+	if err := st.SetSpeakerVolume(7); err != nil {
+		t.Fatalf("writing a new file failed: %v", err)
+	}
+
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Get().Speaker.VolumeOr(0); got != 7 {
+		t.Errorf("read back volume %d, want 7", got)
 	}
 }

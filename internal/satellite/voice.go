@@ -576,11 +576,13 @@ func (c *conversation) disarm() {
 func (c *conversation) trouble() {
 	chime(c.sound, toneTrouble)
 
-	frame := make([]led.Color, led.Segments)
-	for i := range frame {
-		frame[i] = troubleColor
+	// Which animation is the user's choice, and None is one of the answers: the chime has already said
+	// it, and some rooms would rather the ring stayed out of it.
+	name := settings.Get().Ring.TroubleOr(settings.DefaultTrouble)
+	if name == "" {
+		return
 	}
-	c.leds.Claim(led.PriorityTrouble).PaintFor(frame, troubleFlash)
+	c.leds.Claim(led.PriorityTrouble).ShowFor(led.Content{Effect: name, Base: troubleColor}, troubleFlash)
 }
 
 // phraseFor is what Home Assistant expects a turn to report for one of its wake word slots: the

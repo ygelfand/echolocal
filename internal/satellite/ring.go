@@ -2,12 +2,15 @@ package satellite
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
+	"slices"
 	"sync"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/settings"
 )
 
 // ringLight maps Home Assistant's light entities onto the 12-segment ring: one light for the whole
@@ -83,7 +86,12 @@ func (r *ringLight) entities() []esphome.Entity {
 }
 
 // apply takes a command from Home Assistant and makes it the ring's resting appearance.
-func (r *ringLight) apply(s esphome.LightState) {
+func (r *ringLight) apply(s esphome.LightState) { r.set(s, true) }
+
+// set is the one way an appearance is taken up, whether Home Assistant asked for it or it came back
+// from the file. save is false for the second: nothing was chosen, so there is nothing new to remember,
+// and a write at start-up is a write on the path most likely to be interrupted by another restart.
+func (r *ringLight) set(s esphome.LightState, save bool) {
 	s = usable(s)
 	r.light.Set(s)
 	r.show(s)
@@ -91,6 +99,68 @@ func (r *ringLight) apply(s esphome.LightState) {
 	for _, f := range r.followers {
 		f()
 	}
+	if save {
+		r.save()
+	}
+}
+
+// save remembers the appearance, on every command.
+func (r *ringLight) save() {
+	s := r.light.Get()
+	saved := settings.Light{
+		On:         &s.On,
+		Brightness: &s.Brightness,
+		Red:        &s.Red,
+		Green:      &s.Green,
+		Blue:       &s.Blue,
+	}
+
+	// None is stored as no effect rather than as the name, so that the answer survives the option being
+	// renamed and reads the same as never having chosen one.
+	effect := ""
+	if s.Effect != EffectNone {
+		effect = s.Effect
+	}
+	saved.Effect = &effect
+
+	if err := settings.SetRingLight(saved); err != nil {
+		slog.Error("saving the ring light failed", "err", err)
+	}
+}
+
+// restore puts back the appearance Home Assistant last set. Off unless it was on: a ring that lights
+// the room by itself after a power cut is a surprise, which is why ESPHome makes that opt-in too.
+func (r *ringLight) restore(saved settings.Ring) {
+	l := saved.Light
+
+	if !l.OnOr(false) {
+		slog.Info("restored", "what", "ring light", "on", false, "from", from(l.Stored()))
+		return
+	}
+
+	s := esphome.LightState{
+		ColorMode:  esphome.ColorModeRGB,
+		On:         true,
+		Brightness: l.BrightnessOr(1),
+		Red:        l.RedOr(1),
+		Green:      l.GreenOr(1),
+		Blue:       l.BlueOr(1),
+		Effect:     effectOffered(r.light.Effects, l.EffectOr("")),
+	}
+
+	r.set(s, false)
+	slog.Info("restored", "what", "ring light", "on", true,
+		"brightness", s.Brightness, "effect", s.Effect, "from", from)
+}
+
+// effectOffered keeps a saved effect name only if this build still has it. An effect that is gone
+// otherwise reaches RunEffect, fails, and leaves the ring dark with the reason in a log nobody reads.
+func effectOffered(offered []string, name string) string {
+	if name == "" || slices.Contains(offered, name) {
+		return name
+	}
+	slog.Warn("no such effect, restoring a plain colour instead", "effect", name)
+	return ""
 }
 
 // show puts the light's state on the base layer.

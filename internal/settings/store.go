@@ -16,22 +16,41 @@ import (
 // Pointers mark a setting that has never been touched, so a default wins over a zero value. Read
 // them through the Or accessors rather than directly.
 type Stored struct {
-	// MAC is wlan0's address, cached because the interface is not up when echod starts. Not a
-	// setting, but it belongs to the same file: one document, one atomic write.
-	MAC string `json:"mac,omitempty"`
-
 	Speaker    Speaker    `json:"speaker,omitzero"`
 	Microphone Microphone `json:"microphone,omitzero"`
 	Wake       Wake       `json:"wake,omitzero"`
 	Ring       Ring       `json:"ring,omitzero"`
 }
 
-// Ring is the light, apart from what Home Assistant holds for the light entity itself.
+// Ring is the light, apart from what Home Assistant holds for the light entity itself. Each of these
+// is an animation by name, or empty for none, and none of them are appearances the light was set to:
+// they outlive it being switched off and come back with it.
 type Ring struct {
-	// Reaction is the animation that follows the room, by name, or empty for none. It is not part of
-	// the light's own state because it is not an appearance the light was set to: it outlives being
-	// switched off and comes back with it.
+	// Reaction is the animation that follows the room.
 	Reaction *string `json:"reaction,omitempty"`
+
+	// Trouble is what a failure shows, and Muted what a cut microphone shows for as long as it is cut.
+	Trouble *string `json:"trouble,omitempty"`
+	Muted   *string `json:"muted,omitempty"`
+
+	// Light is the appearance Home Assistant last set, so a restart comes back the way it was left.
+	Light Light `json:"light,omitzero"`
+}
+
+// Light is the ring light's own state. It is one thing rather than six settings: an appearance is
+// chosen all at once, so it is saved and restored all at once.
+//
+// Off unless it was on. Nothing stored is a ring that stays dark, which is what a device nobody has
+// asked for anything yet should do, and what ESPHome defaults its own lights to for the same reason.
+type Light struct {
+	On         *bool    `json:"on,omitempty"`
+	Brightness *float32 `json:"brightness,omitempty"`
+	Red        *float32 `json:"red,omitempty"`
+	Green      *float32 `json:"green,omitempty"`
+	Blue       *float32 `json:"blue,omitempty"`
+
+	// Effect is the animation by name, empty for a plain colour.
+	Effect *string `json:"effect,omitempty"`
 }
 
 type Speaker struct {
@@ -129,8 +148,6 @@ func Use(path string) {
 	shared, loadErr = Load(path)
 }
 
-func SetMAC(mac string) error { return store().SetMAC(mac) }
-
 func SetSpeakerVolume(v int) error            { return store().SetSpeakerVolume(v) }
 func SetSpeakerResampling(v Resampling) error { return store().SetSpeakerResampling(v) }
 
@@ -142,6 +159,9 @@ func SetMicGain(db int) error      { return store().SetMicGain(db) }
 func SetMicLeveling(v bool) error { return store().SetMicLeveling(v) }
 
 func SetRingReaction(v string) error { return store().SetRingReaction(v) }
+func SetRingTrouble(v string) error  { return store().SetRingTrouble(v) }
+func SetRingMuted(v string) error    { return store().SetRingMuted(v) }
+func SetRingLight(v Light) error     { return store().SetRingLight(v) }
 
 func SetWakeBackend(v WakeBackend) error         { return store().SetWakeBackend(v) }
 func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(slot, id) }
@@ -160,16 +180,25 @@ type Store struct {
 
 	mu sync.Mutex
 	s  Stored
+
+	// readable is whether what is on disk was understood. It gates writing, because everything here is
+	// written as one whole document: a store that fell back to defaults would replace a file it could
+	// not read with a file that has nothing in it, turning a bad read into permanent loss.
+	//
+	// A missing file is readable. There is nothing to lose and the first change creates it.
+	readable bool
 }
 
-// Load reads the file. A missing or unreadable file is not an error: echod runs with defaults and
-// writes the file on the first change.
+// Load reads the file. A missing file is not an error: echod runs with defaults and writes it on the
+// first change. An unreadable or unparseable one is — the caller may carry on with defaults, but
+// nothing will be saved over it until someone has looked.
 func Load(path string) (*Store, error) {
 	st := &Store{path: path}
 
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			st.readable = true
 			return st, nil
 		}
 		return st, err
@@ -177,6 +206,8 @@ func Load(path string) (*Store, error) {
 	if err := json.Unmarshal(b, &st.s); err != nil {
 		return st, fmt.Errorf("settings: %s: %w", path, err)
 	}
+
+	st.readable = true
 	return st, nil
 }
 
@@ -196,28 +227,56 @@ func (st *Store) Update(f func(*Stored)) error {
 	return st.write()
 }
 
-// write replaces the file through a temporary one, so a kill mid-write cannot truncate it.
+// write replaces the file through a temporary one, flushed at every step, because the thing this has
+// to survive is a reboot rather than a crash.
+//
+// A rename is atomic, which is enough for being killed: either the old file or the new one is there.
+// It is not enough for losing power. The rename can reach the disk while the data behind it has not,
+// and what comes back is the new name with nothing in it — which is how a device that had settings
+// comes up with none. So the contents are flushed before the rename and the directory after it.
 func (st *Store) write() error {
+	if !st.readable {
+		return fmt.Errorf("settings: %s was not readable, refusing to write over it", st.path)
+	}
+
 	b, err := json.MarshalIndent(st.s, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
 
-	if err := os.MkdirAll(filepath.Dir(st.path), 0o755); err != nil {
+	dir := filepath.Dir(st.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
 	tmp := st.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, st.path)
-}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
 
-// SetMAC saves wlan0's address.
-func (st *Store) SetMAC(mac string) error {
-	return st.Update(func(s *Stored) { s.MAC = mac })
+	if err := os.Rename(tmp, st.path); err != nil {
+		return err
+	}
+
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	return d.Sync()
 }
 
 func (st *Store) SetSpeakerVolume(v int) error {
@@ -250,6 +309,19 @@ func (st *Store) SetMicGain(db int) error {
 
 func (st *Store) SetRingReaction(v string) error {
 	return st.Update(func(s *Stored) { s.Ring.Reaction = &v })
+}
+
+func (st *Store) SetRingTrouble(v string) error {
+	return st.Update(func(s *Stored) { s.Ring.Trouble = &v })
+}
+
+func (st *Store) SetRingMuted(v string) error {
+	return st.Update(func(s *Stored) { s.Ring.Muted = &v })
+}
+
+// SetRingLight saves the whole appearance at once, since that is how it is set.
+func (st *Store) SetRingLight(v Light) error {
+	return st.Update(func(s *Stored) { s.Ring.Light = v })
 }
 
 func (st *Store) SetWakeBackend(v WakeBackend) error {

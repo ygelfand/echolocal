@@ -156,6 +156,17 @@ var forest = Palette{
 	{R: 0xA0, G: 0xE0, B: 0x40},
 }
 
+// alarm is the red of a fault, from the dark red it rests at up to the near-white at the top of a
+// pulse. Sampled along and darkest first, so an effect whose shape is how hard something is happening
+// climbs it. Red because nothing else on this device is: the splash is blue, the volume arc white,
+// and a colour used for one thing only needs no explaining.
+var alarm = Palette{
+	{R: 0x30, G: 0x00, B: 0x00},
+	{R: 0xC0, G: 0x00, B: 0x00},
+	{R: 0xFF, G: 0x30, B: 0x18},
+	{R: 0xFF, G: 0xB0, B: 0xA0},
+}
+
 // vu is a meter scale: green where a room sits, amber where it is busy, red at the top. Sampled
 // along, since the whole point is that the far end means something different from the near end.
 var vu = Palette{

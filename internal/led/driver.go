@@ -27,6 +27,11 @@ const (
 	// happened, only that the room is here.
 	PriorityRoom
 
+	// PriorityMute is a microphone that has been cut, if the user asked to see it. Over the room and
+	// the light, because it says the device cannot hear, which outranks anything it might show about a
+	// room it is not listening to.
+	PriorityMute
+
 	// PriorityTurn is a conversation, which holds the ring from the wake word to the end of the reply.
 	PriorityTurn
 

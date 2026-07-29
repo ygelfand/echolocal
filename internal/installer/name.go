@@ -51,7 +51,7 @@ func ReadName(d *device.Device) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// SuggestName derives a unique default from the wlan0 address.
+// SuggestName derives a unique default from the device's address.
 func SuggestName(d *device.Device) string {
 	out, err := d.Shell("cat " + layout.MACPath)
 	if err != nil {

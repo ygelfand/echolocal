@@ -32,15 +32,70 @@ const (
 	// The ring does not follow the room until asked. A device that lights up whenever anyone speaks is
 	// a choice, not a default: in a bedroom it is the opposite of what you want.
 	DefaultReaction = ""
+
+	// A failure says so, because a request that silently did nothing is the worst of the options.
+	DefaultTrouble = "Alert"
+
+	// A cut microphone does not, because the button has its own LED for exactly this and a ring held
+	// lit for as long as someone leaves the device muted is both a light nobody asked for and, on this
+	// hardware, an audible one.
+	DefaultMuted = ""
 )
 
-// ReactionOr reports the animation that follows the room, or def if it has never been set. Empty is
-// a deliberate none, which is why this cannot be a plain string.
+// ReactionOr reports the animation that follows the room, TroubleOr what a failure shows and MutedOr
+// what a cut microphone shows, each or def if it has never been set. Empty is a deliberate none, which
+// is why these cannot be plain strings.
 func (r Ring) ReactionOr(def string) string {
 	if r.Reaction == nil {
 		return def
 	}
 	return *r.Reaction
+}
+
+func (r Ring) TroubleOr(def string) string {
+	if r.Trouble == nil {
+		return def
+	}
+	return *r.Trouble
+}
+
+func (r Ring) MutedOr(def string) string {
+	if r.Muted == nil {
+		return def
+	}
+	return *r.Muted
+}
+
+// Stored reports whether the light's appearance was ever saved. Nothing saved is a ring that comes up
+// dark rather than one that comes up guessing.
+func (l Light) Stored() bool { return l.On != nil }
+
+// OnOr and the rest read the saved appearance. Brightness and the channels are 0 to 1, as Home
+// Assistant sends them.
+func (l Light) OnOr(def bool) bool {
+	if l.On == nil {
+		return def
+	}
+	return *l.On
+}
+
+func (l Light) BrightnessOr(def float32) float32 { return floatOr(l.Brightness, def) }
+func (l Light) RedOr(def float32) float32        { return floatOr(l.Red, def) }
+func (l Light) GreenOr(def float32) float32      { return floatOr(l.Green, def) }
+func (l Light) BlueOr(def float32) float32       { return floatOr(l.Blue, def) }
+
+func (l Light) EffectOr(def string) string {
+	if l.Effect == nil {
+		return def
+	}
+	return *l.Effect
+}
+
+func floatOr(v *float32, def float32) float32 {
+	if v == nil {
+		return def
+	}
+	return *v
 }
 
 // VolumeOr reports the stored volume step, or def if it has never been set.

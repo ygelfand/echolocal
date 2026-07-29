@@ -59,9 +59,17 @@ func newMediaPlayer(k *kit) *mediaPlayer {
 		p.jack.Set(spk.Output() == speaker.OutputHeadphone)
 	}
 
-	p.apply(settings.Get().Speaker.VolumeOr(VolumeSteps / 2))
 	p.mp.SetState(esphome.MediaPlayerIdle)
 	return p
+}
+
+// restore puts the volume back where it was, without flashing the arc: nothing happened, the device is
+// starting where it left off.
+func (p *mediaPlayer) restore(saved settings.Stored) {
+	step := saved.Speaker.VolumeOr(VolumeSteps / 2)
+	p.apply(step, false)
+	slog.Info("restored", "what", "volume", "step", step, "of", VolumeSteps,
+		"from", from(saved.Speaker.Volume != nil))
 }
 
 func (p *mediaPlayer) entities() []esphome.Entity { return []esphome.Entity{p.mp, p.jack} }
@@ -94,22 +102,28 @@ func (p *mediaPlayer) command(c esphome.MediaCommand) {
 
 // set applies a level and remembers it.
 func (p *mediaPlayer) set(step int) {
-	applied := p.apply(step)
+	applied := p.apply(step, true)
 	if err := settings.SetSpeakerVolume(applied); err != nil {
 		slog.Error("saving volume failed", "err", err)
 	}
 }
 
-// apply drives the speaker and the ring, and reports the step it settled on.
-func (p *mediaPlayer) apply(step int) int {
+// apply drives the speaker and reports the step it settled on. tell is false when nothing happened that
+// anyone needs to see or read about, which is a restore: the arc is a response to being turned up, not a
+// readout of the current level.
+func (p *mediaPlayer) apply(step int, tell bool) int {
 	step = max(0, min(step, VolumeSteps))
 	p.step = step
 
 	p.mp.SetVolume(float32(step) / VolumeSteps)
-	p.show(step)
 	if p.speaker != nil {
 		p.speaker.SetVolume(step)
 	}
+	if !tell {
+		return step
+	}
+
+	p.show(step)
 	slog.Info("volume", "step", step, "of", VolumeSteps)
 	return step
 }

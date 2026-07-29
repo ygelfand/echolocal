@@ -27,15 +27,10 @@ type Frame func(elapsed time.Duration) []Color
 type Kinds uint8
 
 const (
-	// KindLight is an animation Home Assistant sets on the ring light: it loops, and it is what the
-	// light's effect list offers.
+	// KindLight is an animation that loops and can be chosen: the ring light's effect list, and the
+	// per-event choices — a wake word, a failure, a muted microphone — which are the same animations
+	// held for as long as the event lasts. How long that is belongs to the event, not the animation.
 	KindLight Kinds = 1 << iota
-
-	// KindNotice is an animation an event can borrow for a moment — a wake word, a volume change, a
-	// failure. How long it runs is the event's business and not the animation's, so nothing here says.
-	// An effect only fit for this is one that reads as an announcement rather than as a state: three
-	// quick pulses say something happened, and say it just as clearly the fourth time.
-	KindNotice
 
 	// KindRoom reacts to the room instead of to the clock: it is handed how loud the room is and reads
 	// it every frame. It is chosen by its own control rather than from the light's effect list, and
@@ -47,9 +42,6 @@ const (
 	// one again does not give back what it showed the first time.
 	KindRoom
 )
-
-// Animations is the usual pair: a loop the light can be set to, which an event may also borrow.
-const Animations = KindLight | KindNotice
 
 // Has reports whether an effect may be used for a kind.
 func (k Kinds) Has(want Kinds) bool { return k&want != 0 }
@@ -122,6 +114,10 @@ const (
 	EffectBounce   = "Bounce"
 	EffectSpring   = "Spring"
 
+	// Announcements.
+	EffectAlert  = "Alert"
+	EffectBeacon = "Beacon"
+
 	// Reacting to the room. Named for what they follow, not for the motion, because that is the part
 	// worth knowing: the ring is showing the room.
 	EffectRoomGlow    = "Room Glow"
@@ -147,12 +143,10 @@ const (
 	EffectPacMan          = "Pac-Man"
 )
 
-// effects is the catalogue: every animation this build has, in the order Home Assistant offers
-// them. There will be many, so it is assembled from one list per kind, each kept in its own file
-// beside the frame functions it names — quiet ones in effect_ambient.go, travelling ones in
-// effect_motion.go. Adding an effect means writing it next to its relatives and joining that list;
-// giving an existing one a set of colours means only a line in that list; a new kind means a new
-// file and one more entry here.
+// effects is every pairing this build has, flattened in the order Home Assistant offers them, and
+// byName is the same by name. The lists they come from are in catalogue.go, and each motion is a file
+// of its own: adding one is a file and a line there, and giving an existing motion another set of
+// colours is only the line.
 var (
 	effects []Effect
 	byName  = map[string]Effect{}
@@ -164,8 +158,9 @@ var catalogue = []struct {
 	kinds   Kinds
 	entries []Effect
 }{
-	{Animations, ambientEffects},
-	{Animations, motionEffects},
+	{KindLight, ambientEffects},
+	{KindLight, motionEffects},
+	{KindLight, alertEffects},
 	{KindRoom, roomEffects},
 }
 
@@ -183,9 +178,8 @@ func init() {
 	}
 }
 
-// Names lists what may be used for a kind, in catalogue order: the light's effect list is
-// Names(KindLight), what an event may borrow is Names(KindNotice), and what the ring can be set to
-// react to is Names(KindRoom).
+// Names lists what may be used for a kind, in catalogue order: the light's effect list and the
+// per-event choices are Names(KindLight), and what the ring can be set to react to is Names(KindRoom).
 func Names(kinds Kinds) []string {
 	out := make([]string, 0, len(effects))
 	for _, e := range effects {
@@ -279,15 +273,4 @@ func play(ctx context.Context, r *Ring, d time.Duration, frame Frame) error {
 		case <-t.C:
 		}
 	}
-}
-
-// around lays a palette round the ring at one brightness, which is what an effect that has no
-// motion of its own across the segments wants: with one colour it is the whole ring in that colour,
-// with a palette it is that palette spread evenly.
-func around(p Palette, f float64) []Color {
-	out := make([]Color, Segments)
-	for i := range out {
-		out[i] = scale(p.At(float64(i)/Segments), f)
-	}
-	return out
 }

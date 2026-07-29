@@ -111,7 +111,8 @@ func New(cfg Config) (*Satellite, error) {
 	k.Wake = newWakeControl(k, wake.Backends(models), WakeSlots)
 	ents.Add(k.Wake.entities()...)
 
-	ents.Add(newOptions(k).entities()...)
+	opts := newOptions(k)
+	ents.Add(opts.entities()...)
 
 	k.Log = newActivity()
 	ents.Add(k.Log.entities()...)
@@ -124,13 +125,18 @@ func New(cfg Config) (*Satellite, error) {
 
 	ents.Add(newDiagnostics(k, s.WakeSlot).entities()...)
 
+	mac, err := macAddress()
+	if err != nil {
+		return nil, err
+	}
+
 	node := layout.Slug(cfg.Name)
 	srv := &esphome.Server{
 		Addr: cfg.Addr,
 		Info: esphome.Info{
 			Name:         node,
 			FriendlyName: cfg.Name,
-			MACAddress:   macAddress(),
+			MACAddress:   mac,
 			Manufacturer: layout.Manufacturer,
 			Model:        layout.Model,
 			Version:      cfg.Version,
@@ -143,6 +149,12 @@ func New(cfg Config) (*Satellite, error) {
 	}
 
 	s.srv, s.name = srv, node
+
+	// Everything the device remembers, put back in one pass now that the pieces that own it exist. This
+	// runs while the boot animation is still up — the splash outranks the ring's own appearance, so a
+	// restored light waits underneath it rather than fighting it — and before Home Assistant has
+	// connected, because how the device behaves is not its business.
+	restore(k, mute, opts, room)
 
 	// Voice needs microphones. Announce and StartConversation go together and both need a
 	// media_player.
@@ -393,47 +405,17 @@ func writePSK(path string, k esphome.PSK) error {
 	return os.WriteFile(path, []byte(k.String()+"\n"), 0o600)
 }
 
-// macAddress reports wlan0's address, which Home Assistant uses to recognise the device across
-// address changes. The interface does not exist yet when echod starts on a cold boot, so the
-// remembered value stands in and a watcher saves the real one for next time.
-func macAddress() string {
-	saved := settings.Get().MAC
-
-	if mac := readMAC(); mac != "" {
-		if mac != saved {
-			_ = settings.SetMAC(mac)
-		}
-		return mac
-	}
-
-	go rememberMAC()
-
-	if saved != "" {
-		return saved
-	}
-	return "00:00:00:00:00:00"
-}
-
-// rememberMAC waits for the interface to come up and saves its address.
-func rememberMAC() {
-	for range macAttempts {
-		time.Sleep(macRetry)
-		if mac := readMAC(); mac != "" {
-			_ = settings.SetMAC(mac)
-			return
-		}
-	}
-}
-
-const (
-	macRetry    = 2 * time.Second
-	macAttempts = 30
-)
-
-func readMAC() string {
+// macAddress is how Home Assistant recognises the device, and it refuses one whose address is not
+// the address it registered. So there is no stand-in: without an address there is nothing to
+// announce, and announcing the wrong one costs the pairing.
+func macAddress() (string, error) {
 	b, err := os.ReadFile(layout.MACPath)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("reading the device address: %w", err)
 	}
-	return strings.TrimSpace(string(b))
+	mac := layout.MAC(string(b))
+	if mac == "" {
+		return "", fmt.Errorf("%s holds %q, which is not an address", layout.MACPath, strings.TrimSpace(string(b)))
+	}
+	return mac, nil
 }

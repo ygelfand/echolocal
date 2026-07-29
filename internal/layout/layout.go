@@ -69,11 +69,11 @@ const (
 	DefaultName = "Echo Dot"
 )
 
-// MACPath is where the wlan0 address is readable, on the device and over adb.
-const MACPath = "/sys/class/net/wlan0/address"
+// MACPath is the address the factory recorded, which the Wi-Fi driver takes when it comes up. idme
+// is a kernel interface, so it reads this early in boot, before wlan0 exists and without /data.
+const MACPath = "/proc/idme/mac_addr"
 
-// StatePath holds echod's runtime settings. echod starts around 4s into boot and the Wi-Fi driver
-// comes up around 10s, so the MAC is remembered here rather than read fresh every time.
+// StatePath holds echod's runtime settings.
 const StatePath = StateDir + "/state.json"
 
 // Wake word models live in /data, not /system: Home Assistant can offer new ones at runtime and
@@ -82,6 +82,31 @@ const (
 	ModelDir         = StateDir + "/models"
 	DefaultWakeModel = ModelDir + "/hey_jarvis.tflite"
 )
+
+// MAC normalizes an address into the form Home Assistant compares against, and reports "" for
+// anything that would not identify a device. idme writes twelve hex digits with no separators.
+func MAC(raw string) string {
+	var digits strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(raw)) {
+		if r >= '0' && r <= '9' || r >= 'a' && r <= 'f' {
+			digits.WriteRune(r)
+		}
+	}
+
+	s := digits.String()
+	if len(s) != 12 || s == "000000000000" {
+		return ""
+	}
+
+	var mac strings.Builder
+	for i := 0; i < len(s); i += 2 {
+		if i > 0 {
+			mac.WriteByte(':')
+		}
+		mac.WriteString(s[i : i+2])
+	}
+	return mac.String()
+}
 
 // NameFromMAC builds the fallback display name, unique per device.
 func NameFromMAC(mac string) string {

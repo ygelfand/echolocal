@@ -11,9 +11,14 @@ package setup
 
 import (
 	"log/slog"
+	"os"
 
 	"github.com/ygelfand/echolocal/internal/prop"
 )
+
+// pinControl dumps and drives every pin on the SoC. It is how the vendor audio HAL reaches the
+// microphone mute line, which is the one thing here that must be nobody else's.
+const pinControl = "/sys/devices/soc/1000b000.pinctrl/mt_gpio"
 
 // Action is one change and why echod wants it.
 type Action struct {
@@ -28,6 +33,20 @@ var Actions = []Action{
 		Name:   "stop shblemeshd",
 		Reason: "BLE mesh daemon left with nothing to talk to once its service package is hidden",
 		Do:     func() error { return prop.Stop("shblemeshd") },
+	},
+	{
+		Name: "take the pin controller back from mediaserver",
+		Reason: "the vendor audio HAL clears the microphone mute line while it sets up an input path, " +
+			"which unmutes a device the user left muted",
+		// Amazon's own csm_audio_init.sh grants this: "mediaserver service needs to access mt_gpio
+		// file in order to access mute LED on MUTE button ... chown root.media". Dropping the group
+		// write takes it back. echod writes the line through /sys/class/gpio, which is root's, so this
+		// costs us nothing and leaves mediaserver running — stopping it is not an option, because
+		// AudioService inside system_server then retries forever and says so in the log every time.
+		//
+		// Every boot rather than once at install: sysfs modes are the kernel's defaults again after a
+		// restart, and the vendor script re-grants it.
+		Do: func() error { return os.Chmod(pinControl, 0o644) },
 	},
 	{
 		Name:   "silence AmazonUsageStatsService",

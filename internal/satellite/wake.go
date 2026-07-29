@@ -71,7 +71,6 @@ func newWakeControl(k *kit, backends []settings.WakeBackend, slots int) *wakeCon
 		}
 		w.backend.Set(want.Label())
 
-		// The slots' saved values are per backend, so everything they show has to be re-read.
 		w.restoreSlots()
 		if w.onBackend != nil {
 			w.onBackend(want)
@@ -83,8 +82,6 @@ func newWakeControl(k *kit, backends []settings.WakeBackend, slots int) *wakeCon
 		w.slots = append(w.slots, w.newSlot(i))
 	}
 
-	w.backend.Set(settings.Get().Wake.BackendOr(settings.DefaultBackend).Label())
-	w.restoreSlots()
 	return w
 }
 
@@ -193,12 +190,8 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 			slog.Error("saving the wake tone failed", "slot", n+1, "err", err)
 		}
 	}
-	s.effect.OnCommand = func(v string) {
-		s.effect.Set(v)
-		if err := settings.SetWakeEffect(n, v); err != nil {
-			slog.Error("saving the wake effect failed", "slot", n+1, "err", err)
-		}
-	}
+	bindEffect(s.effect, led.EffectNames(), nil,
+		func(v string) error { return settings.SetWakeEffect(n, v) })
 	s.delivery.OnCommand = func(label string) {
 		how, ok := settings.ByLabel(deliveries(), label)
 		if !ok {
@@ -243,15 +236,19 @@ func deliveries() []settings.Delivery {
 	return []settings.Delivery{settings.DeliveryWhole, settings.DeliveryStream}
 }
 
-// restoreSlots publishes what the selected backend was last used with.
+// restoreSlots publishes what the selected backend was last used with. It runs from the restore pass
+// at start-up and again whenever the backend changes, because the slots' saved values are per backend
+// and everything they show has to be re-read.
 func (w *wakeControl) restoreSlots() {
 	wake := settings.Get().Wake
+	w.backend.Set(wake.BackendOr(settings.DefaultBackend).Label())
 
 	for i, s := range w.slots {
 		saved := wake.Slot(i)
 		s.threshold.Set(float32(saved.ThresholdOr(settings.DefaultThreshold)))
 		s.tone.Set(saved.ToneOr(settings.DefaultTone).Label())
-		s.effect.Set(saved.EffectOr(settings.DefaultEffect))
+		restoreEffect(s.effect, saved.EffectOr(settings.DefaultEffect), nil,
+			func(v string) error { return settings.SetWakeEffect(i, v) }, saved.Effect != nil)
 		s.delivery.Set(saved.DeliveryOr(settings.DefaultDelivery).Label())
 		s.buffer.Set(float32(saved.BufferOr(settings.DefaultBuffer)))
 		s.followUp.Set(float32(saved.FollowUpOr(settings.DefaultFollowUp)))
