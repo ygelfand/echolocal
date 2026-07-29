@@ -9,15 +9,13 @@ import (
 // once the wake word has been spoken, and speech runs straight on into the request, so without this
 // the first syllables of "turn on the kitchen light" are gone before anything is streaming.
 //
-// It is a compromise in both directions, and the window is narrower than it looks. With none of it
-// the first word of the request goes missing; with 500ms the tail of the wake word is transcribed
-// as part of the request and stops it matching an intent, so a little is worth much more than a
-// lot.
-//
-// The ring itself holds more than is sent, so this can change without changing what is kept.
-const History = 150 * time.Millisecond
+// It is a compromise in both directions: too little and the first word of the request is missing,
+// too much and the tail of the wake word is transcribed as part of the request, which can stop it
+// matching an intent.
+const History = 250 * time.Millisecond
 
-const historySamples = 2 * int(History/time.Millisecond) * Rate / 1000
+// The ring holds a second, whatever is being sent of it.
+const historySamples = Rate
 
 // history is a ring of the most recently captured mono samples.
 type history struct {

@@ -21,6 +21,7 @@ import (
 type options struct {
 	microphone *esphome.Select
 	gain       *esphome.Number
+	leveling   *esphome.Switch
 	resampling *esphome.Select
 }
 
@@ -28,51 +29,64 @@ func newOptions(k *kit) *options {
 	source, spk := k.Mic, k.Speaker
 	o := &options{}
 
-	if source != nil {
-		o.microphone = &esphome.Select{
-			Base: esphome.Base{
-				ObjectID: "microphone",
-				Name:     "Microphone mixing",
-				Icon:     "mdi:microphone-settings",
-				Category: esphome.CategoryConfig,
-			},
-		}
-		bind(o.microphone, mic.Mixings(),
-			settings.Get().Microphone.MixingOr(settings.DefaultMixing),
-			source.SetMixing, settings.SetMicMixing)
+	o.microphone = &esphome.Select{
+		Base: esphome.Base{
+			ObjectID: "microphone",
+			Name:     "Microphone mixing",
+			Icon:     "mdi:microphone-settings",
+			Category: esphome.CategoryConfig,
+		},
+	}
+	bind(o.microphone, mic.Mixings(),
+		settings.Get().Microphone.MixingOr(settings.DefaultMixing),
+		source.SetMixing, settings.SetMicMixing)
 
-		o.gain = &esphome.Number{
-			Base: esphome.Base{
-				ObjectID: "microphone_gain",
-				Name:     "Microphone gain",
-				Icon:     "mdi:volume-plus",
-				Category: esphome.CategoryConfig,
-			},
-			Min: 0, Max: 59, Step: 1, Unit: "dB",
-			Mode: esphome.NumberBox,
-		}
-		o.gain.Set(float32(settings.Get().Microphone.GainOr(settings.DefaultMicGain)))
-		o.gain.OnCommand = func(v float32) {
-			o.gain.Set(v)
-			if err := mic.SetGain(int(v)); err != nil {
-				slog.Error("saving the microphone gain failed", "err", err)
-			}
+	o.leveling = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "mic_leveling",
+			Name:     "Microphone leveling",
+			Icon:     "mdi:signal-variant",
+			Category: esphome.CategoryConfig,
+		},
+	}
+	o.leveling.Set(settings.Get().Microphone.LevelingOr(settings.DefaultLeveling))
+	o.leveling.OnCommand = func(on bool) {
+		o.leveling.Set(on)
+		source.SetLeveling(on)
+		if err := settings.SetMicLeveling(on); err != nil {
+			slog.Error("saving the microphone leveling failed", "err", err)
 		}
 	}
 
-	if spk != nil {
-		o.resampling = &esphome.Select{
-			Base: esphome.Base{
-				ObjectID: "voice_resampling",
-				Name:     "Voice resampling",
-				Icon:     "mdi:sine-wave",
-				Category: esphome.CategoryConfig,
-			},
-		}
-		bind(o.resampling, speaker.Resamplings(),
-			settings.Get().Speaker.ResamplingOr(settings.ResampleSinc),
-			spk.SetResampling, settings.SetSpeakerResampling)
+	o.gain = &esphome.Number{
+		Base: esphome.Base{
+			ObjectID: "microphone_gain",
+			Name:     "Microphone gain",
+			Icon:     "mdi:volume-plus",
+			Category: esphome.CategoryConfig,
+		},
+		Min: 0, Max: 59, Step: 1, Unit: "dB",
+		Mode: esphome.NumberBox,
 	}
+	o.gain.Set(float32(settings.Get().Microphone.GainOr(settings.DefaultMicGain)))
+	o.gain.OnCommand = func(v float32) {
+		o.gain.Set(v)
+		if err := mic.SetGain(int(v)); err != nil {
+			slog.Error("saving the microphone gain failed", "err", err)
+		}
+	}
+
+	o.resampling = &esphome.Select{
+		Base: esphome.Base{
+			ObjectID: "voice_resampling",
+			Name:     "Voice resampling",
+			Icon:     "mdi:sine-wave",
+			Category: esphome.CategoryConfig,
+		},
+	}
+	bind(o.resampling, speaker.Resamplings(),
+		settings.Get().Speaker.ResamplingOr(settings.ResampleSinc),
+		spk.SetResampling, settings.SetSpeakerResampling)
 
 	return o
 }
@@ -105,14 +119,5 @@ func bind[T settings.Labelled](sel *esphome.Select, values []T, saved T, apply f
 }
 
 func (o *options) entities() []esphome.Entity {
-	var ents []esphome.Entity
-	for _, sel := range []*esphome.Select{o.microphone, o.resampling} {
-		if sel != nil {
-			ents = append(ents, sel)
-		}
-	}
-	if o.gain != nil {
-		ents = append(ents, o.gain)
-	}
-	return ents
+	return []esphome.Entity{o.microphone, o.gain, o.leveling, o.resampling}
 }

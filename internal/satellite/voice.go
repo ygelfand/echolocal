@@ -726,7 +726,9 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 			"peak", peak,
 			"peakdbfs", math.Round(20*math.Log10(max(float64(peak), 1)/32768)*10)/10,
 			"rms", math.Round(rms),
-			"rmsdbfs", math.Round(20*math.Log10(math.Max(rms, 1)/32768)*10)/10)
+			"rmsdbfs", math.Round(20*math.Log10(math.Max(rms, 1)/32768)*10)/10,
+			"gaindb", math.Round(c.source.Gain()*10)/10,
+			"clipped", c.source.Clipped())
 	}()
 
 	for {

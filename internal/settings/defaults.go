@@ -20,6 +20,9 @@ const (
 	DefaultMicGain = 20
 
 	DefaultMixing = MixCenter
+
+	// Home Assistant no longer levels what a satellite sends, so the device does.
+	DefaultLeveling = true
 )
 
 // VolumeOr reports the stored volume step, or def if it has never been set.
@@ -52,6 +55,14 @@ func (m Microphone) LEDBrightOr(def bool) bool {
 		return def
 	}
 	return *m.LEDBright
+}
+
+// LevelingOr reports whether the mix is brought up to the level recognition expects.
+func (m Microphone) LevelingOr(def bool) bool {
+	if m.Leveling == nil {
+		return def
+	}
+	return *m.Leveling
 }
 
 // GainOr reports the analog gain on the array, in dB.

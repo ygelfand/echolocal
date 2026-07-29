@@ -70,6 +70,12 @@ type Source struct {
 	// mixer is read by the reader and replaced from Home Assistant, both under mu.
 	mixer  Mixer
 	mixing settings.Mixing
+
+	// leveler and wasLeveling belong to the reader alone; leveling is the switch, which anything may
+	// set.
+	leveler     *leveler
+	wasLeveling bool
+	leveling    atomic.Bool
 }
 
 // SetMixing chooses how the microphones are combined. It takes effect on the next frame, and reports
@@ -94,12 +100,15 @@ func (s *Source) Mixing() settings.Mixing {
 // anything to hear. Listen, Recent and the mixing setting work throughout; frames start at Start.
 func New() *Source {
 	mixer, mixing := NewMixer(settings.Get().Microphone.MixingOr(settings.DefaultMixing))
-	return &Source{
+	s := &Source{
 		listeners: map[int]chan []int16{},
 		raw:       map[int]chan []byte{},
 		mixer:     mixer,
 		mixing:    mixing,
+		leveler:   newLeveler(),
 	}
+	s.leveling.Store(settings.Get().Microphone.LevelingOr(settings.DefaultLeveling))
+	return s
 }
 
 func (s *Source) Name() string { return "capture" }
@@ -270,6 +279,16 @@ func (s *Source) broadcast(raw []byte) {
 	// The recent history is kept whether or not anyone is listening: a wake word is only recognised
 	// once it has been said, so by the time a turn starts, the words after it are already past.
 	frame := s.mixer.Mix(Decode(raw))
+	// Turning leveling off throws away what it learned, so a room it has adapted badly to is
+	// recovered by switching it off and on rather than by restarting anything.
+	on := s.leveling.Load()
+	switch {
+	case on:
+		s.leveler.apply(frame)
+	case s.wasLeveling:
+		s.leveler.forget()
+	}
+	s.wasLeveling = on
 	s.remember(frame)
 
 	for _, ch := range s.listeners {
