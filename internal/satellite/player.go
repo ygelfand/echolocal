@@ -26,6 +26,7 @@ type mediaPlayer struct {
 	jack    *esphome.BinarySensor
 	leds    *led.Driver
 	speaker *speaker.Player
+	sound   *speaker.Driver
 
 	step int
 }
@@ -47,6 +48,7 @@ func newMediaPlayer(k *kit) *mediaPlayer {
 		},
 		leds:    leds,
 		speaker: spk,
+		sound:   k.Sound,
 	}
 	p.mp.OnCommand = p.command
 
@@ -127,7 +129,7 @@ func (p *mediaPlayer) mute(muted bool) {
 
 func (p *mediaPlayer) adjust(delta int) {
 	p.set(p.step + delta)
-	chime(p.speaker, toneVolume)
+	chime(p.sound, toneVolume)
 }
 
 // show lights the level as a clockwise arc, the leading segment dimmed by the fraction of a segment

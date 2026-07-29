@@ -97,6 +97,10 @@ type conversation struct {
 	vs      *esphome.VoiceSatellite
 	source  *mic.Source
 	speaker *speaker.Player
+
+	// sound is who may make one. Everything audible goes through it, so cancelling is one call
+	// wherever the sound came from.
+	sound *speaker.Driver
 	player  *mediaPlayer
 	wake    *wakeControl
 	ring    *ringLight
@@ -169,6 +173,7 @@ func newConversation(k *kit) *conversation {
 		vs:      k.Voice,
 		source:  k.Mic,
 		speaker: k.Speaker,
+		sound:   k.Sound,
 		player:  k.Player,
 		wake:    k.Wake,
 		ring:    k.Ring,
@@ -348,15 +353,18 @@ func (c *conversation) handle(e event) {
 
 	case evCancel:
 		c.clearPending()
-		if c.phase == phaseIdle {
+
+		// Stopping the sound comes first and does not care whether a turn is open: an announcement
+		// plays with nothing else happening, and used to be the one thing cancel could not reach.
+		sounding := c.sound.Busy()
+		c.sound.Silence()
+
+		if c.phase == phaseIdle && !sounding {
 			return
 		}
-		slog.Info("conversation cancelled", "phase", c.phase, "slot", c.slot+1)
-		if c.speaker != nil {
-			c.speaker.Drain()
-		}
+		slog.Info("cancelled", "phase", c.phase, "slot", c.slot+1, "sounding", sounding)
 		c.idle("cancelled")
-		chime(c.speaker, toneCancel)
+		chime(c.sound, toneCancel)
 
 	case evTimeout:
 		c.clearPending()
@@ -493,11 +501,22 @@ func (c *conversation) speak(url string) {
 	if url == "" {
 		return
 	}
+	// Fetching belongs to the sound, not beside it: silencing the reply abandons the download, so a
+	// cancelled turn cannot be followed by the audio it was waiting for.
+	reply := c.sound.Claim("reply", func(ctx context.Context, _ *speaker.Player) error {
+		return c.play(ctx, url)
+	})
+
 	go alog.Safely("reply", func() {
-		if err := c.play(url); err != nil {
+		<-reply.Done()
+
+		if err := reply.Err(); err != nil {
 			slog.Error("fetching the reply failed", "url", url, "err", err)
 		}
-		c.post(event{kind: evPlayed})
+		if reply.Stopped() {
+			return
+		}
+		c.post(event{kind: evPlayed, at: reply.Quiet()})
 	})
 }
 
@@ -562,7 +581,7 @@ func (c *conversation) disarm() {
 // trouble says a request could not be served. It takes its own claim at a priority above the turn,
 // so ending the turn that failed cannot take the indication away with it.
 func (c *conversation) trouble() {
-	chime(c.speaker, toneTrouble)
+	chime(c.sound, toneTrouble)
 
 	frame := make([]led.Color, led.Segments)
 	for i := range frame {
@@ -746,7 +765,7 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 					quiet = time.Time{}
 				case quiet.IsZero():
 					quiet = time.Now()
-				case time.Since(quiet) >= hardwareTail:
+				case time.Since(quiet) >= speaker.HardwareTail:
 					playing = false
 					slog.Debug("held the tone back", "ms", held*1000/mic.Rate)
 				}

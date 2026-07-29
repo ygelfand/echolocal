@@ -79,6 +79,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// DAC and toggling it pops.
 	spk := speaker.New()
 	group.Add(spk, forever())
+	sound := speaker.NewDriver(spk)
 
 	source := mic.New()
 	group.Add(source, forever())
@@ -91,6 +92,7 @@ func Run(ctx context.Context, cfg Config) error {
 		Mute:    mute,
 		MuteLED: muteLED,
 		Speaker: spk,
+		Sound:   sound,
 		Mic:     source,
 	})
 	if err != nil {

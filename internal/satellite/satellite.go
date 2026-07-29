@@ -39,6 +39,9 @@ type Config struct {
 	MuteLED *gpio.MuteLED
 	Speaker *speaker.Player
 
+	// Sound decides what the speaker is playing, the same way Ring decides what the ring shows.
+	Sound *speaker.Driver
+
 	// Mic is the array. Without it there is nothing to send Home Assistant, so no voice.
 	Mic *mic.Source
 }
@@ -83,6 +86,7 @@ func New(cfg Config) (*Satellite, error) {
 		Mute:    cfg.Mute,
 		MuteLED: cfg.MuteLED,
 		LEDs:    cfg.Ring,
+		Sound:   cfg.Sound,
 	}
 	ents := esphome.NewEntities()
 
@@ -264,7 +268,7 @@ func (s *Satellite) RunConversation(ctx context.Context) {
 func (s *Satellite) Action() {
 	if s.turn == nil {
 		slog.Warn("no voice pipeline; the action button has nothing to do")
-		chime(s.kit.Player.speaker, toneTrouble)
+		chime(s.kit.Sound, toneTrouble)
 		return
 	}
 
@@ -283,7 +287,7 @@ func (s *Satellite) Action() {
 func (s *Satellite) ActionHold() {
 	if s.turn == nil {
 		slog.Warn("no voice pipeline; the action button has nothing to hold")
-		chime(s.kit.Player.speaker, toneTrouble)
+		chime(s.kit.Sound, toneTrouble)
 		return
 	}
 	s.turn.Start(1)

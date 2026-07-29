@@ -72,7 +72,7 @@ func (s *Satellite) OnButton(e buttons.Event) {
 				s.mute.toggle()
 			}
 		case buttons.Hold:
-			chime(s.kit.Player.speaker, toneMuteHold)
+			chime(s.kit.Sound, toneMuteHold)
 		}
 
 	case buttons.Action:

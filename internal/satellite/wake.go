@@ -25,7 +25,7 @@ type wakeControl struct {
 	backend *esphome.Select
 	slots   []wakeSlot
 
-	speaker *speaker.Player
+	sound *speaker.Driver
 
 	// onBackend is called after the backend changes, to reload the wake words that backend was last
 	// used with and to make Home Assistant re-read which models are on offer.
@@ -56,7 +56,7 @@ func newWakeControl(k *kit, backends []settings.WakeBackend, slots int) *wakeCon
 			},
 			Options: settings.Labels(backends),
 		},
-		speaker: k.Speaker,
+		sound: k.Sound,
 	}
 
 	w.backend.OnCommand = func(label string) {
@@ -270,7 +270,7 @@ func (w *wakeControl) Threshold(slot int) float64 {
 
 // Chime sounds a detection in whatever the slot is set to.
 func (w *wakeControl) Chime(slot int) {
-	chime(w.speaker, wakeTones[w.saved(slot).ToneOr(settings.DefaultTone)])
+	chime(w.sound, wakeTones[w.saved(slot).ToneOr(settings.DefaultTone)])
 }
 
 // Tones reports whether the slot makes a sound when it fires.

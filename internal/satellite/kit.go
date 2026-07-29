@@ -16,6 +16,9 @@ import (
 // read what was set before it.
 type kit struct {
 	Speaker *speaker.Player
+
+	// Sound is who may make one, so that stopping is one call rather than one per source.
+	Sound *speaker.Driver
 	Mic     *mic.Source
 	Mute    *gpio.Mute
 	MuteLED *gpio.MuteLED

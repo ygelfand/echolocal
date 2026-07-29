@@ -24,11 +24,11 @@ type muteSwitch struct {
 	brightness *esphome.Select
 	mute       *gpio.Mute
 	led        *gpio.MuteLED
-	speaker    *speaker.Player
+	sound      *speaker.Driver
 }
 
 func newMuteSwitch(k *kit) *muteSwitch {
-	m, led, spk := k.Mute, k.MuteLED, k.Speaker
+	m, led, sound := k.Mute, k.MuteLED, k.Sound
 	s := &muteSwitch{
 		sw: &esphome.Switch{
 			Base: esphome.Base{
@@ -37,9 +37,9 @@ func newMuteSwitch(k *kit) *muteSwitch {
 				Icon:     "mdi:microphone-off",
 			},
 		},
-		mute:    m,
-		led:     led,
-		speaker: spk,
+		mute:  m,
+		led:   led,
+		sound: sound,
 	}
 	s.sw.OnCommand = s.set
 
@@ -117,10 +117,10 @@ func (s *muteSwitch) set(muted bool) {
 	}
 
 	if s.sw.Get() {
-		chime(s.speaker, toneMute)
+		chime(s.sound, toneMute)
 		return
 	}
-	chime(s.speaker, toneUnmute)
+	chime(s.sound, toneUnmute)
 }
 
 // apply drives the line, then publishes what the hardware actually reads back.
@@ -142,9 +142,9 @@ func (s *muteSwitch) toggle() {
 	slog.Info("mute button", "muted", muted)
 
 	if muted {
-		chime(s.speaker, toneMute)
+		chime(s.sound, toneMute)
 	} else {
-		chime(s.speaker, toneUnmute)
+		chime(s.sound, toneUnmute)
 	}
 	if err := settings.SetMicMuted(muted); err != nil {
 		slog.Error("saving mute state failed", "err", err)
