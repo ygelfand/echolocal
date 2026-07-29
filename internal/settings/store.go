@@ -36,6 +36,9 @@ type Microphone struct {
 	Muted     *bool `json:"muted,omitempty"`
 	LEDBright *bool `json:"led_bright,omitempty"`
 
+	// Gain is the analog gain on the array's converters, in dB.
+	Gain *int `json:"gain,omitempty"`
+
 	// Mixing is how the seven microphones are combined. Which one wins depends on the room.
 	Mixing *Mixing `json:"mixing,omitempty"`
 }
@@ -119,6 +122,7 @@ func SetSpeakerResampling(v Resampling) error { return store().SetSpeakerResampl
 func SetMicMuted(v bool) error     { return store().SetMicMuted(v) }
 func SetMicLEDBright(v bool) error { return store().SetMicLEDBright(v) }
 func SetMicMixing(v Mixing) error  { return store().SetMicMixing(v) }
+func SetMicGain(db int) error      { return store().SetMicGain(db) }
 
 func SetWakeBackend(v WakeBackend) error         { return store().SetWakeBackend(v) }
 func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(slot, id) }
@@ -214,6 +218,10 @@ func (st *Store) SetMicLEDBright(v bool) error {
 
 func (st *Store) SetMicMixing(v Mixing) error {
 	return st.Update(func(s *Stored) { s.Microphone.Mixing = &v })
+}
+
+func (st *Store) SetMicGain(db int) error {
+	return st.Update(func(s *Stored) { s.Microphone.Gain = &db })
 }
 
 func (st *Store) SetWakeBackend(v WakeBackend) error {

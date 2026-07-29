@@ -1,5 +1,7 @@
 package subband
 
+import "math"
+
 // Bands the beam is chosen on, roughly 250 Hz to 4 kHz. Below that the array has no directivity to
 // speak of and the room has most of its energy; above it, little of speech is left.
 const (
@@ -39,7 +41,7 @@ func (w *Weights) New() *Beamformer {
 	f := newFFT(FFTLen)
 	b := &Beamformer{
 		w:     w,
-		scale: 1 / bankGain(w.window),
+		scale: float32(math.Pow(10, BoostDB/20)) / bankGain(w.window),
 		syn:   newSynthesis(w.window, f),
 	}
 	for m := range b.an {

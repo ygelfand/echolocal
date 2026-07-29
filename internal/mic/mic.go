@@ -93,7 +93,7 @@ func (s *Source) Mixing() settings.Mixing {
 // New makes the array without taking the hardware, so listeners can subscribe before there is
 // anything to hear. Listen, Recent and the mixing setting work throughout; frames start at Start.
 func New() *Source {
-	mixer, mixing := NewMixer(settings.MixDelaySum)
+	mixer, mixing := NewMixer(settings.Get().Microphone.MixingOr(settings.DefaultMixing))
 	return &Source{
 		listeners: map[int]chan []int16{},
 		raw:       map[int]chan []byte{},
@@ -161,6 +161,8 @@ func (s *Source) open() error {
 	s.devMu.Lock()
 	s.pcm = pcm
 	s.devMu.Unlock()
+
+	applyGain(settings.Get().Microphone.GainOr(settings.DefaultMicGain))
 	return nil
 }
 

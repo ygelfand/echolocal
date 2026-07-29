@@ -39,6 +39,10 @@ const (
 	Inputs = 7
 )
 
+// BoostDB is the gain the vendor applies after the beamformer. The weights are not normalised, and
+// without it the mix lands about 7 dB below the center mic.
+const BoostDB = 7.2
+
 // VendorDir is where the vendor keeps its tuning.
 const VendorDir = "/vendor/etc/audio-algorithms"
 

@@ -15,6 +15,11 @@ const (
 
 	// Zero is no follow-up unless Home Assistant asks for one.
 	DefaultFollowUp = 0
+
+	// Analog gain on the array in dB, where the vendor ran it.
+	DefaultMicGain = 20
+
+	DefaultMixing = MixCenter
 )
 
 // VolumeOr reports the stored volume step, or def if it has never been set.
@@ -47,6 +52,14 @@ func (m Microphone) LEDBrightOr(def bool) bool {
 		return def
 	}
 	return *m.LEDBright
+}
+
+// GainOr reports the analog gain on the array, in dB.
+func (m Microphone) GainOr(def int) int {
+	if m.Gain == nil {
+		return def
+	}
+	return *m.Gain
 }
 
 // MixingOr reports how the array is combined.

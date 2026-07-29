@@ -273,6 +273,11 @@ func (w *wakeControl) Chime(slot int) {
 	chime(w.speaker, wakeTones[w.saved(slot).ToneOr(settings.DefaultTone)])
 }
 
+// Tones reports whether the slot makes a sound when it fires.
+func (w *wakeControl) Tones(slot int) bool {
+	return w.saved(slot).ToneOr(settings.DefaultTone) != settings.ToneNone
+}
+
 // Delivery is how a slot's reply should reach the device.
 func (w *wakeControl) Delivery(slot int) settings.Delivery {
 	return w.saved(slot).DeliveryOr(settings.DefaultDelivery)

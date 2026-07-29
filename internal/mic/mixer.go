@@ -73,5 +73,5 @@ func NewMixer(m settings.Mixing) (Mixer, settings.Mixing) {
 			return have.make(), m
 		}
 	}
-	return NewBeamformer(), settings.MixDelaySum
+	return Center{}, settings.DefaultMixing
 }

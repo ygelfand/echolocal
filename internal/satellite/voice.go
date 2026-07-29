@@ -686,7 +686,14 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 	// Send what was already said before this turn began. The wake word can only be recognised after
 	// it has been spoken, and people run straight on into the request, so the opening words exist only
 	// in the microphone's history. Subscribing first means no audio falls between the two.
-	if pre := c.source.Recent(mic.History); len(pre) > 0 {
+	//
+	// A slot that chimes does not send it: whoever is talking waits for the tone, so the history holds
+	// the wake word rather than the request, and the tone itself is louder at the array than they are.
+	pre := c.source.Recent(mic.History)
+	if c.wake.Tones(slot) {
+		pre = nil
+	}
+	if len(pre) > 0 {
 		for _, s := range pre {
 			buf = append(buf, byte(s), byte(s>>8))
 		}
@@ -699,6 +706,13 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 
 	// What the microphone actually sends is the input to speech recognition, and a quiet or clipped
 	// stream explains a bad transcript better than anything downstream does.
+	// The tone plays as the turn opens and is louder at the array than a talker across the room, so
+	// nothing is sent while it is sounding. What the speaker still has queued says when that is, and
+	// hardwareTail is what the driver holds after the queue runs out.
+	playing := c.speaker != nil && c.speaker.Queued() > 0
+	var quiet time.Time
+	var held int
+
 	var peak, samples int
 	var energy float64
 	defer func() {
@@ -722,6 +736,22 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 		case frame, ok := <-frames:
 			if !ok {
 				return
+			}
+
+			if playing {
+				switch {
+				case c.speaker.Queued() > 0:
+					quiet = time.Time{}
+				case quiet.IsZero():
+					quiet = time.Now()
+				case time.Since(quiet) >= hardwareTail:
+					playing = false
+					slog.Debug("held the tone back", "ms", held*1000/mic.Rate)
+				}
+				if playing {
+					held += len(frame)
+					continue
+				}
 			}
 
 			buf = buf[:0]

@@ -20,6 +20,7 @@ import (
 // still worth having here, since init restarts echod.
 type options struct {
 	microphone *esphome.Select
+	gain       *esphome.Number
 	resampling *esphome.Select
 }
 
@@ -37,8 +38,26 @@ func newOptions(k *kit) *options {
 			},
 		}
 		bind(o.microphone, mic.Mixings(),
-			settings.Get().Microphone.MixingOr(settings.MixDelaySum),
+			settings.Get().Microphone.MixingOr(settings.DefaultMixing),
 			source.SetMixing, settings.SetMicMixing)
+
+		o.gain = &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: "microphone_gain",
+				Name:     "Microphone gain",
+				Icon:     "mdi:volume-plus",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 0, Max: 59, Step: 1, Unit: "dB",
+			Mode: esphome.NumberBox,
+		}
+		o.gain.Set(float32(settings.Get().Microphone.GainOr(settings.DefaultMicGain)))
+		o.gain.OnCommand = func(v float32) {
+			o.gain.Set(v)
+			if err := mic.SetGain(int(v)); err != nil {
+				slog.Error("saving the microphone gain failed", "err", err)
+			}
+		}
 	}
 
 	if spk != nil {
@@ -91,6 +110,9 @@ func (o *options) entities() []esphome.Entity {
 		if sel != nil {
 			ents = append(ents, sel)
 		}
+	}
+	if o.gain != nil {
+		ents = append(ents, o.gain)
 	}
 	return ents
 }
