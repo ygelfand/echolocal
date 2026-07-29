@@ -151,21 +151,11 @@ type nextTurn struct {
 	followUp bool
 }
 
-// reply is the state of the answer being spoken. It only means anything in phaseReplying.
+// reply is which answer is being spoken, and how. Only one of them is set: a url means it is being
+// fetched whole, a stream means it is arriving over the API. Both play under one claim on the speaker.
 type reply struct {
-	// url is set when the reply is being fetched whole, which retires the streamed copy.
-	url string
-
-	held    []int16 // audio waiting for the cushion to fill
-	flowing bool    // the cushion is built and audio is going straight through
-
-	bytes     int
-	peak      int
-	splicesAt uint64 // seam count when the reply started, so only this reply's are reported
-
-	// playingAt is when playback began, once the cushion had filled. Wall clock from here to the queue
-	// running dry is what measures gapping; a starved buffer is silence the seam count never sees.
-	playingAt time.Time
+	url    string
+	stream *stream
 }
 
 func newConversation(k *kit) *conversation {
@@ -304,14 +294,13 @@ func (c *conversation) handle(e event) {
 		if c.phase != phaseReplying {
 			c.speak("")
 		}
-		c.queue(e.audio)
+		c.reply.stream.send(e.audio)
 
 	case evStreamEnd:
-		// Everything Home Assistant is going to send has been sent, so whatever is still held back
-		// waiting for the cushion will never be joined by more and should just play.
-		if c.phase == phaseReplying && c.reply.url == "" {
-			c.flush()
-			go alog.Safely("reply drain", c.awaitPlayback)
+		// Everything Home Assistant is going to send has been sent. What the errand is still holding
+		// back for the cushion plays, and it finishes once that has been heard.
+		if c.phase == phaseReplying && c.reply.stream != nil {
+			c.reply.stream.done()
 		}
 
 	case evPlayed:
@@ -403,7 +392,7 @@ func (c *conversation) start(n nextTurn) {
 
 	if c.phase != phaseIdle {
 		slog.Info("conversation interrupted", "was", c.phase, "from", c.slot+1, "slot", slot+1)
-		c.speaker.Drain()
+		c.sound.Silence()
 		c.idle("interrupted")
 
 		// The stopped run has yet to close, and its last events are still on their way.
@@ -483,40 +472,44 @@ func (c *conversation) think() {
 	}
 }
 
-// speak moves to playing the reply. url is empty for the streamed fallback.
+// speak moves to playing the reply. url is empty when it is arriving over the API instead.
+//
+// Either way it becomes one claim on the speaker, so silencing it stops the whole errand: a fetch
+// still downloading is abandoned rather than arriving to play into a cancelled turn, and a stream
+// still receiving stops taking chunks.
 func (c *conversation) speak(url string) {
 	c.stopStreaming()
 	c.enter(phaseReplying)
-	c.reply.url = url
+	c.reply = reply{url: url}
 
 	if effect := c.wake.Effect(c.slot); effect != "" {
 		c.claim.PlayReversed(effect, c.ring.Base())
 	}
 	c.player.mp.SetState(esphome.MediaPlayerAnnouncing)
-	c.reply.splicesAt = c.speaker.Splices()
 
 	// The deadline is left as it was. Text arriving is not the pipeline delivering: it still owes the
 	// audio, and the limit it was given when the device stopped listening goes on running until some
 	// of that audio turns up.
+	errand := func(ctx context.Context, p *speaker.Player) error { return c.play(ctx, url) }
 	if url == "" {
-		return
-	}
-	// Fetching belongs to the sound, not beside it: silencing the reply abandons the download, so a
-	// cancelled turn cannot be followed by the audio it was waiting for.
-	reply := c.sound.Claim("reply", func(ctx context.Context, _ *speaker.Player) error {
-		return c.play(ctx, url)
-	})
-
-	go alog.Safely("reply", func() {
-		<-reply.Done()
-
-		if err := reply.Err(); err != nil {
-			slog.Error("fetching the reply failed", "url", url, "err", err)
+		s := newStream(c.speaker.Splices(), c.wake.Buffer(c.slot))
+		c.reply.stream = s
+		errand = func(ctx context.Context, p *speaker.Player) error {
+			return s.play(ctx, p, func() { c.post(event{kind: evPlaying}) })
 		}
-		if reply.Stopped() {
+	}
+
+	held := c.sound.Claim("reply", errand)
+	go alog.Safely("reply", func() {
+		<-held.Done()
+
+		if err := held.Err(); err != nil {
+			slog.Error("playing the reply failed", "url", url, "err", err)
+		}
+		if held.Stopped() {
 			return
 		}
-		c.post(event{kind: evPlayed, at: reply.Quiet()})
+		c.post(event{kind: evPlayed, at: held.Quiet()})
 	})
 }
 
@@ -615,6 +608,11 @@ func (c *conversation) pipeline(e esphome.PipelineEvent) {
 		c.post(event{kind: evHeard, text: e.Data["text"]})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_STT_VAD_END:
 		c.post(event{kind: evHeard})
+	case api.VoiceAssistantEvent_VOICE_ASSISTANT_INTENT_PROGRESS:
+		if e.Data["tts_start_streaming"] == "1" {
+			slog.Info("early tts streaming offered", "slot", c.slot+1)
+		}
+
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_INTENT_END:
 		if e.Data["continue_conversation"] == "1" {
 			c.post(event{kind: evContinue})
@@ -790,118 +788,25 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 	}
 }
 
-// How much of a reply to hold before playing it: the full cushion to begin with, and only enough to
-// ride out jitter after a dip.
-//
-// Home Assistant sends 512-sample chunks and sleeps to stay 384 ms ahead of a device it assumes plays
-// everything the moment it arrives — ESPHome's own firmware has no threshold at all, just a 512 ms
-// buffer it drains continuously. Rebuilding the whole cushion after every dip turns a shortfall of a
-// few milliseconds into a third of a second of silence, so recovery gets its own, smaller figure.
-const (
-	replyCushion = 384 * time.Millisecond
-	replyResume  = 80 * time.Millisecond
-)
-
-// heldSamples is a duration as a count of 16 kHz samples.
-func heldSamples(d time.Duration) int {
-	return int(d/time.Millisecond) * speaker.VoiceRate / 1000
-}
-
-// queue hands streamed audio to the speaker once enough has arrived to play through a dip.
-func (c *conversation) queue(data []byte) {
-	samples := make([]int16, len(data)/2)
-	peak := 0
-	for i := range samples {
-		samples[i] = int16(uint16(data[i*2]) | uint16(data[i*2+1])<<8)
-		peak = max(peak, int(samples[i]), -int(samples[i]))
-	}
-
-	// The first chunk is the pipeline delivering, so its limit is done with.
-	if c.reply.bytes == 0 {
-		slog.Info("reply audio started", "slot", c.slot+1, "bytes", len(data))
-		c.disarm()
-	}
-
-	// How loud the reply arrives decides whether interpolating it can overflow, and the byte count
-	// against how long it takes to say is how a wrong sample rate would show up.
-	c.reply.bytes += len(data)
-	c.reply.peak = max(c.reply.peak, peak)
-
-	c.reply.held = append(c.reply.held, samples...)
-	if c.speaker.Queued() == 0 {
-		c.reply.flowing = false
-	}
-
-	want := replyCushion
-	if !c.reply.playingAt.IsZero() {
-		want = replyResume
-	}
-	if !c.reply.flowing && len(c.reply.held) < heldSamples(want) {
-		return
-	}
-
-	if c.reply.playingAt.IsZero() {
-		c.reply.playingAt = time.Now()
-	}
-	c.reply.flowing = true
-	out := c.reply.held
-	c.reply.held = nil
-	c.speaker.PlayVoice(out)
-}
-
-// flush plays whatever is still held, for a reply that ended before filling the cushion.
-func (c *conversation) flush() {
-	out := c.reply.held
-	c.reply.held = nil
-	if len(out) > 0 {
-		c.speaker.PlayVoice(out)
-	}
-}
-
-// awaitPlayback waits for the speaker to stay empty, then says the reply is done. Chunks arrive with
-// gaps, so the queue emptying once does not mean the reply is over. It only runs once audio has
-// arrived, so an empty queue cannot be mistaken for a reply that has already finished.
-func (c *conversation) awaitPlayback() {
-	if c.speaker == nil {
-		c.post(event{kind: evPlayed})
-		return
-	}
-
-	// dry is when the queue first ran out. Confirming that is not part of how long the reply took.
-	var dry time.Time
-
-	const idleFor = 8
-	for idle := 0; idle < idleFor; {
-		if c.speaker.Queued() == 0 {
-			if idle == 0 {
-				dry = time.Now()
-			}
-			idle++
-		} else {
-			idle = 0
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	c.post(event{kind: evPlayed, at: dry})
-}
-
-// reported logs how the reply went. gap is silence the device had nothing to fill with.
+// reported logs how a streamed reply went, once the errand that played it has finished and its
+// counters are nobody's to write. gap is silence the device had nothing to fill with.
 func (c *conversation) reported(dry time.Time) {
-	if c.reply.bytes == 0 || c.reply.playingAt.IsZero() {
+	s := c.reply.stream
+	if s == nil || s.bytes == 0 || s.playingAt.IsZero() {
 		return
 	}
 
-	seconds := float64(c.reply.bytes) / float64(2*mic.Rate)
-	took := dry.Sub(c.reply.playingAt).Seconds()
+	seconds := float64(s.bytes) / float64(2*mic.Rate)
+	took := dry.Sub(s.playingAt).Seconds()
 
 	slog.Info("reply played",
 		"via", c.wake.Delivery(c.slot),
-		"bytes", c.reply.bytes,
+		"bytes", s.bytes,
 		"seconds", math.Round(seconds*100)/100,
 		"took", math.Round(took*100)/100,
 		"gap", math.Round(max(took-seconds, 0)*100)/100,
-		"peak", c.reply.peak,
-		"seams", c.speaker.Splices()-c.reply.splicesAt,
+		"peak", s.peak,
+		"seams", c.speaker.Splices()-s.splicesAt,
 		"clipped", c.speaker.Clipped(),
 		"dropped", c.source.Dropped())
 }

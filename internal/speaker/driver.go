@@ -51,6 +51,11 @@ func (d *Driver) Claim(name string, play func(ctx context.Context, p *Player) er
 	return c
 }
 
+// Interject makes a sound without taking the speaker from what has it. Short feedback — a volume
+// beep, a mute tone — is worth hearing, and not worth losing a reply over: it goes into the queue
+// behind whatever is already there rather than replacing it.
+func (d *Driver) Interject(play func(p *Player)) { play(d.p) }
+
 // Silence stops whatever is playing and empties the queue whether anything claimed it or not. It is
 // safe when nothing is playing.
 func (d *Driver) Silence() {

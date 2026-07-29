@@ -1,8 +1,6 @@
 package satellite
 
 import (
-	"context"
-
 	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
 )
@@ -42,15 +40,12 @@ func WakeTones() []settings.Tone {
 	return []settings.Tone{settings.ToneNone, settings.ToneChirp, settings.ToneDing, settings.ToneRise}
 }
 
-// chime takes the speaker for a tone. Feedback someone asked for by pressing a button is worth
-// hearing now rather than after whatever is playing, so it interrupts like anything else does.
+// chime plays a tone alongside whatever is playing rather than instead of it: pressing volume during
+// a reply should beep and leave the reply alone.
 func chime(d *speaker.Driver, notes []speaker.Note) {
 	if d == nil || len(notes) == 0 {
 		return
 	}
 
-	d.Claim("tone", func(_ context.Context, p *speaker.Player) error {
-		p.Chime(toneLevel, notes...)
-		return nil
-	})
+	d.Interject(func(p *speaker.Player) { p.Chime(toneLevel, notes...) })
 }

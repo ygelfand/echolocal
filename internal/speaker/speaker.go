@@ -370,14 +370,51 @@ func (p *Player) Beep(freq float64, ms int, level float64) {
 	p.Chime(level, Note{Freq: freq, Ms: ms})
 }
 
-// Chime queues notes back to back, each shaped by the same short envelope so the joins do not
-// click.
+// Chime sounds notes back to back, each shaped by the same short envelope so the joins do not click.
+//
+// A tone is feedback, so it mixes into whatever is queued rather than waiting behind it: queued audio
+// is a reply's cushion or, when the reply came as a file, all of it, and a beep that waits is a beep
+// that arrives after the answer.
 func (p *Player) Chime(level float64, notes ...Note) {
 	var out []int16
 	for _, n := range notes {
 		out = append(out, tone(n, level)...)
 	}
-	p.Play(out)
+	p.Overlay(out)
+}
+
+// Overlay mixes samples into what is already queued, extending the queue if they outlast it. Sums are
+// clamped: two things at once are louder than either, and wrapping would turn that into a crack.
+func (p *Player) Overlay(samples []int16) {
+	if pb, _ := p.device(); pb == nil {
+		p.Play(samples)
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pending = mix(p.pending, samples)
+}
+
+// mix sums add into the front of into, extending it if add outlasts it.
+func mix(into, add []int16) []int16 {
+	for i, s := range add {
+		if i >= len(into) {
+			return append(into, add[i:]...)
+		}
+		into[i] = clamp(int32(into[i]) + int32(s))
+	}
+	return into
+}
+
+func clamp(v int32) int16 {
+	switch {
+	case v > math.MaxInt16:
+		return math.MaxInt16
+	case v < math.MinInt16:
+		return math.MinInt16
+	}
+	return int16(v)
 }
 
 func tone(n Note, level float64) []int16 {

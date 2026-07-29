@@ -40,6 +40,7 @@ type wakeSlot struct {
 	tone      *esphome.Select
 	effect    *esphome.Select
 	delivery  *esphome.Select
+	buffer    *esphome.Number
 	followUp  *esphome.Number
 	maxListen *esphome.Number
 	maxThink  *esphome.Number
@@ -132,6 +133,16 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 			},
 			Options: settings.Labels(deliveries()),
 		},
+		buffer: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("reply_buffer_%d", n+1),
+				Name:     fmt.Sprintf("Assistant %d reply buffer", n+1),
+				Icon:     "mdi:buffer",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 0, Max: 3000, Step: 50, Unit: "ms",
+			Mode: esphome.NumberBox,
+		},
 		followUp: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("follow_up_%d", n+1),
@@ -200,6 +211,12 @@ func (w *wakeControl) newSlot(n int) wakeSlot {
 		}
 		slog.Info("reply delivery", "slot", n+1, "using", how)
 	}
+	s.buffer.OnCommand = func(v float32) {
+		s.buffer.Set(v)
+		if err := settings.SetWakeBuffer(n, int(v)); err != nil {
+			slog.Error("saving the reply buffer failed", "slot", n+1, "err", err)
+		}
+	}
 	s.followUp.OnCommand = func(v float32) {
 		s.followUp.Set(v)
 		if err := settings.SetWakeFollowUp(n, int(v)); err != nil {
@@ -236,6 +253,7 @@ func (w *wakeControl) restoreSlots() {
 		s.tone.Set(saved.ToneOr(settings.DefaultTone).Label())
 		s.effect.Set(saved.EffectOr(settings.DefaultEffect))
 		s.delivery.Set(saved.DeliveryOr(settings.DefaultDelivery).Label())
+		s.buffer.Set(float32(saved.BufferOr(settings.DefaultBuffer)))
 		s.followUp.Set(float32(saved.FollowUpOr(settings.DefaultFollowUp)))
 		s.maxListen.Set(float32(saved.MaxListenOr(settings.DefaultMaxListen)))
 		s.maxThink.Set(float32(saved.MaxThinkOr(settings.DefaultMaxThink)))
@@ -248,7 +266,7 @@ func (w *wakeControl) restoreSlots() {
 func (w *wakeControl) entities() []esphome.Entity {
 	ents := []esphome.Entity{w.backend}
 	for _, s := range w.slots {
-		ents = append(ents, s.threshold, s.tone, s.effect, s.delivery, s.followUp,
+		ents = append(ents, s.threshold, s.tone, s.effect, s.delivery, s.buffer, s.followUp,
 			s.maxListen, s.maxThink)
 	}
 	return ents
@@ -281,6 +299,11 @@ func (w *wakeControl) Tones(slot int) bool {
 // Delivery is how a slot's reply should reach the device.
 func (w *wakeControl) Delivery(slot int) settings.Delivery {
 	return w.saved(slot).DeliveryOr(settings.DefaultDelivery)
+}
+
+// Buffer is how much of a streamed reply to collect before playing any of it.
+func (w *wakeControl) Buffer(slot int) time.Duration {
+	return time.Duration(w.saved(slot).BufferOr(settings.DefaultBuffer)) * time.Millisecond
 }
 
 // FollowUp is how long a turn opened without a wake word listens for, zero when only Home Assistant

@@ -16,6 +16,11 @@ const (
 	// Zero is no follow-up unless Home Assistant asks for one.
 	DefaultFollowUp = 0
 
+	// Milliseconds of a streamed reply to collect before playing it. Home Assistant paces itself to
+	// stay this far ahead of a device it assumes plays everything on arrival, so it is what it expects
+	// to be enough. A pipeline whose speech arrives slower than it plays needs more.
+	DefaultBuffer = 384
+
 	// Analog gain on the array in dB, where the vendor ran it.
 	DefaultMicGain = 20
 
@@ -123,6 +128,14 @@ func (w WakeWord) DeliveryOr(def Delivery) Delivery {
 		return def
 	}
 	return *w.Delivery
+}
+
+// BufferOr reports how much of a streamed reply to collect before playing it, in milliseconds.
+func (w WakeWord) BufferOr(def int) int {
+	if w.Buffer == nil {
+		return def
+	}
+	return *w.Buffer
 }
 
 // FollowUpOr reports how long a turn opened without a wake word listens for.
