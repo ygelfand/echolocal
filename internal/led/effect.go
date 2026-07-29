@@ -215,13 +215,34 @@ func effect(name string, base Color, level Level) (Frame, error) {
 	return e.New(p), nil
 }
 
-// RunEffect animates until ctx is cancelled.
-func RunEffect(ctx context.Context, r *Ring, name string, base Color, level Level) error {
+// RunEffect animates until ctx is cancelled. under is what to show wherever this draws nothing, or nil
+// to own the ring outright.
+func RunEffect(ctx context.Context, r *Ring, name string, base Color, level Level, under Frame) error {
 	frame, err := effect(name, base, level)
 	if err != nil {
 		return err
 	}
-	return play(ctx, r, 0, frame)
+	return play(ctx, r, 0, through(frame, under))
+}
+
+// through prefers what frame draws and falls back to under wherever frame draws nothing at all.
+//
+// Both are asked for the same moment, so what is underneath keeps one continuous timeline whether or not
+// it is being covered: a comet on the light does not restart every time the room goes quiet.
+func through(frame, under Frame) Frame {
+	if under == nil {
+		return frame
+	}
+
+	return func(elapsed time.Duration) []Color {
+		out := frame(elapsed)
+		for _, c := range out {
+			if c != (Color{}) {
+				return out
+			}
+		}
+		return under(elapsed)
+	}
 }
 
 // RunEffectReversed animates the same effect the other way round the ring, which is how the device
@@ -229,12 +250,12 @@ func RunEffect(ctx context.Context, r *Ring, name string, base Color, level Leve
 //
 // Reversing an effect that reacts to the room is allowed and means nothing: what it shows comes from
 // the room rather than from a direction of travel.
-func RunEffectReversed(ctx context.Context, r *Ring, name string, base Color, level Level) error {
+func RunEffectReversed(ctx context.Context, r *Ring, name string, base Color, level Level, under Frame) error {
 	frame, err := effect(name, base, level)
 	if err != nil {
 		return err
 	}
-	return play(ctx, r, 0, reverse(frame))
+	return play(ctx, r, 0, through(reverse(frame), under))
 }
 
 // reverse mirrors a frame around the ring, turning clockwise motion into anticlockwise without an

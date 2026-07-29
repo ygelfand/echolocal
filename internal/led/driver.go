@@ -168,10 +168,10 @@ func (d *Driver) render(ctx context.Context, top *Claim, rev uint64) {
 		<-rctx.Done()
 		return
 	}
-	d.show(rctx, top.get())
+	d.show(rctx, top.get(), d.beneath(top))
 }
 
-func (d *Driver) show(ctx context.Context, c Content) {
+func (d *Driver) show(ctx context.Context, c Content, under Frame) {
 	switch {
 	case c.Animate != nil:
 		if err := c.Animate(ctx, d.ring); err != nil && ctx.Err() == nil {
@@ -183,9 +183,9 @@ func (d *Driver) show(ctx context.Context, c Content) {
 	case c.Effect != "":
 		var err error
 		if c.Reverse {
-			err = RunEffectReversed(ctx, d.ring, c.Effect, c.Base, c.Level)
+			err = RunEffectReversed(ctx, d.ring, c.Effect, c.Base, c.Level, under)
 		} else {
-			err = RunEffect(ctx, d.ring, c.Effect, c.Base, c.Level)
+			err = RunEffect(ctx, d.ring, c.Effect, c.Base, c.Level, under)
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Error("ring effect failed", "effect", c.Effect, "err", err)
@@ -200,10 +200,9 @@ func (d *Driver) show(ctx context.Context, c Content) {
 	}
 }
 
-// top is what should be showing: the highest priority claim with something to show, and among equals
-// the one taken most recently. The revision comes back with it so the caller can tell this claim
-// changing from something underneath changing.
-func (d *Driver) top() (*Claim, uint64) {
+// stack is every claim with something to show, in the order they would be shown: by priority, and among
+// equals the one taken most recently.
+func (d *Driver) stack() []*Claim {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -215,9 +214,6 @@ func (d *Driver) top() (*Claim, uint64) {
 			live = append(live, c)
 		}
 	}
-	if len(live) == 0 {
-		return nil, 0
-	}
 
 	sort.SliceStable(live, func(i, j int) bool {
 		if live[i].priority != live[j].priority {
@@ -225,11 +221,61 @@ func (d *Driver) top() (*Claim, uint64) {
 		}
 		return live[i].seq > live[j].seq
 	})
+	return live
+}
+
+// top is what should be showing. The revision comes back with it so the caller can tell this claim
+// changing from something underneath changing.
+func (d *Driver) top() (*Claim, uint64) {
+	live := d.stack()
+	if len(live) == 0 {
+		return nil, 0
+	}
 
 	best := live[0]
 	best.mu.Lock()
 	defer best.mu.Unlock()
 	return best, best.rev
+}
+
+// beneath is what the claim under top would draw, for something reacting to the room to show through
+// wherever it draws nothing.
+//
+// Only for that: a room effect is dark until something happens, so a dark ring should mean nothing is
+// happening rather than that the ring is claimed and being held empty. Everything else that draws black
+// draws it deliberately — heartbeat rests between its thumps, alert between its pulses — and would
+// strobe whatever is underneath if it fell through.
+//
+// Keyed on the claim having been given a room to read rather than on which effect it names, because that
+// is the question being asked: not what this animation is capable of, but what it is being used for.
+func (d *Driver) beneath(top *Claim) Frame {
+	if top.get().Level == nil {
+		return nil
+	}
+
+	live := d.stack()
+	if len(live) < 2 || live[0] != top {
+		return nil
+	}
+
+	under := live[1].get()
+	switch {
+	case under.Animate != nil:
+		// It owns the hardware and runs to its own timeline, so it cannot be asked for one frame.
+		return nil
+
+	case under.Effect != "":
+		frame, err := effect(under.Effect, under.Base, under.Level)
+		if err != nil {
+			return nil
+		}
+		return frame
+
+	case len(under.Frame) == Segments:
+		still := under.Frame
+		return func(time.Duration) []Color { return still }
+	}
+	return nil
 }
 
 // wake tells the render loop to reconsider.

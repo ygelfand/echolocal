@@ -24,17 +24,29 @@ func ringInDir(t *testing.T) *Ring {
 }
 
 // shown is the color of segment 0 as it reached the hardware.
+//
+// A frame write truncates the file and writes it again, so reading while an animation is running can
+// catch it empty. That is an artefact of a file standing in for the hardware — the real attribute takes
+// a whole frame at once — so a short read is retried rather than being a failure.
 func shown(t *testing.T, r *Ring) Color {
 	t.Helper()
 
-	vals, err := r.Frame()
-	if err != nil {
-		t.Fatalf("reading frame: %v", err)
+	for try := range 20 {
+		if try > 0 {
+			time.Sleep(2 * time.Millisecond)
+		}
+
+		vals, err := r.Frame()
+		if err != nil {
+			t.Fatalf("reading frame: %v", err)
+		}
+		if len(vals) >= 3 {
+			return Color{R: vals[0], G: vals[1], B: vals[2]}
+		}
 	}
-	if len(vals) < 3 {
-		t.Fatalf("frame is %d values", len(vals))
-	}
-	return Color{R: vals[0], G: vals[1], B: vals[2]}
+
+	t.Fatal("the frame stayed empty")
+	return Color{}
 }
 
 // settle waits for the render loop to write. The driver renders as soon as it is woken, so this only
@@ -250,5 +262,70 @@ func TestReleasedClaimIsInert(t *testing.T) {
 	settle()
 	if got := shown(t, d.ring); got != green {
 		t.Errorf("a released claim painted %+v", got)
+	}
+}
+
+// A room reaction is dark until something happens, so while it is dark the light underneath has to show
+// through: choosing to follow the room should not mean giving up the ring's own colour for the evenings
+// nobody says anything.
+func TestARoomReactionShowsTheLightThroughItsSilence(t *testing.T) {
+	d := running(t)
+
+	base := d.Claim(PriorityBase)
+	base.Paint(solid(green))
+
+	// A quiet room, then a loud one, from the same source the driver reads every frame.
+	var loud atomic.Bool
+	room := d.Claim(PriorityRoom)
+	room.React(EffectRoomGlow, blue, func() float64 {
+		if loud.Load() {
+			return 1
+		}
+		return 0
+	})
+	settle()
+
+	if got := shown(t, d.ring); got != green {
+		t.Errorf("a silent room shows %+v, want the light underneath", got)
+	}
+
+	loud.Store(true)
+	settle()
+	if got := shown(t, d.ring); got != blue {
+		t.Errorf("a loud room shows %+v, want the reaction", got)
+	}
+
+	// And back, without anything being claimed or released in between.
+	loud.Store(false)
+	settle()
+	if got := shown(t, d.ring); got != green {
+		t.Errorf("once the room went quiet the ring shows %+v, want the light again", got)
+	}
+}
+
+// Only something reading the room may be seen through. An animation that goes dark on purpose — a
+// heartbeat between thumps, an alert between pulses — owns the ring while it does, or the layer beneath
+// would strobe through every gap.
+func TestADarkAnimationStillOwnsTheRing(t *testing.T) {
+	d := running(t)
+
+	base := d.Claim(PriorityBase)
+	base.Paint(solid(green))
+
+	// Heartbeat is entirely dark for most of its period, which is what makes it the case worth testing.
+	turn := d.Claim(PriorityTurn)
+	turn.Play(EffectHeartbeat, red)
+
+	// Waited for rather than settled: until the animation's first write lands, the frame still holds
+	// what the claim underneath left there, and reading that proves nothing.
+	for shown(t, d.ring) == green {
+		time.Sleep(FrameInterval)
+	}
+
+	for range 30 {
+		if got := shown(t, d.ring); got == green {
+			t.Fatal("the light underneath showed through a resting heartbeat")
+		}
+		time.Sleep(FrameInterval)
 	}
 }
