@@ -17,9 +17,11 @@ import (
 // not: which words go in which slot, and what to tell Home Assistant about the ones that would not
 // load.
 func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source) {
-	models, err := wake.Installed(layout.ModelDir)
+	library := wake.NewLibrary(layout.ModelDir)
+
+	models, err := wake.Installed(library.Dir())
 	if err != nil {
-		slog.Warn("no wake word models", "dir", layout.ModelDir, "err", err)
+		slog.Warn("no wake word models", "dir", library.Dir(), "err", err)
 		return
 	}
 
@@ -32,6 +34,10 @@ func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source)
 	// refuses is left out, so Home Assistant reverts that slot rather than showing a wake word the
 	// device is not listening for.
 	load := func(ids []string) []string {
+		// A selection may name a model Home Assistant is offering but this device has never had, so the
+		// library is asked rather than the list captured at boot: this is where a new word arrives.
+		models := library.Ensure(ids)
+
 		var accepted []string
 		for slot := range satellite.WakeSlots {
 			if slot >= len(ids) || ids[slot] == "" {
@@ -64,6 +70,7 @@ func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source)
 	}
 
 	sat.OnWakeWord(load)
+	sat.OnOffers(library.Offered)
 
 	// Changing the engine rebuilds it and reloads every slot from what that engine was last used with.
 	sat.OnWakeBackend(func(b settings.WakeBackend) []string {

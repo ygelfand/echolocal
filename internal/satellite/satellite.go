@@ -60,6 +60,7 @@ type Satellite struct {
 
 	// models is everything installed, of either backend. What is advertised is filtered from it.
 	models []wake.Model
+
 }
 
 // New builds the server and its entities. It does not listen; call Serve.
