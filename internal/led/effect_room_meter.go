@@ -7,8 +7,8 @@ import "time"
 // still moves — the same trick the volume arc uses.
 //
 // A palette runs along the fill rather than round it, so the far end of the meter is the loud end.
-func roomMeter(p Palette, l Level) Frame {
+func roomMeter(p Palette, r Room) Frame {
 	return func(time.Duration) []Color {
-		return arcOf(level(l), p)
+		return arcOf(level(r), p)
 	}
 }

@@ -46,10 +46,17 @@ const (
 // Has reports whether an effect may be used for a kind.
 func (k Kinds) Has(want Kinds) bool { return k&want != 0 }
 
-// Level is how loud the room is now, from 0 for quiet to 1 for someone talking close by, measured
-// against the room's own noise floor by internal/mic. An effect that senses the room reads it every
-// frame, which is why it is a function and not a number.
-type Level func() float64
+// Room is what an effect that watches the room can ask about it, read every frame rather than passed as
+// numbers: what it shows is whatever is true at the moment it draws.
+type Room struct {
+	// Level is how loud it is now, 0 for quiet to 1 for someone talking close by, measured against the
+	// room's own noise floor.
+	Level func() float64
+
+	// Facing is where the loudest sound is, as a fraction clockwise round the ring from segment 0, and
+	// whether that is known: it takes a frame of asking, and a room with nothing in it has no answer.
+	Facing func() (float64, bool)
+}
 
 // Effect is one animation the ring can run: a motion, and the colours it runs in.
 //
@@ -77,7 +84,7 @@ type Effect struct {
 	// Senses builds a motion that watches the room. Only KindRoom effects have one, and having one is
 	// what makes an effect unable to be anything else: there is no sensible still frame to fall back
 	// on when nothing is listening for it.
-	Senses func(p Palette, l Level) Frame
+	Senses func(p Palette, r Room) Frame
 }
 
 // Effect names. A pairing that brings its own colours is named for the palette and the motion, so
@@ -120,6 +127,7 @@ const (
 
 	// Reacting to the room. Named for what they follow, not for the motion, because that is the part
 	// worth knowing: the ring is showing the room.
+	EffectFollower    = "Follower"
 	EffectRoomGlow    = "Room Glow"
 	EffectRoomMeter   = "Room Meter"
 	EffectRoomOcean   = "Room Ocean"
@@ -193,9 +201,9 @@ func Names(kinds Kinds) []string {
 // EffectNames lists what the ring light may be set to.
 func EffectNames() []string { return Names(KindLight) }
 
-// effect returns the frame function for a named effect. level is only needed by an effect that
-// senses the room, and asking for one of those without it is an error rather than a dark ring.
-func effect(name string, base Color, level Level) (Frame, error) {
+// effect returns the frame function for a named effect. The room is only needed by an effect that
+// senses it, and asking for one of those without it is an error rather than a dark ring.
+func effect(name string, base Color, room Room) (Frame, error) {
 	e, ok := byName[name]
 	if !ok {
 		return nil, fmt.Errorf("led: no effect %q", name)
@@ -207,18 +215,18 @@ func effect(name string, base Color, level Level) (Frame, error) {
 	}
 
 	if e.Senses != nil {
-		if level == nil {
+		if room.Level == nil {
 			return nil, fmt.Errorf("led: effect %q reacts to the room and was given nothing to react to", name)
 		}
-		return e.Senses(p, level), nil
+		return e.Senses(p, room), nil
 	}
 	return e.New(p), nil
 }
 
 // RunEffect animates until ctx is cancelled. under is what to show wherever this draws nothing, or nil
 // to own the ring outright.
-func RunEffect(ctx context.Context, r *Ring, name string, base Color, level Level, under Frame) error {
-	frame, err := effect(name, base, level)
+func RunEffect(ctx context.Context, r *Ring, name string, base Color, room Room, under Frame) error {
+	frame, err := effect(name, base, room)
 	if err != nil {
 		return err
 	}
@@ -250,8 +258,8 @@ func through(frame, under Frame) Frame {
 //
 // Reversing an effect that reacts to the room is allowed and means nothing: what it shows comes from
 // the room rather than from a direction of travel.
-func RunEffectReversed(ctx context.Context, r *Ring, name string, base Color, level Level, under Frame) error {
-	frame, err := effect(name, base, level)
+func RunEffectReversed(ctx context.Context, r *Ring, name string, base Color, room Room, under Frame) error {
+	frame, err := effect(name, base, room)
 	if err != nil {
 		return err
 	}

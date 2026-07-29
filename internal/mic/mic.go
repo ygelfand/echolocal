@@ -76,6 +76,12 @@ type Source struct {
 	leveler     *leveler
 	wasLeveling bool
 	leveling    atomic.Bool
+
+	// Which way the loudest sound is, as a beam, or -1 until something asks. finder belongs to the
+	// reader; wantFacing is how anything else asks it to look.
+	finder     *Beamformer
+	facing     atomic.Int32
+	wantFacing atomic.Bool
 }
 
 // SetMixing chooses how the microphones are combined. It takes effect on the next frame, and reports
@@ -106,7 +112,10 @@ func New() *Source {
 		mixer:     mixer,
 		mixing:    mixing,
 		leveler:   newLeveler(),
+		finder:    NewBeamformer(),
 	}
+	s.finder.hold = 1
+	s.facing.Store(-1)
 	s.leveling.Store(settings.Get().Microphone.LevelingOr(settings.DefaultLeveling))
 	return s
 }
@@ -278,7 +287,9 @@ func (s *Source) broadcast(raw []byte) {
 	//
 	// The recent history is kept whether or not anyone is listening: a wake word is only recognised
 	// once it has been said, so by the time a turn starts, the words after it are already past.
-	frame := s.mixer.Mix(Decode(raw))
+	mics := Decode(raw)
+	frame := s.mixer.Mix(mics)
+	s.findFacing(mics)
 	// Turning leveling off throws away what it learned, so a room it has adapted badly to is
 	// recovered by switching it off and on rather than by restarting anything.
 	on := s.leveling.Load()

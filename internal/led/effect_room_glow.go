@@ -11,8 +11,8 @@ import "time"
 // quietest recent moment it may well not: see internal/mic/level.go.
 
 // roomGlow brightens the whole ring with the room, and goes out with it.
-func roomGlow(p Palette, l Level) Frame {
+func roomGlow(p Palette, r Room) Frame {
 	return func(time.Duration) []Color {
-		return around(p, level(l))
+		return around(p, level(r))
 	}
 }

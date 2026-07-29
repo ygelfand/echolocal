@@ -18,10 +18,10 @@ type roomReaction struct {
 	sel   *esphome.Select
 	claim *led.Claim
 
-	// level is where the room comes from, and base what colour to show it in. Both are read at the
-	// moment a frame is drawn rather than captured, so leveling and the light's colour stay live.
-	level led.Level
-	base  func() led.Color
+	// room is what the effect may ask about the room, and base what colour to show it in. Both are read
+	// at the moment a frame is drawn rather than captured, so leveling and the light's colour stay live.
+	room led.Room
+	base func() led.Color
 }
 
 func newRoomReaction(k *kit) *roomReaction {
@@ -42,7 +42,7 @@ func newRoomReaction(k *kit) *roomReaction {
 	// nobody can tell has failed.
 	choices := led.Names(led.KindRoom)
 	if k.Mic != nil {
-		r.level = k.Mic.Level
+		r.room = led.Room{Level: k.Mic.Level, Facing: k.Mic.Facing}
 	} else {
 		choices = nil
 	}
@@ -68,7 +68,7 @@ func (r *roomReaction) show(name string) {
 	case name == "":
 		r.claim.Clear()
 	default:
-		r.claim.React(name, r.base(), r.level)
+		r.claim.React(name, r.base(), r.room)
 	}
 }
 

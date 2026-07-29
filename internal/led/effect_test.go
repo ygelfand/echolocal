@@ -25,10 +25,15 @@ func frames(f Frame) [][]Color {
 func built(t *testing.T, e Effect, base Color) Frame {
 	t.Helper()
 
+	// A room that rises and falls, and a talker that walks round it, so an effect that watches either has
+	// something to watch.
 	var heard int
-	frame, err := effect(e.Name, base, func() float64 {
-		heard++
-		return math.Abs(math.Sin(float64(heard) / 40))
+	frame, err := effect(e.Name, base, Room{
+		Level: func() float64 {
+			heard++
+			return math.Abs(math.Sin(float64(heard) / 40))
+		},
+		Facing: func() (float64, bool) { return math.Mod(float64(heard)/120, 1), true },
 	})
 	if err != nil {
 		t.Fatalf("building it failed: %v", err)
@@ -147,10 +152,10 @@ func TestTheListsOfferOnlyWhatFitsThem(t *testing.T) {
 	}
 
 	// And asking for one the wrong way round says so rather than showing a dark ring.
-	if _, err := effect(EffectRoomGlow, HomeAssistant, nil); err == nil {
+	if _, err := effect(EffectRoomGlow, HomeAssistant, Room{}); err == nil {
 		t.Error("building a room effect without a room succeeded, want an error")
 	}
-	if _, err := effect("Nothing Like This", HomeAssistant, nil); err == nil {
+	if _, err := effect("Nothing Like This", HomeAssistant, Room{}); err == nil {
 		t.Error("building an effect that does not exist succeeded, want an error")
 	}
 }

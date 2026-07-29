@@ -70,26 +70,40 @@ func hash(x uint32) uint32 {
 	return x
 }
 
-// level reads the room and keeps it inside 0 to 1, so an effect can trust what it is handed. A nil level
-// cannot happen through the catalogue, which refuses to build a room effect without a source, but a zero
-// reads as a quiet room rather than as a panic.
-func level(l Level) float64 {
-	if l == nil {
+// level reads the room and keeps it inside 0 to 1, so an effect can trust what it is handed. A room with
+// nothing behind it cannot happen through the catalogue, which refuses to build one of these without a
+// source, but it reads as quiet rather than as a panic.
+func level(r Room) float64 {
+	if r.Level == nil {
 		return 0
 	}
-	return math.Max(0, math.Min(1, l()))
+	return math.Max(0, math.Min(1, r.Level()))
+}
+
+// facing is where the sound is, as a position in segments round the ring, and whether it is known at all
+// — which it is not on the first frame, or when nothing is working it out.
+func facing(r Room) (float64, bool) {
+	if r.Facing == nil {
+		return 0, false
+	}
+
+	at, ok := r.Facing()
+	if !ok {
+		return 0, false
+	}
+	return math.Mod(math.Mod(at, 1)+1, 1) * Segments, true
 }
 
 // byRoom turns a motion into a room effect: it runs as written and the room decides how much of it
 // shows, which in silence is none of it. What that buys over a plain effect is that the ring is dark and
 // silent until something happens, and then it is the animation rather than a meter — a wheel that
 // appears while people are talking and fades out when the room settles.
-func byRoom(build func(Palette) Frame) func(Palette, Level) Frame {
-	return func(p Palette, l Level) Frame {
+func byRoom(build func(Palette) Frame) func(Palette, Room) Frame {
+	return func(p Palette, r Room) Frame {
 		frame := build(p)
 
 		return func(elapsed time.Duration) []Color {
-			x := level(l)
+			x := level(r)
 			out := frame(elapsed)
 			for i := range out {
 				out[i] = scale(out[i], x)

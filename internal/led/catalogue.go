@@ -73,6 +73,7 @@ var alertEffects = []Effect{
 // None of them can be a light effect, because none of them mean anything without something feeding
 // them. They are chosen from their own control and are simply on while chosen.
 var roomEffects = []Effect{
+	{Name: EffectFollower, Senses: follower},
 	{Name: EffectRoomGlow, Senses: roomGlow},
 	{Name: EffectRoomMeter, Senses: roomMeter},
 	{Name: EffectRoomOcean, Palette: ocean, Senses: roomMeter},

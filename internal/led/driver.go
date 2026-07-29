@@ -59,9 +59,9 @@ type Content struct {
 	Base    Color
 	Reverse bool
 
-	// Level is how loud the room is, for an effect that reacts to it. Whoever claims the ring for one
-	// supplies it, because the driver has no business knowing where the microphone is.
-	Level Level
+	// Room is what an effect that reacts to the room reads. Whoever claims the ring for one supplies it,
+	// because the driver has no business knowing where the microphones are.
+	Room Room
 
 	// Animate replaces both, for something with a timeline of its own such as the boot animation. It
 	// runs until the context is cancelled.
@@ -183,9 +183,9 @@ func (d *Driver) show(ctx context.Context, c Content, under Frame) {
 	case c.Effect != "":
 		var err error
 		if c.Reverse {
-			err = RunEffectReversed(ctx, d.ring, c.Effect, c.Base, c.Level, under)
+			err = RunEffectReversed(ctx, d.ring, c.Effect, c.Base, c.Room, under)
 		} else {
-			err = RunEffect(ctx, d.ring, c.Effect, c.Base, c.Level, under)
+			err = RunEffect(ctx, d.ring, c.Effect, c.Base, c.Room, under)
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Error("ring effect failed", "effect", c.Effect, "err", err)
@@ -249,7 +249,7 @@ func (d *Driver) top() (*Claim, uint64) {
 // Keyed on the claim having been given a room to read rather than on which effect it names, because that
 // is the question being asked: not what this animation is capable of, but what it is being used for.
 func (d *Driver) beneath(top *Claim) Frame {
-	if top.get().Level == nil {
+	if top.get().Room.Level == nil {
 		return nil
 	}
 
@@ -265,7 +265,7 @@ func (d *Driver) beneath(top *Claim) Frame {
 		return nil
 
 	case under.Effect != "":
-		frame, err := effect(under.Effect, under.Base, under.Level)
+		frame, err := effect(under.Effect, under.Base, under.Room)
 		if err != nil {
 			return nil
 		}
@@ -335,8 +335,8 @@ func (c *Claim) Play(effect string, base Color) { c.Show(Content{Effect: effect,
 
 // React runs an effect that watches the room, and keeps running it: what it shows changes with the
 // room rather than with the claim, so nothing has to come back and set it again.
-func (c *Claim) React(effect string, base Color, level Level) {
-	c.Show(Content{Effect: effect, Base: base, Level: level})
+func (c *Claim) React(effect string, base Color, room Room) {
+	c.Show(Content{Effect: effect, Base: base, Room: room})
 }
 
 // PlayReversed runs it the other way round the ring, which is how the device says it has stopped

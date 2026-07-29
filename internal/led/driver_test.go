@@ -277,12 +277,12 @@ func TestARoomReactionShowsTheLightThroughItsSilence(t *testing.T) {
 	// A quiet room, then a loud one, from the same source the driver reads every frame.
 	var loud atomic.Bool
 	room := d.Claim(PriorityRoom)
-	room.React(EffectRoomGlow, blue, func() float64 {
+	room.React(EffectRoomGlow, blue, Room{Level: func() float64 {
 		if loud.Load() {
 			return 1
 		}
 		return 0
-	})
+	}})
 	settle()
 
 	if got := shown(t, d.ring); got != green {

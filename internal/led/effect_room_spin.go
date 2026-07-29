@@ -6,14 +6,14 @@ import "time"
 // turning as fast as the room is loud. The phase is carried between frames rather than worked out from
 // elapsed, because a speed that changes has to be integrated — there is no closed form for "however
 // fast the room happened to be".
-func roomSpin(p Palette, l Level) Frame {
+func roomSpin(p Palette, r Room) Frame {
 	const revolution = 1400 * time.Millisecond
 
 	var phase float64
 	var last time.Duration
 
 	return func(elapsed time.Duration) []Color {
-		x := level(l)
+		x := level(r)
 
 		dt := elapsed - last
 		last = elapsed
