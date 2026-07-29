@@ -10,7 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
+
+// streamDepth is how much a reader may fall behind before it starts losing the oldest lines. logd
+// still has every one of them.
+const streamDepth = 256
 
 // Handler writes slog records to logd, and to a fallback writer so a run from an adb shell shows
 // output too. Lines carry the uptime, because what matters about echod's log is when something
@@ -22,6 +27,53 @@ type Handler struct {
 	group    string
 
 	mu *sync.Mutex
+}
+
+type Line struct {
+	Level slog.Level
+	Text  string
+
+	// Dropped is how many lines were lost before this one, so a gap can be reported rather than read
+	// as nothing having happened.
+	Dropped uint64
+}
+
+type stream struct {
+	lines   chan Line
+	dropped atomic.Uint64
+}
+
+// One process has one log, the same reason slog has a default. Nothing waits on it: logging happens
+// on whatever goroutine had something to say, including the one feeding audio.
+var out = stream{lines: make(chan Line, streamDepth)}
+
+// Lines is the log from now on, for anything that wants to carry it somewhere else. Nobody reading
+// costs one buffer and then nothing.
+func Lines() <-chan Line { return out.lines }
+
+// publish makes room by throwing away the oldest line rather than the newest: a live log is worth
+// more than its history.
+func (s *stream) publish(l Line) {
+	l.Dropped = s.dropped.Swap(0)
+
+	select {
+	case s.lines <- l:
+		return
+	default:
+	}
+
+	select {
+	case <-s.lines:
+		s.dropped.Add(1)
+	default:
+	}
+
+	select {
+	case s.lines <- l:
+	default:
+		// Someone else took the room in between. Count this line and carry its tally forward.
+		s.dropped.Add(1 + l.Dropped)
+	}
 }
 
 // NewHandler connects to logd. It never fails: without logd the handler writes to fallback only,
@@ -74,6 +126,8 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	})
 
 	line := b.String()
+
+	out.publish(Line{Level: r.Level, Text: line})
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
