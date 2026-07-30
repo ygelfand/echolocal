@@ -7,6 +7,9 @@ package wifi
 
 import (
 	"context"
+	"crypto/pbkdf2"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strconv"
@@ -204,11 +207,21 @@ func Join(d *device.Device, ssid, passphrase string) error {
 		return fmt.Errorf("wifi: add_network said %q", strings.TrimSpace(out))
 	}
 
-	set := [][]string{{"ssid", quoted(ssid)}, {"scan_ssid", "1"}}
-	if passphrase == "" {
+	// Both values go over as hex, which wpa_supplicant takes unquoted. A name or passphrase written as
+	// a quoted string would cross two parsers on the way — the device shell, then wpa_supplicant's own
+	// — and every character that means something to either has to be reasoned about. Hex has no
+	// special characters, so there is nothing to reason about.
+	set := [][]string{{"ssid", hex.EncodeToString([]byte(ssid))}, {"scan_ssid", "1"}}
+	switch {
+	case passphrase == "":
 		set = append(set, []string{"key_mgmt", "NONE"})
-	} else {
-		set = append(set, []string{"psk", quoted(passphrase)})
+	default:
+		psk, err := key(ssid, passphrase)
+		if err != nil {
+			_, _ = run(d, "remove_network", id)
+			return err
+		}
+		set = append(set, []string{"psk", psk})
 	}
 
 	for _, kv := range set {
@@ -244,8 +257,19 @@ type State struct {
 	Address string
 }
 
-// Joined reports whether the device is associated and has an address.
-func (s State) Joined() bool { return s.State == "COMPLETED" && s.Address != "" }
+// Joined reports whether the device is associated to this network and has an address. An empty ssid
+// accepts any, for a join where the name was never chosen — WPS.
+//
+// The name matters because COMPLETED alone is also true of the network the device was already on.
+// select_network does not tear the old association down at once, so for a second or two after asking
+// to switch, the supplicant still reports the previous network as connected. Judging on state alone
+// reports success for the network being left.
+func (s State) Joined(ssid string) bool {
+	if s.State != "COMPLETED" || s.Address == "" {
+		return false
+	}
+	return ssid == "" || s.SSID == ssid
+}
 
 func (s State) String() string {
 	if s.SSID == "" {
@@ -279,8 +303,9 @@ func Status(d *device.Device) (State, error) {
 	return s, nil
 }
 
-// Wait blocks until the device has associated and been given an address.
-func Wait(ctx context.Context, d *device.Device) (State, error) {
+// Wait blocks until the device has joined this network and been given an address. An empty ssid waits
+// for any network, which is all a WPS join can ask for.
+func Wait(ctx context.Context, d *device.Device, ssid string) (State, error) {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
@@ -289,7 +314,7 @@ func Wait(ctx context.Context, d *device.Device) (State, error) {
 		s, err := Status(d)
 		if err == nil {
 			last = s
-			if s.Joined() {
+			if s.Joined(ssid) {
 				return s, nil
 			}
 		}
@@ -315,9 +340,30 @@ func run(d *device.Device, args ...string) (string, error) {
 	return out, nil
 }
 
-// quoted is how wpa_cli takes a string value: in double quotes, through one shell.
-func quoted(s string) string {
-	return "'\"" + strings.ReplaceAll(s, `'`, `'\''`) + "\"'"
+// key turns a passphrase into the 256-bit key wpa_supplicant would derive from it anyway: PBKDF2 over
+// the passphrase with the network name as salt, 4096 rounds. Passing that instead of the passphrase
+// keeps the text out of every parser between here and the supplicant, and out of the config file it
+// writes.
+//
+// A 64-character hex string is already a key rather than a passphrase, so it goes through untouched.
+func key(ssid, passphrase string) (string, error) {
+	if len(passphrase) == 64 && isHex(passphrase) {
+		return passphrase, nil
+	}
+	if len(passphrase) < 8 || len(passphrase) > 63 {
+		return "", fmt.Errorf("wifi: a WPA passphrase is 8 to 63 characters, this one is %d", len(passphrase))
+	}
+
+	psk, err := pbkdf2.Key(sha1.New, passphrase, []byte(ssid), 4096, 32)
+	if err != nil {
+		return "", fmt.Errorf("wifi: deriving the key: %w", err)
+	}
+	return hex.EncodeToString(psk), nil
+}
+
+func isHex(s string) bool {
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 func lastLine(out string) string {

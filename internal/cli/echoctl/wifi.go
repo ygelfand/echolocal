@@ -79,7 +79,7 @@ func ensureWifi(ctx context.Context, out io.Writer, d *device.Device, ssid, pass
 			}
 		}
 
-		state, err := attempt(ctx, d)
+		state, err := attempt(ctx, d, ssid)
 		if err == nil {
 			fmt.Fprintf(out, "%s %s\n", styleDone.Render("✓ connected:"), state)
 			return nil
@@ -147,7 +147,7 @@ func check(ctx context.Context, out io.Writer, d *device.Device) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if state.Joined() {
+	if state.Joined("") {
 		fmt.Fprintf(out, "%s %s\n", styleDone.Render("✓ already connected:"), state)
 		return true, nil
 	}
@@ -168,10 +168,11 @@ func check(ctx context.Context, out io.Writer, d *device.Device) (bool, error) {
 	return !again, err
 }
 
-// attempt waits out one try at associating and being given an address.
-func attempt(ctx context.Context, d *device.Device) (wifi.State, error) {
+// attempt waits out one try at joining ssid and being given an address. An empty ssid is a WPS join,
+// where the network was never named and any is what success looks like.
+func attempt(ctx context.Context, d *device.Device, ssid string) (wifi.State, error) {
 	ctx, cancel := context.WithTimeout(ctx, joinTimeout)
 	defer cancel()
 
-	return wifi.Wait(ctx, d)
+	return wifi.Wait(ctx, d, ssid)
 }

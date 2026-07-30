@@ -70,6 +70,7 @@ var steps = []step{
 	{"gate Amazon init services", gateProps},
 	{"device name", installName},
 	{"encryption key", installKey},
+	{"default wake words", installModels},
 	{"remount /system rw", remountRW},
 	{"install echod", installBinary},
 	{"back up stock ledcontroller", backupService},
