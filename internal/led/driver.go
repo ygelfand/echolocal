@@ -32,6 +32,12 @@ const (
 	// room it is not listening to.
 	PriorityMute
 
+	// PriorityBusy is the device working on something the user asked for and is waiting on, such as a
+	// newly chosen wake word being fetched and warmed up. Over mute, because the mute button has a
+	// light of its own and so says the microphones are cut whatever the ring is doing, and under a
+	// conversation, because by then the device is answering rather than getting ready to.
+	PriorityBusy
+
 	// PriorityTurn is a conversation, which holds the ring from the wake word to the end of the reply.
 	PriorityTurn
 
@@ -77,6 +83,10 @@ func (c Content) empty() bool {
 type Driver struct {
 	ring *Ring
 
+	// busy is the shared indication that the device is working on something, so that anything holding
+	// the driver can say so without taking a claim of its own and competing with the others.
+	busy *Busy
+
 	mu     sync.Mutex
 	claims []*Claim
 	seq    uint64
@@ -87,8 +97,17 @@ type Driver struct {
 }
 
 func NewDriver(r *Ring) *Driver {
-	return &Driver{ring: r, changed: make(chan struct{}, 1)}
+	d := &Driver{ring: r, changed: make(chan struct{}, 1)}
+
+	// Built here rather than on first use: a claim with nothing to show costs nothing, and this way
+	// there is one of them without anybody having to arrange it.
+	d.busy = &Busy{claim: d.Claim(PriorityBusy)}
+	return d
 }
+
+// Busy is how anything says the device is working on something. Shared, so several things working at
+// once show as one indication rather than as claims taking turns.
+func (d *Driver) Busy() *Busy { return d.busy }
 
 // Name is what it is called when supervised.
 func (d *Driver) Name() string { return "ring" }

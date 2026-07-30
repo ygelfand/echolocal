@@ -4,13 +4,14 @@ import (
 	"context"
 
 	"github.com/ygelfand/echolocal/internal/buttons"
+	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/satellite"
 	"github.com/ygelfand/echolocal/internal/service"
 )
 
 // addSatellite registers what Home Assistant drives, once there is a satellite to drive it.
-func addSatellite(group *service.Group, sat *satellite.Satellite, source *mic.Source) {
+func addSatellite(group *service.Group, sat *satellite.Satellite, source *mic.Source, leds *led.Driver) {
 	// Buttons come first: they are the one part of the device that should work whatever else is wrong,
 	// so they must not be downstream of a network listener or lost to one read error.
 	group.Add(buttons.New(sat.OnButton), forever())
@@ -24,7 +25,7 @@ func addSatellite(group *service.Group, sat *satellite.Satellite, source *mic.So
 	// still loading and be told about one that then fails. Nothing installed is not fatal: the device
 	// works, it just cannot be woken.
 	if source != nil {
-		addWake(group, sat, source)
+		addWake(group, sat, source, leds)
 	}
 
 	group.Add(runner{name: "logs", run: sat.PipeLogs}, forever())

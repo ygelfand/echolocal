@@ -103,7 +103,7 @@ func Run(ctx context.Context, cfg Config) error {
 		slog.Error("satellite unavailable", "err", err)
 	} else {
 		ready.Store(sat)
-		addSatellite(group, sat, source)
+		addSatellite(group, sat, source, leds)
 	}
 
 	// The heartbeat samples what drifts, so a device with no satellite still beats and simply has

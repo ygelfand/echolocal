@@ -61,6 +61,12 @@ type Engine struct {
 	// OnDetect runs on a detection, off the audio path.
 	OnDetect func(slot int)
 
+	// OnReady runs once per slot, the first time its model produces a score. That is the first moment
+	// the wake word could be detected at all: these are streaming models with a window to fill, and
+	// openWakeWord gives nothing until it has about two seconds of audio. Loading is not hearing, and
+	// this is the difference.
+	OnReady func(slot int)
+
 	// Load puts the wake words in once the engine is up. It runs on every start, including a restart,
 	// because an engine that came back empty would leave the device deaf while claiming otherwise.
 	// Which words those are depends on what the user last chose, which is not this package's business.
@@ -72,6 +78,10 @@ type Engine struct {
 type slot struct {
 	model  Model
 	loaded bool
+
+	// scored is whether this slot has seen a score yet, which is what makes it able to detect anything.
+	// It goes back to false with the slot, so a wake word that is swapped out has to warm up again.
+	scored bool
 
 	quiet      time.Time
 	peak       float64
@@ -240,6 +250,18 @@ func (e *Engine) Loaded(n int) (Model, bool) {
 	return e.slots[n].model, e.slots[n].loaded
 }
 
+// Ready reports whether a slot has scored, and so whether its wake word can be heard yet. A slot with
+// nothing loaded is never ready.
+func (e *Engine) Ready(n int) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if n < 0 || n >= len(e.slots) {
+		return false
+	}
+	return e.slots[n].scored
+}
+
 // Listening reports whether any slot has a wake word.
 func (e *Engine) Listening() bool {
 	e.mu.Lock()
@@ -301,6 +323,14 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 		score, ok := heard[s.model.Kind][s.model.ID]
 		if !ok {
 			continue
+		}
+		if !s.scored {
+			s.scored = true
+			slog.Info("wake word ready", "slot", i+1, "id", s.model.ID)
+			if e.OnReady != nil {
+				n := i
+				go alog.Safely("wake word ready", func() { e.OnReady(n) })
+			}
 		}
 		e.judge(i, s, score, now, source)
 	}
