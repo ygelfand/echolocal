@@ -26,9 +26,6 @@ func TestDefaultsWhenUnset(t *testing.T) {
 	if v := got.Microphone.MixingOr(MixDelaySum); v != MixDelaySum {
 		t.Errorf("MixingOr = %q", v)
 	}
-	if v := got.Wake.BackendOr(DefaultBackend); v != DefaultBackend {
-		t.Errorf("BackendOr = %q", v)
-	}
 	if id := got.Wake.WordID(0); id != "" {
 		t.Errorf("WordID(0) = %q, want empty so the slot is off", id)
 	}
@@ -87,54 +84,41 @@ func TestZeroValueSticks(t *testing.T) {
 	}
 }
 
-// The whole point of keying by backend: what one engine was tuned to must not leak into the other,
-// since the two score on different scales.
-func TestSlotsAreKeyedByBackend(t *testing.T) {
+// Each slot is tuned on its own: two wake words can be different models on different engines, which
+// score on different scales, so a threshold set for one must not follow the other.
+func TestSlotsAreIndependent(t *testing.T) {
 	st := load(t)
 
-	if err := st.SetWakeBackend(BackendOpenWakeWord); err != nil {
-		t.Fatalf("SetWakeBackend: %v", err)
-	}
 	for _, set := range []func() error{
 		func() error { return st.SetWakeWord(0, "glados") },
 		func() error { return st.SetWakeThreshold(0, 0.97) },
 		func() error { return st.SetWakeTone(0, ToneRise) },
+		func() error { return st.SetWakeWord(1, "hey_jarvis") },
 	} {
 		if err := set(); err != nil {
-			t.Fatalf("setting an openWakeWord slot: %v", err)
+			t.Fatalf("setting a slot: %v", err)
 		}
 	}
 
-	if err := st.SetWakeBackend(BackendMicroWakeWord); err != nil {
-		t.Fatalf("SetWakeBackend: %v", err)
+	got := st.Get().Wake
+	if id := got.WordID(0); id != "glados" {
+		t.Errorf("WordID(0) = %q, want glados", id)
+	}
+	if v := got.Slot(0).ThresholdOr(DefaultThreshold); v != 0.97 {
+		t.Errorf("ThresholdOr(0) = %v, want 0.97", v)
+	}
+	if v := got.Slot(0).ToneOr(DefaultTone); v != ToneRise {
+		t.Errorf("ToneOr(0) = %q, want %q", v, ToneRise)
 	}
 
-	// Switching engines shows that engine's own slots, which have never been set.
-	micro := st.Get().Wake
-	if id := micro.WordID(0); id != "" {
-		t.Errorf("WordID(0) = %q under microWakeWord, want empty", id)
+	if id := got.WordID(1); id != "hey_jarvis" {
+		t.Errorf("WordID(1) = %q, want hey_jarvis", id)
 	}
-	if v := micro.Slot(0).ThresholdOr(DefaultThreshold); v != DefaultThreshold {
-		t.Errorf("ThresholdOr = %v under microWakeWord, want the default", v)
+	if v := got.Slot(1).ThresholdOr(DefaultThreshold); v != DefaultThreshold {
+		t.Errorf("ThresholdOr(1) = %v, want the default", v)
 	}
-
-	if err := st.SetWakeWord(0, "hey_jarvis"); err != nil {
-		t.Fatalf("SetWakeWord: %v", err)
-	}
-
-	// Switching back brings the first engine's slots back untouched.
-	if err := st.SetWakeBackend(BackendOpenWakeWord); err != nil {
-		t.Fatalf("SetWakeBackend: %v", err)
-	}
-	open := st.Get().Wake
-	if id := open.WordID(0); id != "glados" {
-		t.Errorf("WordID(0) = %q after switching back, want glados", id)
-	}
-	if v := open.Slot(0).ThresholdOr(DefaultThreshold); v != 0.97 {
-		t.Errorf("ThresholdOr = %v after switching back, want 0.97", v)
-	}
-	if v := open.Slot(0).ToneOr(DefaultTone); v != ToneRise {
-		t.Errorf("ToneOr = %q after switching back, want %q", v, ToneRise)
+	if v := got.Slot(1).ToneOr(DefaultTone); v != DefaultTone {
+		t.Errorf("ToneOr(1) = %q, want the default", v)
 	}
 }
 

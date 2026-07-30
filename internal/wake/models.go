@@ -2,7 +2,6 @@ package wake
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/zserge/microwakeword"
 
 	"github.com/ygelfand/echolocal/internal/oww"
-	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/tflite"
 )
 
@@ -29,7 +27,7 @@ type Model struct {
 	// model itself has to say, and it does: an openWakeWord wake word classifies a window of speech
 	// embeddings and takes them as its input, while a microWakeWord model is self-contained and
 	// consumes audio features.
-	Kind settings.WakeBackend
+	Kind Kind
 
 	Path   string
 	Config microwakeword.Config
@@ -53,8 +51,13 @@ type manifest struct {
 // Installed lists the models in dir, one per .tflite, reading a sidecar JSON of the same name when
 // there is one. A model with no manifest still works: the defaults are the ones every published
 // microWakeWord model uses, and the phrase comes from the file name.
+// A directory that is not there yet is not an error: a device Home Assistant has never offered a wake
+// word to has none, and adopting the first one creates it.
 func Installed(dir string) ([]Model, error) {
 	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -68,34 +71,31 @@ func Installed(dir string) ([]Model, error) {
 		id := strings.TrimSuffix(e.Name(), ".tflite")
 		out = append(out, load(dir, id))
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("wake: no models in %s", dir)
-	}
 	return out, nil
 }
 
 // kindOf asks the model which engine runs it. An openWakeWord classifier takes a window of
 // embeddings, [1, frames, 96]; anything else is treated as microWakeWord, which is the safe default
 // because that engine reports a load failure while a wrong guess the other way would score noise.
-func kindOf(path string) settings.WakeBackend {
+func kindOf(path string) Kind {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return settings.BackendMicroWakeWord
+		return KindMicroWakeWord
 	}
 	m, err := tflite.Parse(raw)
 	if err != nil {
-		return settings.BackendMicroWakeWord
+		return KindMicroWakeWord
 	}
 
 	g := m.Subgraphs[0]
 	if len(g.Inputs) == 0 {
-		return settings.BackendMicroWakeWord
+		return KindMicroWakeWord
 	}
 	shape := g.Tensors[g.Inputs[0]].Shape
 	if len(shape) == 3 && shape[2] == oww.EmbeddingDims {
-		return settings.BackendOpenWakeWord
+		return KindOpenWakeWord
 	}
-	return settings.BackendMicroWakeWord
+	return KindMicroWakeWord
 }
 
 func load(dir, id string) Model {
@@ -176,24 +176,12 @@ func Find(models []Model, id string) (Model, bool) {
 	return Model{}, false
 }
 
-// OfKind is the models one backend can run.
-func OfKind(models []Model, k settings.WakeBackend) []Model {
+// OfKind is the models one engine runs.
+func OfKind(models []Model, k Kind) []Model {
 	var out []Model
 	for _, m := range models {
 		if m.Kind == k {
 			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// Backends lists the ones with something installed to run, openWakeWord first because it is the one
-// wake words are published for.
-func Backends(models []Model) []settings.WakeBackend {
-	var out []settings.WakeBackend
-	for _, k := range []settings.WakeBackend{settings.BackendOpenWakeWord, settings.BackendMicroWakeWord} {
-		if len(OfKind(models, k)) > 0 {
-			out = append(out, k)
 		}
 	}
 	return out

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -38,8 +37,9 @@ type Reporter func(Event)
 
 // Config is what an install needs from the caller.
 type Config struct {
-	// EchodPath is the host path to the arm binary to install.
-	EchodPath string
+	// Echod is the arm binary to install: contents, so an embedded payload and a file arrive the
+	// same way.
+	Echod []byte
 
 	// Name is what Home Assistant calls the device. Only needed on a device that has none.
 	Name string
@@ -48,6 +48,15 @@ type Config struct {
 	// Home Assistant can push one. Nothing to paste, but until HA does that anyone on the
 	// network can drive the device.
 	ZeroPSK bool
+
+	// BootImage is the image the flash stage writes, and BootImageFrom where it came from.
+	BootImage     []byte
+	BootImageFrom string
+
+	// Approved records that someone agreed to the boot partition being overwritten. Nothing is
+	// written without it: the caller asks, because by the time a stage runs the terminal belongs to
+	// the progress display.
+	Approved bool
 }
 
 type step struct {
@@ -91,12 +100,30 @@ var uninstallSteps = []step{
 type run struct {
 	d   *device.Device
 	cfg Config
+
+	// ctx is the caller's, for the steps that wait on a device rebooting.
+	ctx context.Context
+
+	// state is what the device last said about itself. The flash stage reads it before deciding to
+	// write anything and again afterwards to judge whether it worked.
+	state state
 }
 
-// Install is safe to re-run: every step either checks the state it creates or is harmless to
-// repeat. The stock binary is backed up only once, so a second run cannot overwrite it.
+// Install puts echod on a device that already has root. It is safe to re-run: every step either
+// checks the state it creates or is harmless to repeat, and the stock binary is backed up only once,
+// so a second run cannot overwrite it.
+//
+// FlashBoot has to have happened first, on this device or a previous run. Nothing here works without
+// a root adbd, and reading the device's own name needs it.
 func Install(ctx context.Context, d *device.Device, cfg Config, report Reporter) error {
-	return execute(ctx, steps, &run{d: d, cfg: cfg}, report)
+	return execute(ctx, steps, &run{d: d, cfg: cfg, ctx: ctx}, report)
+}
+
+// FlashBoot writes echod's boot image, and does nothing on a device that already has root and a
+// permissive kernel. Its own stage because it reboots twice, is the only thing that writes outside
+// /system, and is worth running on its own as often as needed.
+func FlashBoot(ctx context.Context, d *device.Device, cfg Config, report Reporter) error {
+	return execute(ctx, flashSteps, &run{d: d, cfg: cfg, ctx: ctx}, report)
 }
 
 // Uninstall puts Amazon's ledcontroller back and removes echod.
@@ -137,11 +164,8 @@ func execute(ctx context.Context, steps []step, r *run, report Reporter) error {
 }
 
 func checkDevice(r *run) (string, bool, error) {
-	if r.cfg.EchodPath == "" {
+	if len(r.cfg.Echod) == 0 {
 		return "", false, errors.New("no echod binary given")
-	}
-	if _, err := os.Stat(r.cfg.EchodPath); err != nil {
-		return "", false, err
 	}
 
 	sdk, err := r.d.Getprop("ro.build.version.sdk")
@@ -164,7 +188,7 @@ func installBinary(r *run) (string, bool, error) {
 	if _, err := r.d.Shell("mkdir -p " + layout.Dir); err != nil {
 		return "", false, err
 	}
-	if err := r.d.PushFile(r.cfg.EchodPath, layout.Binary, 0o755); err != nil {
+	if err := r.d.WriteFile(layout.Binary, r.cfg.Echod, 0o755); err != nil {
 		return "", false, err
 	}
 	label, err := r.d.Label(layout.Binary)

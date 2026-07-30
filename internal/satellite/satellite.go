@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,11 +74,12 @@ func New(cfg Config) (*Satellite, error) {
 		slog.Error("reading saved settings failed, continuing with defaults", "err", err)
 	}
 
-	// The installed models decide which backends can be offered, so they are read before anything
-	// that shows a choice.
+	// What is installed is advertised from the start; what Home Assistant offers is added when it asks
+	// for the configuration. A device with neither is still worth building — that is how it gets its
+	// first wake word.
 	models, err := wake.Installed(layout.ModelDir)
 	if err != nil {
-		slog.Warn("no wake word models to advertise", "err", err)
+		slog.Warn("listing wake word models failed", "err", err)
 	}
 
 	k := &kit{
@@ -108,7 +110,7 @@ func New(cfg Config) (*Satellite, error) {
 	k.Player = newMediaPlayer(k)
 	ents.Add(k.Player.entities()...)
 
-	k.Wake = newWakeControl(k, wake.Backends(models), WakeSlots)
+	k.Wake = newWakeControl(k, WakeSlots)
 	ents.Add(k.Wake.entities()...)
 
 	opts := newOptions(k)
@@ -123,7 +125,8 @@ func New(cfg Config) (*Satellite, error) {
 	s.buttons = newButtonEvents()
 	ents.Add(s.buttons.entities()...)
 
-	ents.Add(newDiagnostics(k, s.WakeSlot).entities()...)
+	k.Diag = newDiagnostics(k, s.WakeSlot)
+	ents.Add(k.Diag.entities()...)
 
 	mac, err := macAddress()
 	if err != nil {
@@ -163,20 +166,15 @@ func New(cfg Config) (*Satellite, error) {
 			esphome.FeatureSpeaker |
 			esphome.FeatureAnnounce |
 			esphome.FeatureStartConversation
-		k.Voice = newVoiceSatellite(s.backendModels())
+		k.Voice = newVoiceSatellite(s.models)
 		s.turn = newConversation(k)
 		srv.Handler = esphome.Chain(ents, k.Voice)
 	}
 	return s, nil
 }
 
-// backendModels is what the selected backend can run.
-func (s *Satellite) backendModels() []wake.Model {
-	return wake.OfKind(s.models, settings.Get().Wake.BackendOr(settings.DefaultBackend))
-}
-
-// newVoiceSatellite advertises what the selected backend can run and follows Home Assistant's
-// selection.
+// newVoiceSatellite advertises every installed model and follows Home Assistant's selection. Which
+// engine runs one is the model's business, so nothing here has to filter.
 func newVoiceSatellite(models []wake.Model) *esphome.VoiceSatellite {
 	available, active := wakeWords(models, WakeSlots)
 	vs := &esphome.VoiceSatellite{
@@ -214,6 +212,12 @@ func (s *Satellite) OnWakeWord(load func(ids []string) []string) {
 		if len(accepted) != len(ids) {
 			slog.Warn("some wake words were refused", "asked", ids, "running", accepted)
 		}
+
+		// A selection both downloads models and lets go of the ones it replaced, so it is the one
+		// thing that moves either number.
+		if s.kit.Diag != nil {
+			s.kit.Diag.measure()
+		}
 	}
 }
 
@@ -237,33 +241,6 @@ func (s *Satellite) SetActiveWakeWords(ids []string) {
 	}
 	s.kit.Voice.ActiveWakeWords = ids
 	slog.Info("wake words listening", "active", ids)
-}
-
-// OnWakeBackend is called when the user changes engines. reload swaps the engine over and reports
-// the wake words it managed to bring up, which become what is advertised as active.
-//
-// Home Assistant only re-reads the available wake words when it sets them or when it connects, and
-// there is no way to push. Since the two engines offer different models, the connection is dropped
-// so the integration reconnects and asks again — otherwise its pickers would go on offering the old
-// engine's models until the next restart.
-func (s *Satellite) OnWakeBackend(reload func(settings.WakeBackend) []string) {
-	if s.kit.Voice == nil {
-		return
-	}
-
-	s.kit.Wake.onBackend = func(b settings.WakeBackend) {
-		active := reload(b)
-
-		available, fallback := wakeWords(s.backendModels(), WakeSlots)
-		if len(active) == 0 {
-			active = fallback
-		}
-		s.kit.Voice.AvailableWakeWords = available
-		s.kit.Voice.ActiveWakeWords = active
-
-		slog.Info("re-advertising wake words", "backend", b, "count", len(available), "active", active)
-		s.srv.Reconnect()
-	}
 }
 
 // PipelineReady reports whether Home Assistant has a voice pipeline listening. Wake detection runs
@@ -338,13 +315,25 @@ func (s *Satellite) Serve(ctx context.Context) error {
 	return s.srv.Serve(ctx, ln)
 }
 
-// advertise keeps trying until it works. echod starts from init, well before wifi has associated, so
-// the first attempt on a cold boot fails with no usable interface — registering needs one with an
-// address. Discovery is a convenience and a device reachable by address works without it, which is
-// why this only logs, but giving up after one go means a device is undiscoverable for the rest of the
-// run over a few seconds of boot ordering.
+// advertise publishes the addresses the device actually has, and republishes them when they change.
+//
+// echod starts from init, well before wifi has associated. The addresses are passed rather than left
+// to the library, which falls back to loopback when nothing routable exists — a record Home Assistant
+// discovers and then cannot connect to, which is worse than no record at all. Discovery is a
+// convenience and a device reachable by address works without it, so this only logs.
 func (s *Satellite) advertise(ctx context.Context, port int) {
 	for attempt := 1; ; attempt++ {
+		ips := routable()
+		if len(ips) == 0 {
+			if attempt == 1 {
+				slog.Info("waiting for an address before advertising over mdns")
+			}
+			if !pause(ctx, mdnsRetry) {
+				return
+			}
+			continue
+		}
+
 		adv, err := mdns.Advertise(mdns.Config{
 			Name:         s.name,
 			FriendlyName: s.srv.Info.FriendlyName,
@@ -354,27 +343,71 @@ func (s *Satellite) advertise(ctx context.Context, port int) {
 			Platform:     layout.Platform,
 			Board:        layout.Board,
 			Encrypted:    s.srv.PSK != nil,
+			IPs:          ips,
 		})
-		if err == nil {
-			slog.Info("advertising over mdns", "name", s.name, "port", port, "attempts", attempt)
-			<-ctx.Done()
-			adv.Close()
-			return
+		if err != nil {
+			// Only the first failure is worth a warning: after that it is the expected state of a
+			// device waiting for its network, and saying so every few seconds buries everything else.
+			if attempt == 1 {
+				slog.Warn("mdns advertise failed, retrying", "err", err)
+			} else {
+				slog.Debug("mdns advertise failed", "attempt", attempt, "err", err)
+			}
+			if !pause(ctx, mdnsRetry) {
+				return
+			}
+			continue
 		}
 
-		// Only the first failure is worth a warning: after that it is the expected state of a device
-		// waiting for its network, and saying so every few seconds buries everything else.
-		if attempt == 1 {
-			slog.Warn("mdns advertise failed, retrying", "err", err)
-		} else {
-			slog.Debug("mdns advertise failed", "attempt", attempt, "err", err)
-		}
+		slog.Info("advertising over mdns", "name", s.name, "port", port, "addrs", addrKey(ips))
 
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(mdnsRetry):
+		// The registration stands until the addresses it was made with are no longer the ones the
+		// device has: a lease that changed, or a network that arrived late.
+		for addrKey(routable()) == addrKey(ips) {
+			if !pause(ctx, mdnsRetry) {
+				adv.Close()
+				return
+			}
 		}
+		adv.Close()
+		slog.Info("addresses changed, re-advertising over mdns", "was", addrKey(ips))
+	}
+}
+
+// routable is what the device can be reached on: no loopback, no link-local.
+func routable() []net.IP {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+
+	var ips []net.IP
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if ok && ipnet.IP.IsGlobalUnicast() && !ipnet.IP.IsLinkLocalUnicast() {
+			ips = append(ips, ipnet.IP)
+		}
+	}
+	return ips
+}
+
+// addrKey is a set of addresses as one comparable string, so a change is one comparison.
+func addrKey(ips []net.IP) string {
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		out = append(out, ip.String())
+	}
+	slices.Sort(out)
+	return strings.Join(out, ",")
+}
+
+// pause sleeps unless ctx ends first, reporting whether there is any point carrying on.
+func pause(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
 

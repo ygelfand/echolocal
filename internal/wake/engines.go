@@ -8,7 +8,14 @@ import (
 	"github.com/zserge/microwakeword"
 
 	"github.com/ygelfand/echolocal/internal/oww"
-	"github.com/ygelfand/echolocal/internal/settings"
+)
+
+// Kind is which engine runs a wake word.
+type Kind string
+
+const (
+	KindOpenWakeWord  Kind = "openwakeword"
+	KindMicroWakeWord Kind = "microwakeword"
 )
 
 // backend runs the wake words of one Kind. It is the whole engine rather than one detector because
@@ -34,8 +41,8 @@ type backend interface {
 }
 
 // newBackend builds the engine for one of them.
-func newBackend(k settings.WakeBackend) (backend, error) {
-	if k == settings.BackendOpenWakeWord {
+func newBackend(k Kind) (backend, error) {
+	if k == KindOpenWakeWord {
 		front, err := oww.New()
 		if err != nil {
 			return nil, err

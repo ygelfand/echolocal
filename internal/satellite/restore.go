@@ -44,9 +44,13 @@ func restore(k *kit, mute *muteSwitch, opts *options, room *roomReaction) {
 	}
 
 	// Last, because a wake word slot is a pipeline's worth of settings and nothing else depends on it.
-	// It restores again on its own when the engine changes, since the words differ per backend.
 	if k.Wake != nil {
 		k.Wake.restoreSlots()
+	}
+
+	// What the disk holds, which the slots decide: a model no slot wants is cache.
+	if k.Diag != nil {
+		k.Diag.measure()
 	}
 
 	slog.Info("state restored")

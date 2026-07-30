@@ -12,6 +12,12 @@ var HomeAssistant = Color{R: 0x18, G: 0xBC, B: 0xF2}
 // It fills from segment 11 so the arc grows across the front of the device.
 func Arc(fraction float64, c Color) []Color { return arcOf(fraction, Palette{c}) }
 
+// Volume is the level as an arc in the meter's colours: green while quiet, amber as it gets loud,
+// red at the top. Since arcOf takes the colour from where a segment sits rather than from how far
+// along the fill it is, the same step is always the same colour, and how loud the device is about to
+// be can be read without counting segments.
+func Volume(fraction float64) []Color { return arcOf(fraction, vu) }
+
 // arcOf is the same arc in a palette's colours, laid along the fill rather than round the ring: the
 // far end of the arc is the far end of the palette, so how full it is says something on its own.
 func arcOf(fraction float64, p Palette) []Color {

@@ -6,7 +6,6 @@ const (
 	DefaultThreshold = 0.85
 	DefaultEffect    = "Pulse"
 	DefaultTone      = ToneChirp
-	DefaultBackend   = BackendOpenWakeWord
 	DefaultDelivery  = DeliveryWhole
 
 	// Seconds. Nobody speaks for fifteen, and a pipeline with a model in it can take a while.
@@ -154,22 +153,13 @@ func (m Microphone) MixingOr(def Mixing) Mixing {
 	return *m.Mixing
 }
 
-// BackendOr reports which engine runs the wake words.
-func (w Wake) BackendOr(def WakeBackend) WakeBackend {
-	if w.Backend == nil {
-		return def
-	}
-	return *w.Backend
-}
-
-// Slot is the configuration of one wake word slot for the selected backend, filled in with defaults.
-// A slot that has never been set comes back empty, which means switched off.
+// Slot is the configuration of one wake word slot. A slot that has never been set comes back empty,
+// which means switched off.
 func (w Wake) Slot(slot int) WakeWord {
-	words := w.Words[w.BackendOr(DefaultBackend)]
-	if slot < 0 || slot >= len(words) {
+	if slot < 0 || slot >= len(w.Words) {
 		return WakeWord{}
 	}
-	return words[slot]
+	return w.Words[slot]
 }
 
 // WordID is the wake word listening in a slot, empty when the slot is off.

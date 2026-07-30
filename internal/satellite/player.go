@@ -150,6 +150,6 @@ func (p *mediaPlayer) adjust(delta int) {
 // the level does not fill. It takes its own claim each time and lets it expire, which is what puts
 // back whatever was underneath — including a conversation that is still running.
 func (p *mediaPlayer) show(step int) {
-	frame := led.Arc(float64(step)/VolumeSteps, led.Color{R: 0xFF, G: 0xFF, B: 0xFF})
+	frame := led.Volume(float64(step) / VolumeSteps)
 	p.leds.Claim(led.PriorityNotice).PaintFor(frame, volumeFlash)
 }

@@ -74,14 +74,9 @@ type Microphone struct {
 	Mixing *Mixing `json:"mixing,omitempty"`
 }
 
-// Wake is the wake word configuration. Words is keyed by backend and indexed by Home Assistant's
-// wake word slot, so switching backends brings back the words that backend was last used with,
-// tuning and all, rather than starting over. Thresholds especially do not carry across: the two
-// engines score on different scales.
+// Wake is the wake word configuration, indexed by Home Assistant's wake word slot.
 type Wake struct {
-	Backend *WakeBackend `json:"backend,omitempty"`
-
-	Words map[WakeBackend][]WakeWord `json:"words,omitempty"`
+	Words []WakeWord `json:"slots,omitempty"`
 }
 
 // WakeWord is one slot: which wake word listens there and how it behaves when it fires. An empty ID
@@ -163,7 +158,6 @@ func SetRingTrouble(v string) error  { return store().SetRingTrouble(v) }
 func SetRingMuted(v string) error    { return store().SetRingMuted(v) }
 func SetRingLight(v Light) error     { return store().SetRingLight(v) }
 
-func SetWakeBackend(v WakeBackend) error         { return store().SetWakeBackend(v) }
 func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(slot, id) }
 func SetWakeThreshold(slot int, v float64) error { return store().SetWakeThreshold(slot, v) }
 func SetWakeTone(slot int, v Tone) error         { return store().SetWakeTone(slot, v) }
@@ -324,12 +318,6 @@ func (st *Store) SetRingLight(v Light) error {
 	return st.Update(func(s *Stored) { s.Ring.Light = v })
 }
 
-func (st *Store) SetWakeBackend(v WakeBackend) error {
-	return st.Update(func(s *Stored) { s.Wake.Backend = &v })
-}
-
-// The wake setters write into whichever backend is selected, so no caller has to say which: the
-// slot the user is editing is a slot of the engine that is running.
 func (st *Store) SetWakeWord(slot int, id string) error {
 	return st.updateWord(slot, func(w *WakeWord) { w.ID = &id })
 }
@@ -371,16 +359,9 @@ func (st *Store) updateWord(slot int, f func(*WakeWord)) error {
 		return fmt.Errorf("settings: wake slot %d", slot)
 	}
 	return st.Update(func(s *Stored) {
-		backend := s.Wake.BackendOr(BackendOpenWakeWord)
-		if s.Wake.Words == nil {
-			s.Wake.Words = map[WakeBackend][]WakeWord{}
+		for len(s.Wake.Words) <= slot {
+			s.Wake.Words = append(s.Wake.Words, WakeWord{})
 		}
-
-		words := s.Wake.Words[backend]
-		for len(words) <= slot {
-			words = append(words, WakeWord{})
-		}
-		f(&words[slot])
-		s.Wake.Words[backend] = words
+		f(&s.Wake.Words[slot])
 	})
 }

@@ -1,24 +1,49 @@
-// Package device wraps gadb with the shell semantics this device needs: commands carry their
-// own exit status, and output is normalised from CRLF.
+// Package device drives a connected Echo Dot through the adb binary, with the shell semantics this
+// device needs: commands carry their own exit status, and output is normalised from CRLF.
+//
+// Shelling out rather than speaking the protocol: every Go adb library talks to the adb server rather
+// than to the device, so platform-tools is a prerequisite either way. Given that, the binary is worth
+// more than a library — it brings wait-for-device, wait-for-recovery, reboot and the sync protocol,
+// all of which a library makes us reimplement.
 package device
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/electricbubble/gadb"
 )
+
+// Binary is what has to be on PATH.
+const Binary = "adb"
 
 const rcMarker = "__echolocal_rc="
 
-// Device is one connected Echo Dot, with a root adbd.
+// PlatformTools is where to get adb, for an error worth reading.
+const PlatformTools = "https://developer.android.com/tools/releases/platform-tools"
+
+// Require reports whether adb is available, and says what to install when it is not. Every entry
+// point checks this first: a missing binary should be one clear sentence, not a failure part way
+// through talking to a device.
+func Require() error {
+	if _, err := exec.LookPath(Binary); err != nil {
+		return fmt.Errorf("adb is not on PATH: install Android platform-tools and try again\n"+
+			"  %s\n"+
+			"  macOS: brew install --cask android-platform-tools\n"+
+			"  Debian/Ubuntu: apt install android-sdk-platform-tools", PlatformTools)
+	}
+	return nil
+}
+
+// Device is one connected Echo Dot, addressed by serial so a second device cannot be caught by
+// accident once one has been chosen.
 type Device struct {
-	d gadb.Device
+	serial string
 }
 
 // Error is a shell command that ran and failed.
@@ -53,68 +78,99 @@ func (i Info) String() string {
 	return i.Serial
 }
 
-// List returns the devices adb can actually talk to. Offline and unauthorized entries are
-// skipped: they show up in adb's listing but every command against them fails.
+// State is what adb says about a device. Only two matter here: a device that can be installed to, and
+// one in recovery, which is where the boot image is written from.
+const (
+	StateOnline   = "device"
+	StateRecovery = "recovery"
+)
+
+// List returns the devices adb can actually talk to. Offline and unauthorized entries are skipped:
+// they show up in adb's listing but every command against them fails.
 func List() ([]Info, error) {
-	devices, err := online()
+	serials, err := listing(StateOnline)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Info, 0, len(devices))
-	for _, gd := range devices {
-		d := &Device{d: gd}
+
+	out := make([]Info, 0, len(serials))
+	for _, serial := range serials {
+		d := &Device{serial: serial}
 		model, _ := d.Getprop("ro.product.model")
 		product, _ := d.Getprop("ro.product.device")
-		out = append(out, Info{Serial: gd.Serial(), Model: model, Product: product})
+		out = append(out, Info{Serial: serial, Model: model, Product: product})
 	}
 	return out, nil
 }
 
-func online() ([]gadb.Device, error) {
-	c, err := gadb.NewClient()
+// listing is the serials in any of the given states. `adb devices` reports one per line as
+// "serial<tab>state" after a header.
+func listing(states ...string) ([]string, error) {
+	out, err := run(context.Background(), "devices")
 	if err != nil {
-		return nil, fmt.Errorf("device: no adb server on 127.0.0.1:5037 (%w); start one with `adb start-server`", err)
-	}
-	devices, err := c.DeviceList()
-	if err != nil {
-		return nil, fmt.Errorf("device: listing devices: %w", err)
+		return nil, err
 	}
 
-	out := make([]gadb.Device, 0, len(devices))
-	for _, d := range devices {
-		if state, err := d.State(); err == nil && state == gadb.StateOnline {
-			out = append(out, d)
+	var serials []string
+	for line := range strings.SplitSeq(out, "\n") {
+		serial, state, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
+		for _, want := range states {
+			if strings.TrimSpace(state) == want {
+				serials = append(serials, serial)
+			}
 		}
 	}
-	return out, nil
+	return serials, nil
 }
 
-// Connect selects a device, or the only online one when serial is empty.
+// Connect selects a device an install can use: online, with a root adbd.
 func Connect(serial string) (*Device, error) {
-	devices, err := online()
+	d, err := Attach(serial)
+	if err != nil {
+		return nil, err
+	}
+	return rooted(d)
+}
+
+// Attach is Connect without the root check, for the one job that runs before root exists: writing the
+// boot image that grants it. Everything else takes Connect and is refused early.
+func Attach(serial string) (*Device, error) {
+	return attach(serial, StateOnline)
+}
+
+// AttachAny also accepts a device in recovery, which is where the boot partition is written and whose
+// adbd is already root.
+func AttachAny(serial string) (*Device, error) {
+	return attach(serial, StateOnline, StateRecovery)
+}
+
+func attach(serial string, states ...string) (*Device, error) {
+	if err := Require(); err != nil {
+		return nil, err
+	}
+	serials, err := listing(states...)
 	if err != nil {
 		return nil, err
 	}
 
 	switch {
-	case len(devices) == 0:
+	case len(serials) == 0:
 		return nil, errors.New("device: no device connected; check the USB cable and `adb devices`")
 	case serial != "":
-		for _, d := range devices {
-			if d.Serial() == serial {
-				return rooted(&Device{d: d})
+		for _, s := range serials {
+			if s == serial {
+				return &Device{serial: s}, nil
 			}
 		}
-		return nil, fmt.Errorf("device: no online device with serial %q", serial)
-	case len(devices) > 1:
-		serials := make([]string, 0, len(devices))
-		for _, d := range devices {
-			serials = append(serials, d.Serial())
-		}
+		return nil, fmt.Errorf("device: no device with serial %q", serial)
+	case len(serials) > 1:
 		return nil, fmt.Errorf("device: %d devices connected, pick one with --serial: %s",
-			len(devices), strings.Join(serials, ", "))
+			len(serials), strings.Join(serials, ", "))
 	}
-	return rooted(&Device{d: devices[0]})
+	return &Device{serial: serials[0]}, nil
 }
 
 // rooted refuses a device that cannot do what an install needs, rather than failing partway
@@ -125,12 +181,74 @@ func rooted(d *Device) (*Device, error) {
 		return nil, err
 	}
 	if !root {
-		return nil, errors.New("device: adbd is not running as root; unlock and root the device first")
+		return nil, errors.New("device: adbd is not running as root; write the boot image first (echoctl install --flash-only)")
 	}
 	return d, nil
 }
 
-func (d *Device) Serial() string { return d.d.Serial() }
+func (d *Device) Serial() string { return d.serial }
+
+// Reboot restarts the device. An empty target is Android; "recovery" is TWRP, which is the only place
+// the boot partition can be written.
+//
+// The device goes away as this runs, so a caller waits for it to come back with Wait.
+func (d *Device) Reboot(target string) error {
+	args := []string{"reboot"}
+	if target != "" {
+		args = append(args, target)
+	}
+	_, err := d.run(context.Background(), args...)
+	return err
+}
+
+// Wait blocks until the device is back in one of the given states, or ctx is done. It then confirms a
+// shell answers, because adb reports a device as present a moment before it will run anything.
+func (d *Device) Wait(ctx context.Context, states ...string) error {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+
+	for {
+		serials, err := listing(states...)
+		if err == nil {
+			for _, s := range serials {
+				if s != d.serial {
+					continue
+				}
+				if _, err := d.Shell("true"); err == nil {
+					return nil
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("device: waiting for %s in %v: %w", d.serial, states, ctx.Err())
+		case <-tick.C:
+		}
+	}
+}
+
+// WaitBooted waits for Android to finish coming up, not merely to answer: an install that starts
+// while the framework is still starting sees services that are not there yet.
+func (d *Device) WaitBooted(ctx context.Context) error {
+	if err := d.Wait(ctx, StateOnline); err != nil {
+		return err
+	}
+
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+
+	for {
+		if done, _ := d.Getprop("sys.boot_completed"); done == "1" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("device: %s did not finish booting: %w", d.serial, ctx.Err())
+		case <-tick.C:
+		}
+	}
+}
 
 // Shell runs a command and fails if it exits non-zero.
 func (d *Device) Shell(cmd string) (string, error) {
@@ -150,12 +268,14 @@ func (d *Device) ShellCode(cmd string) (string, int, error) {
 	return d.shell(cmd)
 }
 
+// shell appends its own exit-status marker rather than trusting adb to propagate one, which older
+// adb does not.
 func (d *Device) shell(cmd string) (string, int, error) {
-	raw, err := d.d.RunShellCommandWithBytes(cmd + "; echo " + rcMarker + "$?")
+	raw, err := d.run(context.Background(), "shell", cmd+"; echo "+rcMarker+"$?")
 	if err != nil {
 		return "", 0, fmt.Errorf("device: running %q: %w", cmd, err)
 	}
-	out, code, err := splitRC(string(raw))
+	out, code, err := splitRC(raw)
 	if err != nil {
 		return out, 0, fmt.Errorf("device: running %q: %w", cmd, err)
 	}
@@ -195,36 +315,56 @@ func (d *Device) IsSymlink(path string) (bool, error) {
 	return code == 0, nil
 }
 
-// ReadFile pulls a file into memory.
+// ReadFile reads a file into memory through exec-out, which is the only shell that does not translate
+// line endings. Reading a boot partition through `adb shell cat` corrupts it silently.
 func (d *Device) ReadFile(path string) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := d.d.Pull(path, &buf); err != nil {
-		return nil, fmt.Errorf("device: pulling %s: %w", path, err)
+	cmd := d.command(context.Background(), "exec-out", "cat "+quote(path))
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("device: reading %s: %w", path, err)
 	}
-	return buf.Bytes(), nil
+	return out, nil
 }
 
 // PullFile copies a file off the device.
 func (d *Device) PullFile(remote, local string) error {
-	f, err := os.Create(local)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := d.d.Pull(remote, f); err != nil {
+	if _, err := d.run(context.Background(), "pull", remote, local); err != nil {
 		return fmt.Errorf("device: pulling %s: %w", remote, err)
 	}
-	return f.Sync()
+	return nil
+}
+
+// Stream writes bytes into a file on the device through exec-in, which pipes stdin to a command
+// untranslated and without the sync protocol. `adb shell` is not an alternative: it mangles binary on
+// the way in.
+func (d *Device) Stream(remote string, data []byte) error {
+	cmd := d.command(context.Background(), "exec-in", fmt.Sprintf("dd of=%s bs=1M", quote(remote)))
+	cmd.Stdin = bytes.NewReader(data)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("device: streaming %s: %w: %s", remote, err, strings.Join(strings.Fields(string(out)), " "))
+	}
+	return nil
 }
 
 // WriteFile creates a file on the device with the given contents and mode.
 func (d *Device) WriteFile(remote string, data []byte, mode os.FileMode) error {
-	if err := d.d.Push(bytes.NewReader(data), remote, time.Now(), mode); err != nil {
-		return fmt.Errorf("device: writing %s: %w", remote, err)
+	tmp, err := os.CreateTemp("", "echoctl")
+	if err != nil {
+		return err
 	}
-	_, err := d.Shell(fmt.Sprintf("chmod %o %s", mode.Perm(), quote(remote)))
-	return err
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return d.PushFile(tmp.Name(), remote, mode)
 }
 
 // PushFile copies a file onto the device and sets its mode.
@@ -233,17 +373,11 @@ func (d *Device) WriteFile(remote string, data []byte, mode os.FileMode) error {
 // other, and overwriting one yields 0644. The chmod is what actually sets it, and without it a
 // re-install leaves a binary init cannot exec.
 func (d *Device) PushFile(local, remote string, mode os.FileMode) error {
-	f, err := os.Open(local)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := d.d.PushFile(f, remote); err != nil {
+	if _, err := d.run(context.Background(), "push", local, remote); err != nil {
 		return fmt.Errorf("device: pushing %s: %w", remote, err)
 	}
 
-	_, err = d.Shell(fmt.Sprintf("chmod %o %s", mode.Perm(), quote(remote)))
+	_, err := d.Shell(fmt.Sprintf("chmod %o %s", mode.Perm(), quote(remote)))
 	return err
 }
 
@@ -300,6 +434,34 @@ func (d *Device) Uptime() (float64, error) {
 		return 0, fmt.Errorf("device: unparseable uptime %q", out)
 	}
 	return v, nil
+}
+
+// command builds an adb invocation aimed at this device.
+func (d *Device) command(ctx context.Context, args ...string) *exec.Cmd {
+	if d.serial != "" {
+		args = append([]string{"-s", d.serial}, args...)
+	}
+	return exec.CommandContext(ctx, Binary, args...)
+}
+
+func (d *Device) run(ctx context.Context, args ...string) (string, error) {
+	return output(d.command(ctx, args...))
+}
+
+func run(ctx context.Context, args ...string) (string, error) {
+	return output(exec.CommandContext(ctx, Binary, args...))
+}
+
+// output reports stdout and stderr together, since adb explains refusals on stderr. Errors carry that
+// output on one line: adb's is several, and a multi-line error wrecks any progress display it lands in.
+func output(cmd *exec.Cmd) (string, error) {
+	out, err := cmd.CombinedOutput()
+	text := string(out)
+	if err != nil {
+		said := strings.Join(strings.Fields(text), " ")
+		return text, fmt.Errorf("%s: %w: %s", strings.Join(cmd.Args, " "), err, said)
+	}
+	return text, nil
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

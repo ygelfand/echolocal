@@ -2,6 +2,7 @@ package echoctl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/ygelfand/echolocal/internal/assets"
 	"github.com/ygelfand/echolocal/internal/device"
 	"github.com/ygelfand/echolocal/internal/installer"
 )
@@ -32,41 +34,101 @@ var (
 
 func newInstallCmd() *cobra.Command {
 	var (
-		serial  string
-		echod   string
-		name    string
-		zeroPSK bool
+		serial    string
+		echod     string
+		name      string
+		bootImage string
+		zeroPSK   bool
+		flashOnly bool
+		assumeYes bool
 	)
 
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install echod on a connected Echo Dot",
 		Long: "Installs echod into /system/app/echod and hands it Amazon's ledcontroller service,\n" +
-			"so init starts and supervises it. Safe to re-run.",
+			"so init starts and supervises it. Safe to re-run.\n\n" +
+			"Begins by writing EchoLocal's boot image, without which there is no root adbd and no\n" +
+			"permissive kernel, and so no way for echod to open its socket. That stage is skipped\n" +
+			"on a device that already has both, and needs TWRP as the recovery partition.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			d, err := connect(cmd.Context(), cmd.OutOrStdout(), serial)
+			out := cmd.OutOrStdout()
+
+			// Not connect: the flash stage is what grants root, so demanding it first would refuse
+			// every device that still needs one.
+			d, err := attach(cmd.Context(), out, serial)
 			if err != nil {
 				return err
 			}
-			chosen, err := resolveName(cmd.Context(), cmd.OutOrStdout(), d, name)
+
+			cfg := installer.Config{ZeroPSK: zeroPSK}
+
+			// The image is only resolved when it is going to be written. A device that already has root
+			// and a permissive kernel needs none, so a build that ships no payload can still install to
+			// one.
+			state, err := installer.Probe(d)
 			if err != nil {
 				return err
 			}
-			cfg := installer.Config{EchodPath: echod, Name: chosen, ZeroPSK: zeroPSK}
-			if err := render(cmd.Context(), cmd.OutOrStdout(), "Installing EchoLocal",
+			if !state.Ready {
+				if cfg.BootImage, cfg.BootImageFrom, err = payload(assets.BootImage(), bootImage, "boot image"); err != nil {
+					return err
+				}
+				if cfg.Approved, err = approveFlash(cmd.Context(), out, d, state, cfg.BootImageFrom, assumeYes); err != nil {
+					return err
+				}
+			}
+
+			// The boot image first, and on its own: until it is written there is no root adbd, and
+			// everything below needs one — reading the device's own name included.
+			if err := render(cmd.Context(), out, "Writing EchoLocal's boot image",
+				"✓ device has root and a permissive kernel",
+				func(report installer.Reporter) error {
+					return installer.FlashBoot(cmd.Context(), d, cfg, report)
+				}); err != nil {
+				return err
+			}
+			if flashOnly {
+				return nil
+			}
+
+			if cfg.Echod, _, err = payload(assets.Echod(), echod, "echod binary"); err != nil {
+				return err
+			}
+			chosen, err := resolveName(cmd.Context(), out, d, name)
+			if err != nil {
+				return err
+			}
+			cfg.Name = chosen
+
+			if err := render(cmd.Context(), out, "Installing EchoLocal",
 				"✓ echod installed and running",
 				func(report installer.Reporter) error {
 					return installer.Install(cmd.Context(), d, cfg, report)
 				}); err != nil {
 				return err
 			}
-			return printPairing(cmd.OutOrStdout(), d, chosen)
+
+			// Last, because Home Assistant cannot reach the device without it, and because a device
+			// that never gets a network is still installed. Declining leaves it for `echoctl wifi`.
+			if err := ensureWifi(cmd.Context(), out, d, "", "", false); err != nil {
+				if !errors.Is(err, ErrCancelled) {
+					return err
+				}
+				fmt.Fprintf(out, "%s\n", styleSkip.Render("• wireless left unconfigured; run `echoctl wifi` when ready"))
+			}
+			return printPairing(out, d, chosen)
 		},
 	}
 
 	c.Flags().StringVar(&serial, "serial", "", "device serial, when more than one is connected")
-	c.Flags().StringVar(&echod, "echod", "bin/echod", "path to the echod binary to install")
+	c.Flags().StringVar(&echod, "echod", "", "echod binary to install, instead of the one shipped")
+	c.Flags().StringVar(&bootImage, "boot-image", "", "boot image to write, instead of the one shipped")
+	c.Flags().BoolVar(&flashOnly, "flash-only", false,
+		"write the boot image and stop, without installing echod")
+	c.Flags().BoolVarP(&assumeYes, "yes", "y", false,
+		"do not ask before overwriting the boot partition")
 	c.Flags().BoolVar(&zeroPSK, "zero-psk", false,
 		"leave the device unprovisioned so Home Assistant can push a key, instead of generating one")
 	nameFlag(c, &name)
@@ -173,8 +235,11 @@ func (m *installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case tea.KeyMsg:
+		// Cancelling is a failure, and has to say so: without an error here the view takes the
+		// success branch and the command exits 0, claiming to have done what it was interrupted
+		// half way through.
 		if msg.String() == "ctrl+c" {
-			m.finished = true
+			m.err, m.finished = ErrCancelled, true
 			return m, tea.Quit
 		}
 		return m, nil

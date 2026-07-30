@@ -5,6 +5,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/ygelfand/echolocal/internal/framework"
 	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/settings"
@@ -186,6 +187,11 @@ func (s *muteSwitch) settled(asked bool) {
 
 	s.sw.Set(muted)
 	s.show(chosenEffect(s.ring))
+
+	// Not gated on asked: start-up is the path that most needs it, because the setting is what decides
+	// whether system_server unmutes the line again at BOOT_COMPLETED.
+	framework.SetMicMuted(muted)
+
 	if !asked {
 		return
 	}

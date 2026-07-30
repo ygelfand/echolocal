@@ -40,6 +40,6 @@ func (s *Source) findFacing(mics [][]int16) {
 		return
 	}
 
-	s.finder.Mix(mics)
+	s.finder.Look(mics)
 	s.facing.Store(int32(s.finder.Beam()))
 }

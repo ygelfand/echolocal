@@ -28,5 +28,6 @@ type kit struct {
 	Player *mediaPlayer
 	Wake   *wakeControl
 	Log    *activity
+	Diag   *diagnostics
 	Voice  *esphome.VoiceSatellite
 }

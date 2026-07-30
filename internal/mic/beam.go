@@ -99,14 +99,12 @@ func (b *Beamformer) Mix(mics [][]int16) []int16 {
 	return out
 }
 
-// Look steers without mixing, for a caller that wants the direction and not the audio. samples is how
-// much of the frame to listen to: the answer is one of six directions, so a slice of a frame settles it
-// as well as the whole one and costs a fraction as much.
-func (b *Beamformer) Look(mics [][]int16, samples int) {
+// Look steers without mixing, for a caller that wants the direction and not the audio.
+func (b *Beamformer) Look(mics [][]int16) {
 	if len(mics) < Mics || len(mics[0]) == 0 {
 		return
 	}
-	b.scan(mics, nil, samples)
+	b.scan(mics, nil, len(mics[0]))
 }
 
 // scan filters n samples into every beam, measures how much high frequency each kept, and steers at the

@@ -12,18 +12,24 @@ import (
 // ErrNoName means neither the device nor the caller supplied a name.
 var ErrNoName = errors.New("no device name")
 
-// installName records the name Home Assistant sees. It is written once: Home Assistant keys the
-// device on it, so a later change appears as a new device with new entity ids.
+// installName records the name Home Assistant sees.
+//
+// A name asked for is written even over one already there, because the caller resolved it deliberately
+// and refusing quietly is worse than renaming. Home Assistant keys the device on it, so the old name
+// stays behind as a device with its own entities — which the caller warns about.
 func installName(r *run) (string, bool, error) {
 	existing, err := ReadName(r.d)
 	if err != nil {
 		return "", false, err
 	}
-	if existing != "" {
-		return existing, true, nil
-	}
 	if r.cfg.Name == "" {
+		if existing != "" {
+			return existing, true, nil
+		}
 		return "", false, fmt.Errorf("%w: pass --name", ErrNoName)
+	}
+	if existing == r.cfg.Name {
+		return existing, true, nil
 	}
 	if err := validName(r.cfg.Name); err != nil {
 		return "", false, err

@@ -5,21 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ygelfand/echolocal/internal/device"
 )
 
-var (
-	styleCursor   = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	styleSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	styleHelp     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-)
-
-// ErrCancelled means the user dismissed the picker.
+// ErrCancelled means the user dismissed a prompt.
 var ErrCancelled = errors.New("cancelled")
 
 // connect resolves which device a command acts on and opens it. Every command goes through
@@ -30,6 +20,16 @@ func connect(ctx context.Context, out io.Writer, serial string) (*device.Device,
 		return nil, err
 	}
 	return device.Connect(target)
+}
+
+// attach is connect for the install, which begins by writing the boot image that grants root. It
+// cannot demand root up front for the same reason.
+func attach(ctx context.Context, out io.Writer, serial string) (*device.Device, error) {
+	target, err := resolveSerial(ctx, out, serial)
+	if err != nil {
+		return nil, err
+	}
+	return device.Attach(target)
 }
 
 // resolveSerial decides which device to act on. An explicit serial always wins. On a terminal
@@ -54,67 +54,10 @@ func resolveSerial(ctx context.Context, out io.Writer, serial string) (string, e
 }
 
 func pickDevice(ctx context.Context, out io.Writer, devices []device.Info) (string, error) {
-	m := &pickerModel{devices: devices}
-	final, err := tea.NewProgram(m, tea.WithContext(ctx), tea.WithOutput(out)).Run()
+	chosen, err := choose(ctx, out, "Select a device", devices,
+		func(d device.Info) string { return fmt.Sprintf("%s  %s", d, d.Serial) }, "")
 	if err != nil {
 		return "", err
 	}
-	p := final.(*pickerModel)
-	if p.cancelled {
-		return "", ErrCancelled
-	}
-	return p.devices[p.cursor].Serial, nil
-}
-
-type pickerModel struct {
-	devices   []device.Info
-	cursor    int
-	chosen    bool
-	cancelled bool
-}
-
-func (m *pickerModel) Init() tea.Cmd { return nil }
-
-func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-
-	switch key.String() {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.devices)-1 {
-			m.cursor++
-		}
-	case "enter":
-		m.chosen = true
-		return m, tea.Quit
-	case "q", "esc", "ctrl+c":
-		m.cancelled = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m *pickerModel) View() string {
-	if m.chosen || m.cancelled {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString(styleTitle.Render("Select a device") + "\n\n")
-	for i, d := range m.devices {
-		cursor, line := "  ", fmt.Sprintf("%s  %s", d, styleDetail.Render(d.Serial))
-		if i == m.cursor {
-			cursor = styleCursor.Render("> ")
-			line = styleSelected.Render(d.String()) + "  " + styleDetail.Render(d.Serial)
-		}
-		b.WriteString(cursor + line + "\n")
-	}
-	b.WriteString("\n" + styleHelp.Render("↑/↓ move · enter select · esc cancel") + "\n")
-	return b.String()
+	return chosen.Serial, nil
 }

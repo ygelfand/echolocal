@@ -22,14 +22,9 @@ const EffectNone = "None"
 // detection off, which is the same thing Home Assistant's own wake word selects already say. A
 // second control for it could only disagree with them.
 type wakeControl struct {
-	backend *esphome.Select
-	slots   []wakeSlot
+	slots []wakeSlot
 
 	sound *speaker.Driver
-
-	// onBackend is called after the backend changes, to reload the wake words that backend was last
-	// used with and to make Home Assistant re-read which models are on offer.
-	onBackend func(settings.WakeBackend)
 }
 
 // wakeSlot is the per-slot configuration. Home Assistant pairs each of its wake word slots with its
@@ -46,37 +41,8 @@ type wakeSlot struct {
 	maxThink  *esphome.Number
 }
 
-func newWakeControl(k *kit, backends []settings.WakeBackend, slots int) *wakeControl {
-	w := &wakeControl{
-		backend: &esphome.Select{
-			Base: esphome.Base{
-				ObjectID: "wake_backend",
-				Name:     "Wake word engine",
-				Icon:     "mdi:cog-outline",
-				Category: esphome.CategoryConfig,
-			},
-			Options: settings.Labels(backends),
-		},
-		sound: k.Sound,
-	}
-
-	w.backend.OnCommand = func(label string) {
-		want, ok := settings.ByLabel(backends, label)
-		if !ok {
-			slog.Warn("unknown wake backend", "value", label)
-			return
-		}
-		if err := settings.SetWakeBackend(want); err != nil {
-			slog.Error("saving the wake backend failed", "err", err)
-		}
-		w.backend.Set(want.Label())
-
-		w.restoreSlots()
-		if w.onBackend != nil {
-			w.onBackend(want)
-		}
-		slog.Info("wake backend", "using", want)
-	}
+func newWakeControl(k *kit, slots int) *wakeControl {
+	w := &wakeControl{sound: k.Sound}
 
 	for i := range slots {
 		w.slots = append(w.slots, w.newSlot(i))
@@ -236,12 +202,9 @@ func deliveries() []settings.Delivery {
 	return []settings.Delivery{settings.DeliveryWhole, settings.DeliveryStream}
 }
 
-// restoreSlots publishes what the selected backend was last used with. It runs from the restore pass
-// at start-up and again whenever the backend changes, because the slots' saved values are per backend
-// and everything they show has to be re-read.
+// restoreSlots publishes what each slot was last set to. It runs from the restore pass at start-up.
 func (w *wakeControl) restoreSlots() {
 	wake := settings.Get().Wake
-	w.backend.Set(wake.BackendOr(settings.DefaultBackend).Label())
 
 	for i, s := range w.slots {
 		saved := wake.Slot(i)
@@ -256,12 +219,11 @@ func (w *wakeControl) restoreSlots() {
 		s.maxThink.Set(float32(saved.MaxThinkOr(settings.DefaultMaxThink)))
 	}
 
-	slog.Info("wake settings restored", "backend", wake.BackendOr(settings.DefaultBackend),
-		"slots", len(w.slots))
+	slog.Info("wake settings restored", "slots", len(w.slots))
 }
 
 func (w *wakeControl) entities() []esphome.Entity {
-	ents := []esphome.Entity{w.backend}
+	var ents []esphome.Entity
 	for _, s := range w.slots {
 		ents = append(ents, s.threshold, s.tone, s.effect, s.delivery, s.buffer, s.followUp,
 			s.maxListen, s.maxThink)

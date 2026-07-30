@@ -7,7 +7,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/satellite"
 	"github.com/ygelfand/echolocal/internal/service"
-	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
@@ -19,14 +18,15 @@ import (
 func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source) {
 	library := wake.NewLibrary(layout.ModelDir)
 
+	// A device with no models still wires everything up. What Home Assistant offers arrives on the
+	// configuration request, and dropping that handler is how a device ends up unable to adopt its
+	// first wake word: nothing local, so nothing offered, so nothing to select.
 	models, err := wake.Installed(library.Dir())
 	if err != nil {
-		slog.Warn("no wake word models", "dir", library.Dir(), "err", err)
-		return
+		slog.Warn("listing wake word models failed", "dir", library.Dir(), "err", err)
 	}
 
-	backend := settings.Get().Wake.BackendOr(settings.DefaultBackend)
-	engine := wake.New(backend, satellite.WakeSlots, source)
+	engine := wake.New(satellite.WakeSlots, source)
 	engine.Threshold = sat.WakeThreshold
 	engine.OnDetect = sat.WakeDetected
 
@@ -72,22 +72,8 @@ func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source)
 	sat.OnWakeWord(load)
 	sat.OnOffers(library.Offered)
 
-	// Changing the engine rebuilds it and reloads every slot from what that engine was last used with.
-	sat.OnWakeBackend(func(b settings.WakeBackend) []string {
-		if err := engine.SetBackend(b); err != nil {
-			slog.Error("changing the wake engine failed", "backend", b, "err", err)
-			return nil
-		}
-
-		saved := settings.Get().Wake
-		ids := make([]string, satellite.WakeSlots)
-		for slot := range ids {
-			ids[slot] = saved.WordID(slot)
-		}
-		return load(ids)
-	})
-
 	group.Add(engine, forever())
 	slog.Info("wake words installed", "count", len(models),
-		"backend", backend, "runnable", len(wake.OfKind(models, backend)))
+		"openwakeword", len(wake.OfKind(models, wake.KindOpenWakeWord)),
+		"microwakeword", len(wake.OfKind(models, wake.KindMicroWakeWord)))
 }

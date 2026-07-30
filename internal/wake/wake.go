@@ -46,10 +46,13 @@ const (
 type Engine struct {
 	source *mic.Source
 
-	mu      sync.Mutex
-	backend backend
-	kind    settings.WakeBackend
-	slots   []slot
+	mu sync.Mutex
+
+	// backends is one engine per kind of model in use, built when a slot first wants it and dropped
+	// when the last slot using it goes. Both can be up at once, a slot each, and each costs a front
+	// end per frame — so which are running follows what is loaded rather than a setting.
+	backends map[Kind]backend
+	slots    []slot
 
 	// Threshold is asked for every score, so a change in Home Assistant takes effect at once. It is
 	// per slot because the models disagree on scale.
@@ -83,25 +86,17 @@ type slot struct {
 }
 
 // New describes an engine. Nothing is built until Start.
-func New(kind settings.WakeBackend, slots int, source *mic.Source) *Engine {
-	return &Engine{kind: kind, slots: make([]slot, slots), source: source}
+func New(slots int, source *mic.Source) *Engine {
+	return &Engine{backends: map[Kind]backend{}, slots: make([]slot, slots), source: source}
 }
 
 func (e *Engine) Name() string { return "wake" }
 
-// Start builds the backend and loads the wake words. A restart comes back through here, so a detector
+// Start empties the engine and loads the wake words. A restart comes back through here, so a detector
 // that broke is rebuilt from scratch rather than resumed from whatever state it died in.
 func (e *Engine) Start(context.Context) error {
 	e.mu.Lock()
-	b, err := newBackend(e.kind)
-	if err != nil {
-		e.mu.Unlock()
-		return err
-	}
-	e.backend = b
-	for i := range e.slots {
-		e.slots[i] = slot{}
-	}
+	e.reset()
 	e.mu.Unlock()
 
 	if e.Load == nil {
@@ -110,52 +105,43 @@ func (e *Engine) Start(context.Context) error {
 	return e.Load()
 }
 
-// Close drops the backend and everything loaded in it.
+// Close drops the engines and everything loaded in them.
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.backend != nil {
-		e.backend.close()
-		e.backend = nil
-	}
+	e.reset()
 	return nil
 }
 
-// Kind reports which backend is running.
-func (e *Engine) Kind() settings.WakeBackend {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.kind
-}
-
-// SetBackend swaps the engine, dropping every loaded wake word: a model belongs to one backend and
-// nothing carries across. The caller reloads the slots afterwards, from what that backend was last
-// used with.
-func (e *Engine) SetBackend(kind settings.WakeBackend) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if kind == e.kind {
-		return nil
+// reset closes every engine and empties every slot. Held with mu.
+func (e *Engine) reset() {
+	for k, b := range e.backends {
+		b.close()
+		delete(e.backends, k)
 	}
-	b, err := newBackend(kind)
-	if err != nil {
-		return err
-	}
-
-	e.backend.close()
-	e.backend, e.kind = b, kind
 	for i := range e.slots {
 		e.slots[i] = slot{}
 	}
-
-	slog.Info("wake backend changed", "backend", kind)
-	return nil
 }
 
-// Use loads a wake word into a slot. A model of the wrong kind is refused rather than run: the
-// backends cannot share a front end, and loading one under the other would score noise.
+// build makes an engine of one kind. A test replaces it with one that needs no model files.
+var build = newBackend
+
+// engineFor is the backend that runs a kind of model, built the first time one is wanted.
+func (e *Engine) engineFor(k Kind) (backend, error) {
+	if b, ok := e.backends[k]; ok {
+		return b, nil
+	}
+	b, err := build(k)
+	if err != nil {
+		return nil, err
+	}
+	e.backends[k] = b
+	return b, nil
+}
+
+// Use loads a wake word into a slot, in whichever engine runs that model.
 func (e *Engine) Use(n int, m Model) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -163,20 +149,24 @@ func (e *Engine) Use(n int, m Model) error {
 	if n < 0 || n >= len(e.slots) {
 		return fmt.Errorf("wake: slot %d out of range", n)
 	}
-	if m.Kind != e.kind {
-		return fmt.Errorf("wake: %s is a %s model, backend is %s", m.ID, m.Kind, e.kind)
-	}
 	if s := e.slots[n]; s.loaded && s.model.ID == m.ID {
 		return nil
 	}
 
-	if err := e.backend.load(m); err != nil {
+	b, err := e.engineFor(m.Kind)
+	if err != nil {
 		return err
 	}
-	e.release(n)
-	e.slots[n] = slot{model: m, loaded: true}
+	if err := b.load(m); err != nil {
+		e.drop(slot{model: m, loaded: true})
+		return err
+	}
 
-	slog.Info("wake word loaded", "slot", n+1, "phrase", m.Phrase, "id", m.ID, "backend", m.Kind)
+	old := e.slots[n]
+	e.slots[n] = slot{model: m, loaded: true}
+	e.drop(old)
+
+	slog.Info("wake word loaded", "slot", n+1, "phrase", m.Phrase, "id", m.ID, "engine", m.Kind)
 	return nil
 }
 
@@ -191,23 +181,52 @@ func (e *Engine) Clear(n int) {
 	if e.slots[n].loaded {
 		slog.Info("wake word cleared", "slot", n+1, "id", e.slots[n].model.ID)
 	}
-	e.release(n)
+
+	old := e.slots[n]
 	e.slots[n] = slot{}
+	e.drop(old)
 }
 
-// release drops a slot's model from the backend, unless another slot is still using it. Held with mu.
-func (e *Engine) release(n int) {
-	if !e.slots[n].loaded {
+// drop lets go of what a slot was using: the model, unless another slot still wants it, and then the
+// engine itself, unless another slot still needs that. An engine with nothing loaded would go on
+// costing a front end for every frame. Called with the slot table already updated, so what it asks
+// about the other slots is the truth. Held with mu.
+func (e *Engine) drop(was slot) {
+	if !was.loaded {
 		return
 	}
-	id := e.slots[n].model.ID
+	b := e.backends[was.model.Kind]
+	if b == nil {
+		return
+	}
 
-	for i, s := range e.slots {
-		if i != n && s.loaded && s.model.ID == id {
-			return
+	if !e.uses(was.model.ID) {
+		b.unload(was.model.ID)
+	}
+	if !e.runs(was.model.Kind) {
+		b.close()
+		delete(e.backends, was.model.Kind)
+	}
+}
+
+// uses reports whether a slot is listening for a model. Held with mu.
+func (e *Engine) uses(id string) bool {
+	for _, s := range e.slots {
+		if s.loaded && s.model.ID == id {
+			return true
 		}
 	}
-	e.backend.unload(id)
+	return false
+}
+
+// runs reports whether a slot needs an engine. Held with mu.
+func (e *Engine) runs(k Kind) bool {
+	for _, s := range e.slots {
+		if s.loaded && s.model.Kind == k {
+			return true
+		}
+	}
+	return false
 }
 
 // Loaded reports the wake word in a slot, and whether the slot is on.
@@ -253,8 +272,8 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 }
 
-// score feeds one frame and acts on what came back. The lock is held across the whole of it: the
-// backend is shared with whatever Use installs next, and it is not safe to swap a wake word out from
+// score feeds one frame and acts on what came back. The lock is held across the whole of it: an
+// engine is shared with whatever Use installs next, and it is not safe to swap a wake word out from
 // under an inference.
 func (e *Engine) score(frame []int16, source *mic.Source) {
 	e.mu.Lock()
@@ -262,14 +281,15 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 
 	// Always feed. These are streaming models: a gap in the input is a gap in their history, and the
 	// next utterance gets scored from a cold state. The refractory below suppresses reporting, not
-	// audio. Nothing loaded is the one case where there is nothing to feed.
-	if !e.anyLoaded() {
-		return
-	}
-	scores, fresh := e.backend.feed(frame)
-	if !fresh {
-		// openWakeWord produces a score every 80 ms, so most frames only advance it.
-		return
+	// audio. An engine only exists while a slot needs it, so nothing loaded feeds nothing.
+	// Only what came back fresh is kept, so a slot whose engine has not scored this frame finds
+	// nothing rather than reading a stale number. openWakeWord scores every 80 ms, so for it most
+	// frames only advance the front end.
+	heard := make(map[Kind]map[string]float64, len(e.backends))
+	for k, b := range e.backends {
+		if scores, fresh := b.feed(frame); fresh {
+			heard[k] = scores
+		}
 	}
 
 	now := time.Now()
@@ -278,21 +298,12 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 		if !s.loaded {
 			continue
 		}
-		score, ok := scores[s.model.ID]
+		score, ok := heard[s.model.Kind][s.model.ID]
 		if !ok {
 			continue
 		}
 		e.judge(i, s, score, now, source)
 	}
-}
-
-func (e *Engine) anyLoaded() bool {
-	for _, s := range e.slots {
-		if s.loaded {
-			return true
-		}
-	}
-	return false
 }
 
 // judge turns one slot's score into a detection, a near miss, or nothing. Held with mu.
