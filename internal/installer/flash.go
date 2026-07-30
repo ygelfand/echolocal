@@ -102,18 +102,22 @@ func probe(d *device.Device) (state, error) {
 		return s, err
 	}
 
-	// ro.boot.selinux is what the booted image asked for; getenforce is what is in force. Both,
-	// because a permissive cmdline with an enforcing kernel would leave echod broken in a way that
-	// reads as a bug in echod.
 	asked, err := d.Getprop("ro.boot.selinux")
 	if err != nil {
 		return s, err
 	}
 	s.enforcing, _ = d.Shell("getenforce")
 	s.enforcing = strings.TrimSpace(s.enforcing)
-	s.permissive = asked == "permissive" && !strings.EqualFold(s.enforcing, "enforcing")
+	s.permissive = permissiveFrom(asked, s.enforcing)
 
 	return s, nil
+}
+
+// permissiveFrom judges the two answers together: ro.boot.selinux is what the booted image asked for,
+// getenforce is what is in force. A permissive cmdline on an enforcing kernel would leave echod unable
+// to open its socket and looking like a bug in echod.
+func permissiveFrom(asked, enforcing string) bool {
+	return asked == "permissive" && !strings.EqualFold(enforcing, "enforcing")
 }
 
 // checkState reads what the device is and decides whether anything needs writing. It never refuses a

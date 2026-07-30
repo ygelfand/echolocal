@@ -11,7 +11,6 @@ package setup
 
 import (
 	"log/slog"
-	"os"
 
 	"github.com/ygelfand/echolocal/internal/prop"
 )
