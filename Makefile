@@ -15,14 +15,12 @@ BOOT_IMAGE := images/echolocal-boot.img
 # echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). Amazon ships a 32-bit userspace but
 # the SoC and kernel are arm64 and /system/lib64 is present, so echod is built 64-bit: the wake word
 # pipeline costs 50ms per 80ms of audio there against 88ms as 32-bit code, which does not fit.
-# The ALSA path is pure Go over /dev/snd ioctls, so no cgo and no NDK image. Keep it that
-# way unless something genuinely needs C; the NDK target below exists only for that case.
-NDK_IMAGE := echolocal-ndk:latest
+# The ALSA path is pure Go over /dev/snd ioctls, so no cgo and no NDK. Keep it that way unless
+# something genuinely needs C, which is what would make a toolchain image worth having.
 DEVICE_ENV := GOOS=linux GOARCH=arm64 CGO_ENABLED=0
 DEVICE_LDFLAGS := -s -w $(LDFLAGS)
 
 ADB ?= adb
-DEVICE_DIR := /system/etc/echolocal
 DEVICE_TMP := /data/local/tmp
 
 # echod lives under /system/app because that tree is labelled u:object_r:system_file:s0,
@@ -101,10 +99,6 @@ check: fmt vet lint test ## Format, vet, lint and test
 
 ##@ Device (echod)
 
-.PHONY: ndk-image
-ndk-image: ## Build the pinned NDK image (only needed if something requires cgo)
-	podman build -t $(NDK_IMAGE) -f build/ndk/Dockerfile build/ndk
-
 .PHONY: payload
 payload: build-echod ## Stage echod and the boot image for embedding into echoctl
 	@mkdir -p $(ASSET_DIR)
@@ -117,10 +111,6 @@ payload: build-echod ## Stage echod and the boot image for embedding into echoct
 dist: payload ## Full build: echod, the boot image, then echoctl carrying both
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 go build -tags payload -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echoctl ./cmd/echoctl
-
-.PHONY: install-device
-install-device: build-echod ## Install echod to /system on a connected device
-	$(ADB) push $(BUILD_DIR)/echod $(DEVICE_DIR)/echod
 
 .PHONY: install-echod
 install-echod: build-echod ## Install echod into /system/app/echod, restarting it if installed
@@ -147,9 +137,11 @@ restart-echod: ## Restart echod through init (ctl.stop then ctl.start)
 	@$(ADB) shell 'setprop ctl.stop ledcontroller; sleep 1; setprop ctl.start ledcontroller; \
 		sleep 1; echo "init.svc: $$(getprop init.svc.ledcontroller)"'
 
-.PHONY: boot-log
-boot-log: ## Show echod's boot log from the device
-	@$(ADB) shell 'cat /dev/echolocal.log 2>&1; echo "state: $$(getprop echolocal.state)"'
+.PHONY: state
+state: ## Show what echod and init say about echod
+	@$(ADB) shell 'echo "state:   $$(getprop echolocal.state)"; \
+		echo "started: $$(getprop echolocal.started)"; \
+		echo "init.svc: $$(getprop init.svc.ledcontroller)"'
 
 .PHONY: logs
 logs: ## Tail echod logs from a connected device
@@ -179,4 +171,4 @@ clean: ## Remove build artifacts
 
 .PHONY: help
 help: ## Display this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
