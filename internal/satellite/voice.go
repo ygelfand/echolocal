@@ -832,10 +832,16 @@ func wakeWords(models []wake.Model, slots int) ([]esphome.WakeWord, []string) {
 		}
 	}
 
-	// Nothing saved for this backend yet: start it listening for something rather than nothing, or a
-	// fresh device looks broken until the user finds the select.
-	if len(active) == 0 && len(models) > 0 {
-		active = []string{models[0].ID}
+	// Nothing chosen yet: start listening for something rather than nothing, or a fresh device looks
+	// broken until the user finds the select. The shipped default when it is installed, and otherwise
+	// whatever this device does have — a device carrying one model somebody copied on should listen for
+	// that one rather than for nothing.
+	if len(active) == 0 {
+		if m, ok := wake.Find(models, wake.DefaultModel); ok {
+			active = []string{m.ID}
+		} else if len(models) > 0 {
+			active = []string{models[0].ID}
+		}
 	}
 	return out, active
 }

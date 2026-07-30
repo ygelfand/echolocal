@@ -12,6 +12,12 @@ import (
 	"github.com/ygelfand/echolocal/internal/tflite"
 )
 
+// DefaultModel is what a device that has never been configured listens for, by id. Something rather
+// than nothing, because a satellite that hears no phrase at all until somebody finds the select reads
+// as broken; this one because it is what the reference satellite ships selected, so a person who has
+// used one already knows what to say.
+const DefaultModel = "okay_nabu"
+
 // Model is an installed wake word: the file to run and what to call it in Home Assistant.
 type Model struct {
 	// ID is the file's base name. Home Assistant selects by it.
