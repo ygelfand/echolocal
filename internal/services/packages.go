@@ -31,6 +31,15 @@ var Hidden = []Package{
 	{"com.amazon.device.smarthome.ota", "smart home OTA"},
 	{"com.amazon.device.software.ota", "firmware OTA"},
 	{"com.amazon.client.metrics", "telemetry; also runs a logcat harvester"},
+	{"com.amazon.banyan.core", "metrics pipeline"},
+	{"com.amazon.diode", "analytics, and analysis of connectivity events"},
+	{"com.amazon.device.logmanager", "log collection"},
+	{"com.amazon.adep", "remote device management and Arcus remote config"},
+	{"com.amazon.imp", "Amazon account and OAuth"},
+	{"com.amazon.swags", "Alexa directives, whole-home audio, account deregistration"},
+	{"com.amazon.kindleautomatictimezone", "timezone from an Amazon account, woken by joining wifi"},
+	{"com.amazon.platformsettings", "Amazon's settings layer"},
+	{"com.amazon.device.settings", "the settings app"},
 	{"com.amazon.device.crashmanager", "uploads crash dumps"},
 	{"com.amazon.tcomm", "Amazon's cloud transport"},
 	{"com.amazon.device.messaging", "push messaging from Amazon"},
@@ -43,6 +52,7 @@ var Hidden = []Package{
 	{"com.amazon.device.bluetoothdfu", "Bluetooth firmware update"},
 	{"com.amazon.NativeAccessorProxyServices", "Alexa SIM directive and OOBE receivers"},
 	{"com.amazon.whad", "whole-home audio; advertises a control plane on the LAN"},
+	{"com.amazon.cmb", "listens on udp 5000, which Amazon's firewall opens for it"},
 }
 
 // Package is one package and why it goes.

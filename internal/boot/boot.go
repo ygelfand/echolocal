@@ -50,6 +50,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	setup.Apply()
+	go alog.Safely("late setup", func() { setup.ApplyLate(ctx) })
 
 	ring := prepareRing()
 	defer func() {
@@ -105,7 +106,13 @@ func Run(ctx context.Context, cfg Config) error {
 		addSatellite(group, sat, source)
 	}
 
-	group.Add(heartbeat{})
+	// The heartbeat samples what drifts, so a device with no satellite still beats and simply has
+	// nothing to publish.
+	beat := heartbeat{}
+	if sat := ready.Load(); sat != nil {
+		beat.sample = sat.Sample
+	}
+	group.Add(beat)
 
 	slog.Info("resident")
 	_ = prop.Set(layout.StateProp, "resident")

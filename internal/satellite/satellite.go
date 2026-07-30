@@ -243,6 +243,10 @@ func (s *Satellite) SetActiveWakeWords(ids []string) {
 	slog.Info("wake words listening", "active", ids)
 }
 
+// Sample publishes the diagnostics that drift on their own: free space, temperatures, cores, load and
+// memory. Called from the heartbeat, so they share one timestamp instead of each keeping its own timer.
+func (s *Satellite) Sample() { s.kit.Diag.Sample() }
+
 // PipelineReady reports whether Home Assistant has a voice pipeline listening. Wake detection runs
 // before that happens, but nothing can be done with a detection until it does, so this is what the
 // device shows on the ring while it comes up.

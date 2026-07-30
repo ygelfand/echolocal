@@ -1,5 +1,8 @@
 // Package prop sets Android system properties by speaking init's property_service
 // protocol directly, so echod needs no setprop, start or stop binary on the device.
+//
+// Reading is the exception. Properties are served to writers over a socket but read out of a
+// shared mapping, so Get runs getprop rather than reimplementing that mapping.
 package prop
 
 import (
@@ -8,11 +11,16 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os/exec"
+	"strings"
 	"time"
 )
 
 // Socket is init's property service endpoint.
 const Socket = "/dev/socket/property_service"
+
+// getprop is the binary Get runs, by full path since echod's PATH is init's.
+const getprop = "/system/bin/getprop"
 
 // Wire format of bionic's prop_msg on Android 5.1: a command word followed by two
 // fixed-width NUL-padded fields. Android 8 replaced this with a length-prefixed
@@ -62,6 +70,16 @@ func Set(name, value string) error {
 		return fmt.Errorf("prop: wait: %w", err)
 	}
 	return nil
+}
+
+// Get reads a system property. An unset property reads as empty with no error, which is what
+// getprop reports for one.
+func Get(name string) (string, error) {
+	out, err := exec.Command(getprop, name).Output()
+	if err != nil {
+		return "", fmt.Errorf("prop: reading %s: %w", name, err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Stop asks init to stop a service.

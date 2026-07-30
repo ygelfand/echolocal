@@ -6,6 +6,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/ygelfand/echolocal/internal/hardware"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
@@ -27,13 +28,28 @@ type diagnostics struct {
 	cached *esphome.Sensor
 	free   *esphome.Sensor
 	purge  *esphome.Button
+
+	temperature *esphome.Sensor
+	radioTemp   *esphome.Sensor
+	cores       *esphome.Sensor
+	coresOnline *esphome.Sensor
+	load        *esphome.Sensor
+	memory      *esphome.Sensor
 }
+
+// The thermal zones worth showing, by the name the kernel gives them. The rest are board sensors that
+// answer no question anybody asks.
+const (
+	cpuZone   = "mtktscpu"
+	radioZone = "mtktswmt"
+)
 
 func newDiagnostics(k *kit, wake func(int)) *diagnostics {
 	spk := k.Speaker
 	d := &diagnostics{}
 
 	d.storage()
+	d.hardware()
 
 	if spk != nil {
 		// A reply is 16 kHz audio fetched over HTTP and stretched here, so judging a resampling by
@@ -113,8 +129,60 @@ func (d *diagnostics) storage() {
 	}
 }
 
-// measure republishes what the disk holds. It runs at start-up and after anything that adds to the
-// cache or takes from it, rather than on a timer: nothing here changes on its own.
+// hardware builds what the board says about itself. Two temperatures rather than four: the CPU answers
+// "is it working hard" and the combo chip answers "is it the radio", and the board sensors answer
+// nothing anybody asks.
+//
+// Cores are reported twice on purpose. This kernel hotplugs them, so a device with four can be running
+// two, and echod's share of a CPU means something different depending on which number you hold it
+// against.
+func (d *diagnostics) hardware() {
+	temp := func(id, name, icon string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: icon, Category: esphome.CategoryDiagnostic,
+			},
+			Unit:        "°C",
+			DeviceClass: "temperature",
+			StateClass:  esphome.StateClassMeasurement,
+			Decimals:    1,
+		}
+	}
+	d.temperature = temp("cpu_temperature", "CPU temperature", "mdi:thermometer")
+	d.radioTemp = temp("radio_temperature", "Radio temperature", "mdi:thermometer")
+
+	count := func(id, name string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: "mdi:cpu-64-bit", Category: esphome.CategoryDiagnostic,
+			},
+			StateClass: esphome.StateClassMeasurement,
+		}
+	}
+	d.cores = count("cpu_cores", "CPU cores")
+	d.coresOnline = count("cpu_cores_online", "CPU cores online")
+
+	d.load = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "load_average", Name: "Load average", Icon: "mdi:gauge",
+			Category: esphome.CategoryDiagnostic,
+		},
+		StateClass: esphome.StateClassMeasurement,
+		Decimals:   2,
+	}
+	d.memory = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "memory_available", Name: "Memory available", Icon: "mdi:memory",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "kB",
+		DeviceClass: "data_size",
+		StateClass:  esphome.StateClassMeasurement,
+	}
+}
+
+// measure republishes what the disk holds. Called at start-up and after anything that adds to the cache
+// or takes from it, so the number is right the moment a purge finishes rather than a minute later.
 func (d *diagnostics) measure() {
 	if d.cached == nil {
 		return
@@ -131,6 +199,51 @@ func (d *diagnostics) measure() {
 	d.free.Set(float32(free / 1024))
 }
 
+// Sample publishes everything that drifts on its own: the disk, and what the board says about itself.
+// Called on the heartbeat, so these all come from the same moment and line up when something is wrong.
+func (d *diagnostics) Sample() {
+	if d == nil {
+		return
+	}
+	d.measure()
+	d.board()
+}
+
+// board reads the hardware and publishes what it reported. A sensor with no reading is left alone
+// rather than set to zero: a board without that sensor should show unknown, not a plausible lie.
+func (d *diagnostics) board() {
+	if d.temperature == nil {
+		return
+	}
+	r := hardware.Reader{}
+
+	temps := r.Temperatures()
+	set(d.temperature, reading(temps, cpuZone))
+	set(d.radioTemp, reading(temps, radioZone))
+
+	present, online := r.Cores()
+	set(d.cores, present)
+	set(d.coresOnline, online)
+
+	one, _ := r.Load()
+	set(d.load, one)
+
+	available, _ := r.Memory()
+	set(d.memory, available)
+}
+
+// reading picks one thermal zone out of what was found.
+func reading(temps map[string]float64, zone string) hardware.Reading {
+	v, ok := temps[zone]
+	return hardware.Reading{Value: v, Known: ok}
+}
+
+func set(s *esphome.Sensor, r hardware.Reading) {
+	if s != nil && r.Known {
+		s.Set(float32(r.Value))
+	}
+}
+
 // inUseWakeWords is what the slots are set to, which is what a purge has to leave alone.
 func inUseWakeWords() []string {
 	saved := settings.Get().Wake
@@ -145,7 +258,10 @@ func inUseWakeWords() []string {
 }
 
 func (d *diagnostics) entities() []esphome.Entity {
-	ents := []esphome.Entity{d.cached, d.free, d.purge}
+	ents := []esphome.Entity{
+		d.cached, d.free, d.purge,
+		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory,
+	}
 	if d.testPlayback != nil {
 		ents = append(ents, d.testPlayback)
 	}

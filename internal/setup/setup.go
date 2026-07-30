@@ -10,7 +10,9 @@
 package setup
 
 import (
+	"context"
 	"log/slog"
+	"time"
 
 	"github.com/ygelfand/echolocal/internal/prop"
 )
@@ -22,13 +24,25 @@ type Action struct {
 	Do     func() error
 }
 
+// stop asks init to stop a vendor service.
+func stop(service, reason string) Action {
+	return Action{
+		Name:   "stop " + service,
+		Reason: reason,
+		Do:     func() error { return prop.Stop(service) },
+	}
+}
+
 // Actions is applied in order. Nothing here is allowed to fail a boot.
 var Actions = []Action{
-	{
-		Name:   "stop shblemeshd",
-		Reason: "BLE mesh daemon left with nothing to talk to once its service package is hidden",
-		Do:     func() error { return prop.Stop("shblemeshd") },
-	},
+	stop("meshmgrservice", "the other half of the BLE mesh stack"),
+	stop("whad_cc", "whole-home audio's control channel, left with nothing once whad is hidden"),
+	stop("vitals_service", "collects the device's vitals for Amazon"),
+	stop("perfmonitord", "Amazon's performance monitoring"),
+	stop("perfrecoveryd", "Amazon's performance monitoring"),
+	stop("avahi-daemon", "Amazon's mDNS, for Spotify Connect; echod advertises itself"),
+	stop("drm", "drmserver, for protected media playback"),
+	stop("kisd", "installs DRM key blocks into TrustZone, over a local socket, as root"),
 	{
 		Name:   "silence AmazonUsageStatsService",
 		Reason: "logs the network state on a timer from inside system_server",
@@ -38,15 +52,61 @@ var Actions = []Action{
 	},
 }
 
+// Late is applied once Android reports the boot finished, for the services init starts from that
+// and no earlier. A stop sent before then is undone by the start that follows it.
+var Late = []Action{
+	stop("shblemeshd", "BLE mesh daemon left with nothing to talk to once its service package is hidden"),
+}
+
+// How long ApplyLate waits for the boot to finish, and how often it looks. Nothing is waiting on
+// these stops, so the interval is loose.
+const (
+	bootProp = "sys.boot_completed"
+	bootWait = 3 * time.Minute
+	bootPoll = 5 * time.Second
+)
+
 // Apply runs every action, reporting what failed. A failure is logged and passed over: none of this
 // is worth refusing to start over.
-func Apply() {
+func Apply() { apply("boot setup", Actions) }
+
+// ApplyLate waits for the boot to finish and then applies Late. It is meant to be run in its own
+// goroutine, and returns without applying anything if the boot never completes.
+func ApplyLate(ctx context.Context) {
+	if !bootCompleted(ctx) {
+		return
+	}
+	apply("late setup", Late)
+}
+
+func apply(what string, actions []Action) {
 	var failed int
-	for _, a := range Actions {
+	for _, a := range actions {
 		if err := a.Do(); err != nil {
-			slog.Error("boot setup failed", "action", a.Name, "reason", a.Reason, "err", err)
+			slog.Error(what+" failed", "action", a.Name, "reason", a.Reason, "err", err)
 			failed++
 		}
 	}
-	slog.Info("boot setup applied", "actions", len(Actions), "failed", failed)
+	slog.Info(what+" applied", "actions", len(actions), "failed", failed)
+}
+
+// bootCompleted reports whether the boot finished before bootWait ran out.
+func bootCompleted(ctx context.Context) bool {
+	tick := time.NewTicker(bootPoll)
+	defer tick.Stop()
+	giveUp := time.After(bootWait)
+
+	for {
+		if v, err := prop.Get(bootProp); err == nil && v == "1" {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-giveUp:
+			slog.Warn("gave up waiting for the boot to finish", "after", bootWait, "skipped", len(Late))
+			return false
+		case <-tick.C:
+		}
+	}
 }
