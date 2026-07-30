@@ -7,23 +7,6 @@ import (
 
 // dot is the inner product every convolution and matrix multiply bottoms out in. Four
 // accumulators keep the pipeline busy rather than serialising on one dependency chain.
-func dot(a, b []float32) float32 {
-	b = b[:len(a)]
-	var s0, s1, s2, s3 float32
-	i := 0
-	for ; i+4 <= len(a); i += 4 {
-		s0 += a[i] * b[i]
-		s1 += a[i+1] * b[i+1]
-		s2 += a[i+2] * b[i+2]
-		s3 += a[i+3] * b[i+3]
-	}
-	s := s0 + s1 + s2 + s3
-	for ; i < len(a); i++ {
-		s += a[i] * b[i]
-	}
-	return s
-}
-
 func conv2D(o *OpDesc, in, out []*Tensor) error {
 	p := o.conv
 	x, w, y := in[0], in[1], out[0]

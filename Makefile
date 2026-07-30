@@ -20,6 +20,11 @@ BOOT_IMAGE := images/echolocal-boot.img
 DEVICE_ENV := GOOS=linux GOARCH=arm64 CGO_ENABLED=0
 DEVICE_LDFLAGS := -s -w $(LDFLAGS)
 
+# TAGS passes build tags through to echod, which is how the same device can be measured both ways:
+# `make install-echod TAGS=noasm` builds the portable dot instead of the NEON one.
+TAGS ?=
+DEVICE_TAGS := $(if $(TAGS),-tags $(TAGS),)
+
 ADB ?= adb
 DEVICE_TMP := /data/local/tmp
 
@@ -44,9 +49,9 @@ build-echoctl: ## Build the host CLI into ./bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echoctl ./cmd/echoctl
 
 .PHONY: build-echod
-build-echod: ## Cross-compile echod for the Echo Dot (static, no cgo)
+build-echod: ## Cross-compile echod for the Echo Dot (static, no cgo; TAGS=noasm for the portable dot)
 	@mkdir -p $(BUILD_DIR)
-	$(DEVICE_ENV) go build -ldflags "$(DEVICE_LDFLAGS)" -o $(BUILD_DIR)/echod ./cmd/echod
+	$(DEVICE_ENV) go build $(DEVICE_TAGS) -ldflags "$(DEVICE_LDFLAGS)" -o $(BUILD_DIR)/echod ./cmd/echod
 
 .PHONY: run-echoctl
 run-echoctl: ## Run echoctl on the host (make run-echoctl ARGS="tools tone -h")
