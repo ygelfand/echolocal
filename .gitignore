@@ -18,9 +18,8 @@
 bin/
 dist/
 
-# Embedded device payload — built by `make payload`, never committed
-internal/assets/payload/echod
-internal/assets/payload/*.sha256
+# Embedded payload — staged by `make payload`, never committed
+internal/assets/payload/
 
 dumps/
 captures/

@@ -3,18 +3,22 @@ module github.com/ygelfand/echolocal
 go 1.26
 
 require (
-	github.com/electricbubble/gadb v0.1.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 )
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
+	github.com/catppuccin/go v0.3.0 // indirect
+	github.com/charmbracelet/huh v1.0.0 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/libp2p/zeroconf/v2 v2.2.0 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
-	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e // indirect
+	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.57.0 // indirect

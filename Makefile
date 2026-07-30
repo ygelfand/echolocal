@@ -10,6 +10,7 @@ LDFLAGS := -X 'main.Version=$(VERSION)' \
 
 BUILD_DIR := bin
 ASSET_DIR := internal/assets/payload
+BOOT_IMAGE := images/echolocal-boot.img
 
 # echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). Amazon ships a 32-bit userspace but
 # the SoC and kernel are arm64 and /system/lib64 is present, so echod is built 64-bit: the wake word
@@ -105,13 +106,17 @@ ndk-image: ## Build the pinned NDK image (only needed if something requires cgo)
 	podman build -t $(NDK_IMAGE) -f build/ndk/Dockerfile build/ndk
 
 .PHONY: payload
-payload: build-echod ## Stage echod for embedding into echoctl
+payload: build-echod ## Stage echod and the boot image for embedding into echoctl
 	@mkdir -p $(ASSET_DIR)
 	cp $(BUILD_DIR)/echod $(ASSET_DIR)/echod
+	cp $(BOOT_IMAGE) $(ASSET_DIR)/boot.img
 	@shasum -a 256 $(ASSET_DIR)/echod | awk '{print $$1}' > $(ASSET_DIR)/echod.sha256
+	@shasum -a 256 $(ASSET_DIR)/boot.img | awk '{print $$1}' > $(ASSET_DIR)/boot.img.sha256
 
 .PHONY: dist
-dist: payload build-echoctl ## Full build: echod, payload, then echoctl with it embedded
+dist: payload ## Full build: echod, the boot image, then echoctl carrying both
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 go build -tags payload -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echoctl ./cmd/echoctl
 
 .PHONY: install-device
 install-device: build-echod ## Install echod to /system on a connected device
@@ -167,7 +172,7 @@ snapshot: ## Build a local goreleaser snapshot
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -rf $(BUILD_DIR) dist/ coverage.out
-	rm -f $(ASSET_DIR)/echod $(ASSET_DIR)/echod.sha256
+	rm -rf $(ASSET_DIR)
 	go clean
 
 ##@ Help
