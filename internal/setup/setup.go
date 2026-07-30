@@ -42,7 +42,6 @@ var Actions = []Action{
 	stop("perfrecoveryd", "Amazon's performance monitoring"),
 	stop("avahi-daemon", "Amazon's mDNS, for Spotify Connect; echod advertises itself"),
 	stop("drm", "drmserver, for protected media playback"),
-	stop("kisd", "installs DRM key blocks into TrustZone, over a local socket, as root"),
 	{
 		Name:   "silence AmazonUsageStatsService",
 		Reason: "logs the network state on a timer from inside system_server",

@@ -41,6 +41,8 @@ func newInstallCmd() *cobra.Command {
 		zeroPSK   bool
 		flashOnly bool
 		assumeYes bool
+		doReboot  bool
+		noReboot  bool
 	)
 
 	c := &cobra.Command{
@@ -82,7 +84,7 @@ func newInstallCmd() *cobra.Command {
 
 			// The boot image first, and on its own: until it is written there is no root adbd, and
 			// everything below needs one — reading the device's own name included.
-			if err := render(cmd.Context(), out, "Writing EchoLocal's boot image",
+			if _, err := render(cmd.Context(), out, "Writing EchoLocal's boot image",
 				"✓ device has root and a permissive kernel",
 				func(report installer.Reporter) error {
 					return installer.FlashBoot(cmd.Context(), d, cfg, report)
@@ -102,21 +104,30 @@ func newInstallCmd() *cobra.Command {
 			}
 			cfg.Name = chosen
 
-			if err := render(cmd.Context(), out, "Installing EchoLocal",
+			changed, err := render(cmd.Context(), out, "Installing EchoLocal",
 				"✓ echod installed and running",
 				func(report installer.Reporter) error {
 					return installer.Install(cmd.Context(), d, cfg, report)
-				}); err != nil {
+				})
+			if err != nil {
 				return err
 			}
 
-			// Last, because Home Assistant cannot reach the device without it, and because a device
-			// that never gets a network is still installed. Declining leaves it for `echoctl wifi`.
+			// Wifi before the reboot, because the supplicant keeps what it is given and a device that
+			// comes back on the network is more of the install proven. Home Assistant cannot reach the
+			// device without it, and a device that never gets a network is still installed, so declining
+			// leaves it for `echoctl wifi`.
 			if err := ensureWifi(cmd.Context(), out, d, "", "", false); err != nil {
 				if !errors.Is(err, ErrCancelled) {
 					return err
 				}
 				fmt.Fprintf(out, "%s\n", styleSkip.Render("• wireless left unconfigured; run `echoctl wifi` when ready"))
+			}
+
+			// Before the pairing key rather than after, so the one thing to carry off the screen is the
+			// last thing printed.
+			if err := offerReboot(cmd.Context(), out, d, changed, rebootChoiceOf(doReboot, noReboot)); err != nil {
+				return err
 			}
 			return printPairing(out, d, chosen)
 		},
@@ -131,6 +142,9 @@ func newInstallCmd() *cobra.Command {
 		"do not ask before overwriting the boot partition")
 	c.Flags().BoolVar(&zeroPSK, "zero-psk", false,
 		"leave the device unprovisioned so Home Assistant can push a key, instead of generating one")
+	c.Flags().BoolVar(&doReboot, "reboot", false, "reboot at the end without asking")
+	c.Flags().BoolVar(&noReboot, "no-reboot", false, "finish without rebooting, and without asking")
+	c.MarkFlagsMutuallyExclusive("reboot", "no-reboot")
 	nameFlag(c, &name)
 	return c
 }
@@ -147,11 +161,12 @@ func newUninstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return render(cmd.Context(), cmd.OutOrStdout(), "Uninstalling EchoLocal",
+			_, err = render(cmd.Context(), cmd.OutOrStdout(), "Uninstalling EchoLocal",
 				"✓ echod removed, ledcontroller restored",
 				func(report installer.Reporter) error {
 					return installer.Uninstall(cmd.Context(), d, report)
 				})
+			return err
 		},
 	}
 
@@ -180,28 +195,40 @@ func printPairing(out io.Writer, d *device.Device, name string) error {
 	return nil
 }
 
-// render drives a step run, live when attached to a terminal and plain lines otherwise.
-func render(ctx context.Context, out io.Writer, title, success string, run func(installer.Reporter) error) error {
+// render drives a step run, live when attached to a terminal and plain lines otherwise. It reports
+// whether any step actually did something, so a re-run that changed nothing can say so and stay quiet.
+func render(ctx context.Context, out io.Writer, title, success string, run func(installer.Reporter) error) (bool, error) {
+	var changed bool
+	counted := func(report installer.Reporter) installer.Reporter {
+		return func(e installer.Event) {
+			if e.Status == installer.Done {
+				changed = true
+			}
+			report(e)
+		}
+	}
+
 	if !isTerminal() {
-		return run(func(e installer.Event) {
+		err := run(counted(func(e installer.Event) {
 			if e.Status == installer.Running {
 				return
 			}
 			fmt.Fprintf(out, "[%d/%d] %s %s %s\n", e.Step, e.Total, statusWord(e.Status), e.Name, detailOf(e))
-		})
+		}))
+		return changed, err
 	}
 
 	m := &installModel{title: title, success: success, spin: spinner.New(spinner.WithSpinner(spinner.Dot))}
 	m.spin.Style = styleActive
 
 	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithOutput(out))
-	go func() { p.Send(doneMsg{err: run(func(e installer.Event) { p.Send(e) })}) }()
+	go func() { p.Send(doneMsg{err: run(counted(func(e installer.Event) { p.Send(e) }))}) }()
 
 	final, err := p.Run()
 	if err != nil {
-		return err
+		return changed, err
 	}
-	return final.(*installModel).err
+	return changed, final.(*installModel).err
 }
 
 type doneMsg struct{ err error }
