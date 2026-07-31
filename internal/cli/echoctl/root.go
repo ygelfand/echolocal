@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -65,7 +66,13 @@ func initConfig() {
 }
 
 func Execute() {
-	if err := newRoot().Execute(); err != nil {
+	root := newRoot()
+	if !isTerminal() {
+		root.SetOut(colorprofile.NewWriter(os.Stdout, os.Environ()))
+		root.SetErr(colorprofile.NewWriter(os.Stderr, os.Environ()))
+	}
+
+	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }

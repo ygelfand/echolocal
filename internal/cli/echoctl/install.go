@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/ygelfand/echolocal/internal/assets"
@@ -274,7 +274,7 @@ func (m *installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *installModel) View() string {
+func (m *installModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(styleTitle.Render(m.title) + "\n\n")
 
@@ -293,7 +293,7 @@ func (m *installModel) View() string {
 			b.WriteString("\n" + styleDone.Render(m.success) + "\n")
 		}
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 func mark(st installer.Status) string {

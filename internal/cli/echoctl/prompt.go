@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 )
 
 // The prompts are huh forms. A cancelled form reports huh.ErrUserAborted, which is translated once
@@ -17,8 +16,7 @@ import (
 func ask(ctx context.Context, out io.Writer, field huh.Field) error {
 	err := huh.NewForm(huh.NewGroup(field)).
 		WithOutput(out).
-		WithProgramOptions(tea.WithContext(ctx)).
-		Run()
+		RunWithContext(ctx)
 	if errors.Is(err, huh.ErrUserAborted) {
 		return ErrCancelled
 	}
