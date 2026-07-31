@@ -16,4 +16,3 @@ func TestRebootChoiceOf(t *testing.T) {
 		}
 	}
 }
-
