@@ -50,9 +50,10 @@ func newInstallCmd() *cobra.Command {
 		Short: "Install echod on a connected Echo Dot",
 		Long: "Installs echod into /system/app/echod and hands it Amazon's ledcontroller service,\n" +
 			"so init starts and supervises it. Safe to re-run.\n\n" +
-			"Begins by writing EchoLocal's boot image, without which there is no root adbd and no\n" +
-			"permissive kernel, and so no way for echod to open its socket. That stage is skipped\n" +
-			"on a device that already has both, and needs TWRP as the recovery partition.",
+			"Begins by checking that the device has root and a permissive kernel, without which\n" +
+			"there is no root adbd and no way for echod to open its socket. A device that has both\n" +
+			"is left alone; one that does not has EchoLocal's boot image written from recovery,\n" +
+			"which needs TWRP as the recovery partition.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
@@ -84,7 +85,9 @@ func newInstallCmd() *cobra.Command {
 
 			// The boot image first, and on its own: until it is written there is no root adbd, and
 			// everything below needs one — reading the device's own name included.
-			if _, err := render(cmd.Context(), out, "Writing EchoLocal's boot image",
+			// Named for what it always does rather than for what it sometimes does: most runs find a
+			// device that already has root and a permissive kernel and write nothing at all.
+			if err := render(cmd.Context(), out, "Verifying device boot status",
 				"✓ device has root and a permissive kernel",
 				func(report installer.Reporter) error {
 					return installer.FlashBoot(cmd.Context(), d, cfg, report)
@@ -104,12 +107,17 @@ func newInstallCmd() *cobra.Command {
 			}
 			cfg.Name = chosen
 
-			changed, err := render(cmd.Context(), out, "Installing EchoLocal",
+			// settles is whether anything changed that only takes effect on the next boot, which the
+			// installer decides: it is the only thing that knows a run replaced the binary from a run
+			// that gated a service or hid a package that was running.
+			var settles bool
+			if err := render(cmd.Context(), out, "Installing EchoLocal",
 				"✓ echod installed and running",
 				func(report installer.Reporter) error {
-					return installer.Install(cmd.Context(), d, cfg, report)
-				})
-			if err != nil {
+					var err error
+					settles, err = installer.Install(cmd.Context(), d, cfg, report)
+					return err
+				}); err != nil {
 				return err
 			}
 
@@ -126,7 +134,7 @@ func newInstallCmd() *cobra.Command {
 
 			// Before the pairing key rather than after, so the one thing to carry off the screen is the
 			// last thing printed.
-			if err := offerReboot(cmd.Context(), out, d, changed, rebootChoiceOf(doReboot, noReboot)); err != nil {
+			if err := offerReboot(cmd.Context(), out, d, settles, rebootChoiceOf(doReboot, noReboot)); err != nil {
 				return err
 			}
 			return printPairing(out, d, chosen)
@@ -161,12 +169,11 @@ func newUninstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = render(cmd.Context(), cmd.OutOrStdout(), "Uninstalling EchoLocal",
+			return render(cmd.Context(), cmd.OutOrStdout(), "Uninstalling EchoLocal",
 				"✓ echod removed, ledcontroller restored",
 				func(report installer.Reporter) error {
 					return installer.Uninstall(cmd.Context(), d, report)
 				})
-			return err
 		},
 	}
 
@@ -195,40 +202,28 @@ func printPairing(out io.Writer, d *device.Device, name string) error {
 	return nil
 }
 
-// render drives a step run, live when attached to a terminal and plain lines otherwise. It reports
-// whether any step actually did something, so a re-run that changed nothing can say so and stay quiet.
-func render(ctx context.Context, out io.Writer, title, success string, run func(installer.Reporter) error) (bool, error) {
-	var changed bool
-	counted := func(report installer.Reporter) installer.Reporter {
-		return func(e installer.Event) {
-			if e.Status == installer.Done {
-				changed = true
-			}
-			report(e)
-		}
-	}
-
+// render drives a step run, live when attached to a terminal and plain lines otherwise.
+func render(ctx context.Context, out io.Writer, title, success string, run func(installer.Reporter) error) error {
 	if !isTerminal() {
-		err := run(counted(func(e installer.Event) {
+		return run(func(e installer.Event) {
 			if e.Status == installer.Running {
 				return
 			}
 			fmt.Fprintf(out, "[%d/%d] %s %s %s\n", e.Step, e.Total, statusWord(e.Status), e.Name, detailOf(e))
-		}))
-		return changed, err
+		})
 	}
 
 	m := &installModel{title: title, success: success, spin: spinner.New(spinner.WithSpinner(spinner.Dot))}
 	m.spin.Style = styleActive
 
 	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithOutput(out))
-	go func() { p.Send(doneMsg{err: run(counted(func(e installer.Event) { p.Send(e) }))}) }()
+	go func() { p.Send(doneMsg{err: run(func(e installer.Event) { p.Send(e) })}) }()
 
 	final, err := p.Run()
 	if err != nil {
-		return changed, err
+		return err
 	}
-	return changed, final.(*installModel).err
+	return final.(*installModel).err
 }
 
 type doneMsg struct{ err error }

@@ -24,6 +24,9 @@ type Work int
 const (
 	// WorkWakeWord is a newly chosen wake word being fetched, loaded, and warmed up.
 	WorkWakeWord Work = iota
+
+	// WorkElsewhere is another device answering a wake word this one also heard.
+	WorkElsewhere
 )
 
 // busyLimit is the longest any one piece of work may hold the ring. Whatever ends a busy indication is
@@ -37,6 +40,8 @@ func (w Work) appearance() (string, Color) {
 	switch w {
 	case WorkWakeWord:
 		return EffectChase, Color{R: 0xFF, G: 0x9A, B: 0x00}
+	case WorkElsewhere:
+		return EffectChase, Color{R: 0x00, G: 0xB0, B: 0xC0}
 	}
 	return EffectChase, Color{R: 0xFF, G: 0xFF, B: 0xFF}
 }
@@ -45,6 +50,8 @@ func (w Work) String() string {
 	switch w {
 	case WorkWakeWord:
 		return "wake word"
+	case WorkElsewhere:
+		return "answered elsewhere"
 	}
 	return "work"
 }
@@ -77,6 +84,14 @@ func (b *Busy) Start(w Work) *Task {
 	b.tasks = append(b.tasks, t)
 	b.show()
 	return t
+}
+
+// Flash shows work that is already over, for as long as it takes to be noticed. Same appearance and
+// same priority as work in progress, because to whoever is looking it is the same kind of thing: the
+// device saying what it is doing about what they just said.
+func (b *Busy) Flash(w Work, d time.Duration) {
+	t := b.Start(w)
+	time.AfterFunc(d, t.Done)
 }
 
 // Done ends one piece of work. Safe to call twice, and on nothing, so a caller may both defer it and

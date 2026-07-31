@@ -58,9 +58,6 @@ type Satellite struct {
 	turn    *conversation
 	buttons *buttonEvents
 	name    string
-
-	// models is everything installed, of either backend. What is advertised is filtered from it.
-	models []wake.Model
 }
 
 // New builds the server and its entities. It does not listen; call Serve.
@@ -72,14 +69,6 @@ func New(cfg Config) (*Satellite, error) {
 
 	if err := settings.LoadError(); err != nil {
 		slog.Error("reading saved settings failed, continuing with defaults", "err", err)
-	}
-
-	// What is installed is advertised from the start; what Home Assistant offers is added when it asks
-	// for the configuration. A device with neither is still worth building — that is how it gets its
-	// first wake word.
-	models, err := wake.Installed(layout.ModelDir)
-	if err != nil {
-		slog.Warn("listing wake word models failed", "err", err)
 	}
 
 	k := &kit{
@@ -120,7 +109,7 @@ func New(cfg Config) (*Satellite, error) {
 	ents.Add(k.Log.entities()...)
 
 	// The action button drives the conversation, which needs the satellite that is built below.
-	s := &Satellite{kit: k, mute: mute, models: models}
+	s := &Satellite{kit: k, mute: mute}
 
 	s.buttons = newButtonEvents()
 	ents.Add(s.buttons.entities()...)
@@ -166,23 +155,26 @@ func New(cfg Config) (*Satellite, error) {
 			esphome.FeatureSpeaker |
 			esphome.FeatureAnnounce |
 			esphome.FeatureStartConversation
-		k.Voice = newVoiceSatellite(s.models)
+		k.Voice = s.newVoiceSatellite()
 		s.turn = newConversation(k)
 		srv.Handler = esphome.Chain(ents, k.Voice)
 	}
 	return s, nil
 }
 
-// newVoiceSatellite advertises every installed model and follows Home Assistant's selection. Which
-// engine runs one is the model's business, so nothing here has to filter.
-func newVoiceSatellite(models []wake.Model) *esphome.VoiceSatellite {
-	available, active := wakeWords(models, WakeSlots)
+// newVoiceSatellite follows Home Assistant's selection and answers its questions. What the device can
+// hear is not stored here: it is asked for on every configuration request, because models arrive and
+// are deleted while the device runs.
+func (s *Satellite) newVoiceSatellite() *esphome.VoiceSatellite {
+	ours := wake.Lib().Ours()
+
+	active := activeWakeWords(ours, WakeSlots)
 	vs := &esphome.VoiceSatellite{
-		AvailableWakeWords: available,
-		ActiveWakeWords:    active,
-		MaxActiveWakeWords: WakeSlots,
+		ActiveWakeWords:     active,
+		MaxActiveWakeWords:  WakeSlots,
+		OnExternalWakeWords: s.answerWakeWords,
 	}
-	slog.Info("advertising wake words", "count", len(available), "active", active)
+	slog.Info("wake words", "ours", len(ours), "active", active)
 	return vs
 }
 

@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	esphome "github.com/ygelfand/go-esphome-device"
 )
 
 // served stands in for Home Assistant's custom_wake_words directory, which it serves statically: the
 // config at one path and the model beside it.
-func served(t *testing.T, config string, model []byte) (*httptest.Server, Offer) {
+func served(t *testing.T, config string, model []byte) (*httptest.Server, esphome.ExternalWakeWord) {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -28,13 +30,13 @@ func served(t *testing.T, config string, model []byte) (*httptest.Server, Offer)
 	t.Cleanup(srv.Close)
 
 	sum := sha256.Sum256(model)
-	return srv, Offer{
-		ID:        "test",
-		Phrase:    "Hey Test",
-		Languages: []string{"en"},
-		Size:      uint32(len(model)),
-		Hash:      hex.EncodeToString(sum[:]),
-		URL:       srv.URL + "/api/esphome/wake_words/test.json",
+	return srv, esphome.ExternalWakeWord{
+		ID:               "test",
+		Phrase:           "Hey Test",
+		TrainedLanguages: []string{"en"},
+		Size:             uint32(len(model)),
+		Hash:             hex.EncodeToString(sum[:]),
+		URL:              srv.URL + "/api/esphome/wake_words/test.json",
 	}
 }
 

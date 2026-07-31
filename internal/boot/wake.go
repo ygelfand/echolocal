@@ -3,7 +3,6 @@ package boot
 import (
 	"log/slog"
 
-	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/satellite"
@@ -17,16 +16,7 @@ import (
 // not: which words go in which slot, and what to tell Home Assistant about the ones that would not
 // load.
 func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source, leds *led.Driver) {
-	library := wake.NewLibrary(layout.ModelDir)
-
-	// A device with no models still wires everything up. What Home Assistant offers arrives on the
-	// configuration request, and dropping that handler is how a device ends up unable to adopt its
-	// first wake word: nothing local, so nothing offered, so nothing to select.
-	models, err := wake.Installed(library.Dir())
-	if err != nil {
-		slog.Warn("listing wake word models failed", "dir", library.Dir(), "err", err)
-	}
-
+	library := wake.Lib()
 	engine := wake.New(satellite.WakeSlots, source)
 	engine.Threshold = sat.WakeThreshold
 	engine.OnDetect = sat.WakeDetected
@@ -83,10 +73,11 @@ func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source,
 	}
 
 	sat.OnWakeWord(load)
-	sat.OnOffers(library.Offered)
 
 	group.Add(engine, forever())
-	slog.Info("wake words installed", "count", len(models),
-		"openwakeword", len(wake.OfKind(models, wake.KindOpenWakeWord)),
-		"microwakeword", len(wake.OfKind(models, wake.KindMicroWakeWord)))
+
+	ours := library.Ours()
+	slog.Info("wake words installed", "count", len(ours),
+		"openwakeword", len(wake.OfKind(ours, wake.KindOpenWakeWord)),
+		"microwakeword", len(wake.OfKind(ours, wake.KindMicroWakeWord)))
 }

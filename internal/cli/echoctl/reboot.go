@@ -31,16 +31,19 @@ func rebootChoiceOf(yes, no bool) rebootChoice {
 
 // offerReboot restarts the device when that is wanted, and then waits for echod to come back by itself.
 //
-// Asked only when the install changed something. Steps that gate init services or hook the firewall
-// take effect on the next boot, so a device that was only just installed is not yet the device it will
-// be; a re-run that changed nothing has nothing new to prove and should finish silently.
-func offerReboot(ctx context.Context, out io.Writer, d *device.Device, changed bool, choice rebootChoice) error {
+// settles is the installer's own answer to whether anything changed that the device will only act on
+// when it next starts: an init service gated, a package hidden while it was running, a boot script
+// stubbed, the ledcontroller link newly pointed at echod. It is deliberately not "did any step do
+// work" — writing the binary, remounting /system and restarting the service happen on every run and a
+// reboot settles none of them, so counting those would raise the question every time and teach anyone
+// re-running an install to dismiss it.
+func offerReboot(ctx context.Context, out io.Writer, d *device.Device, settles bool, choice rebootChoice) error {
 	switch choice {
 	case rebootNo:
 		return nil
 
 	case rebootAsk:
-		if !changed {
+		if !settles {
 			return nil
 		}
 		if !isTerminal() {
@@ -60,9 +63,8 @@ func offerReboot(ctx context.Context, out io.Writer, d *device.Device, changed b
 		}
 	}
 
-	_, err := render(ctx, out, "Rebooting", "✓ device came back and echod started on its own",
+	return render(ctx, out, "Rebooting", "✓ device came back and echod started on its own",
 		func(report installer.Reporter) error {
 			return installer.RebootAndWait(ctx, d, report)
 		})
-	return err
 }

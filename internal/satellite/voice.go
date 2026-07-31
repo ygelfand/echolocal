@@ -24,6 +24,15 @@ const troubleFlash = 1500 * time.Millisecond
 
 var troubleColor = led.Color{R: 0xC0, G: 0x00, B: 0x00}
 
+// errDuplicate is what Home Assistant reports to the devices that lost a race to answer: "Duplicate
+// wake-up detected for Glados". Every satellite in earshot hears the wake word and starts a turn, and
+// only the first is served.
+const errDuplicate = "duplicate_wake_up_detected"
+
+// yieldFlash is how long the ring says the turn went elsewhere. Long enough to be seen by somebody
+// looking at the wrong device, short enough not to compete with the one that is answering.
+const yieldFlash = 900 * time.Millisecond
+
 // phase is what the conversation is doing. It is the whole of its state: everything that used to be
 // inferred from a handful of booleans is a phase, and every transition happens in one goroutine, so
 // there is no combination to get into that the transitions do not describe.
@@ -335,6 +344,18 @@ func (c *conversation) handle(e event) {
 		c.disarm()
 
 	case evError:
+		// Two devices in earshot both hear the wake word and both start a turn. Home Assistant keeps the
+		// first and refuses the rest, so this arrives on every device that lost — which is not a failure
+		// of any of them, and a chime and a red ring say the opposite to the room. It ends the turn and
+		// says nothing: the device that won is about to light up and answer.
+		if e.code == errDuplicate {
+			slog.Info("another device answered first", "slot", c.slot+1, "message", e.msg)
+			c.clearPending()
+			c.idle("answered elsewhere")
+			c.leds.Busy().Flash(led.WorkElsewhere, yieldFlash)
+			return
+		}
+
 		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
 		c.clearPending()
 		c.idle("failed")
@@ -593,11 +614,11 @@ func (c *conversation) phraseFor(slot int) (string, bool) {
 		return "", false
 	}
 
+	// From what is on disk, because a slot is only active once its model loaded, and the advertised list
+	// is not kept anywhere to be read.
 	id := c.vs.ActiveWakeWords[slot]
-	for _, w := range c.vs.AvailableWakeWords {
-		if w.ID == id {
-			return w.Phrase, true
-		}
+	if m, ok := wake.Find(wake.Lib().Ours(), id); ok {
+		return m.Phrase, true
 	}
 	return id, true
 }
@@ -813,15 +834,10 @@ func (c *conversation) reported(dry time.Time) {
 		"dropped", c.source.Dropped())
 }
 
-// wakeWords advertises the models the selected backend can run, with the per-slot selection the user
-// last made for it. Only that backend's models are offered: the other's cannot be loaded without a
-// second front end, so offering them would be offering something the device will refuse.
-func wakeWords(models []wake.Model, slots int) ([]esphome.WakeWord, []string) {
-	out := make([]esphome.WakeWord, 0, len(models))
-	for _, m := range models {
-		out = append(out, esphome.WakeWord{ID: m.ID, Phrase: m.Phrase, TrainedLanguages: m.Languages})
-	}
-
+// activeWakeWords is the per-slot selection the user last made, filtered to what the device can
+// actually load. Home Assistant takes it as authoritative, so claiming a model that is not here would
+// leave a slot looking armed and deaf.
+func activeWakeWords(models []wake.Model, slots int) []string {
 	saved := settings.Get().Wake
 	var active []string
 	for i := range slots {
@@ -843,5 +859,5 @@ func wakeWords(models []wake.Model, slots int) ([]esphome.WakeWord, []string) {
 			active = []string{models[0].ID}
 		}
 	}
-	return out, active
+	return active
 }

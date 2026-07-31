@@ -18,7 +18,7 @@
 // The only vector float arithmetic the Go assembler knows on arm64 is FMLA, so there is no vector add
 // to fold the four accumulators together with. Multiplying by a vector of ones is that add, and it is
 // exact: one is representable and a fused multiply-add rounds once.
-TEXT ·dotNEON(SB), NOSPLIT, $0-32
+TEXT ·dotNEON(SB), NOSPLIT, $0-28
 	MOVD	a+0(FP), R0
 	MOVD	b+8(FP), R1
 	MOVD	n+16(FP), R2

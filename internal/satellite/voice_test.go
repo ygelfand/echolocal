@@ -23,10 +23,7 @@ func TestWakeWordsPreselectsTheDefault(t *testing.T) {
 			models = append(models, wake.Model{ID: id, Phrase: id})
 		}
 
-		available, active := wakeWords(models, WakeSlots)
-		if len(available) != len(models) {
-			t.Errorf("%s: offered %d models, want %d", name, len(available), len(models))
-		}
+		active := activeWakeWords(models, WakeSlots)
 
 		switch {
 		case tc.want == "":

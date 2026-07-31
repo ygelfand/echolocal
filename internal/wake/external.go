@@ -12,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 	"time"
+
+	esphome "github.com/ygelfand/go-esphome-device"
 )
 
 // Models Home Assistant offers from its own custom_wake_words directory, which is how a wake word is
@@ -21,23 +23,11 @@ import (
 // What it offers is the config, with the model beside it, and the hash and size are the model's. So
 // this fetches the config to learn the model's name, fetches the model, and refuses it unless both
 // match — a wake word that runs on a truncated download would fail in a way nobody could read.
-type Offer struct {
-	ID        string
-	Phrase    string
-	Languages []string
-
-	// Size and Hash are the model file's, as Home Assistant measured it: bytes, and sha256 in hex.
-	Size uint32
-	Hash string
-
-	// URL is the config. The model is served beside it, under the name the config gives.
-	URL string
-}
 
 const fetchTimeout = 30 * time.Second
 
 // Have reports whether the offered model is already on disk and is the one being offered.
-func Have(dir string, o Offer) bool {
+func Have(dir string, o esphome.ExternalWakeWord) bool {
 	data, err := os.ReadFile(modelPath(dir, o.ID))
 	if err != nil {
 		return false
@@ -46,7 +36,7 @@ func Have(dir string, o Offer) bool {
 }
 
 // Adopt downloads a model unless it is already there, and returns it ready to load.
-func Adopt(ctx context.Context, dir string, o Offer) (Model, error) {
+func Adopt(ctx context.Context, dir string, o esphome.ExternalWakeWord) (Model, error) {
 	if Have(dir, o) {
 		return load(dir, o.ID), nil
 	}
@@ -74,7 +64,7 @@ func Adopt(ctx context.Context, dir string, o Offer) (Model, error) {
 
 	// The offer knows what to call it and what it was trained on; the config knows how to run it.
 	m.WakeWord = o.Phrase
-	m.TrainedLanguages = o.Languages
+	m.TrainedLanguages = o.TrainedLanguages
 	m.Model = filepath.Base(modelPath(dir, o.ID))
 
 	if err := write(dir, o.ID, model, m); err != nil {
@@ -84,7 +74,7 @@ func Adopt(ctx context.Context, dir string, o Offer) (Model, error) {
 }
 
 // matches checks a download against what was offered.
-func matches(model []byte, o Offer) error {
+func matches(model []byte, o esphome.ExternalWakeWord) error {
 	if uint32(len(model)) != o.Size {
 		return fmt.Errorf("%d bytes, offered as %d", len(model), o.Size)
 	}

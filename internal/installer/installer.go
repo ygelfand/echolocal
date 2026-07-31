@@ -108,16 +108,27 @@ type run struct {
 	// state is what the device last said about itself. The flash stage reads it before deciding to
 	// write anything and again afterwards to judge whether it worked.
 	state state
+
+	// reboot is or-ed by the steps that change something init only acts on at start-up. The rest of a
+	// run — checks, remounts, writing the binary, restarting the service — happens every time and
+	// proves nothing about the next boot, so this is what decides whether a reboot is worth offering.
+	reboot bool
 }
 
 // Install puts echod on a device that already has root. It is safe to re-run: every step either
 // checks the state it creates or is harmless to repeat, and the stock binary is backed up only once,
 // so a second run cannot overwrite it.
 //
+// It reports whether anything changed that the device will only act on when it next starts, which is
+// the only reason to offer a reboot. A re-run that just replaced the binary reports false: echod is
+// started again here, so there is nothing a restart would settle.
+//
 // FlashBoot has to have happened first, on this device or a previous run. Nothing here works without
 // a root adbd, and reading the device's own name needs it.
-func Install(ctx context.Context, d *device.Device, cfg Config, report Reporter) error {
-	return execute(ctx, steps, &run{d: d, cfg: cfg, ctx: ctx}, report)
+func Install(ctx context.Context, d *device.Device, cfg Config, report Reporter) (bool, error) {
+	r := &run{d: d, cfg: cfg, ctx: ctx}
+	err := execute(ctx, steps, r, report)
+	return r.reboot, err
 }
 
 // FlashBoot writes echod's boot image, and does nothing on a device that already has root and a
@@ -215,13 +226,27 @@ func backupService(r *run) (string, bool, error) {
 	return layout.Backup, false, nil
 }
 
+// takeOverService points init's ledcontroller at echod. Already pointing there is left alone rather
+// than relinked: an identical write reported as work is what made every re-run look like it had
+// changed something, and this is the step whose effect a reboot actually settles — init starts what the
+// link points at.
 func takeOverService(r *run) (string, bool, error) {
-	_, err := r.d.Shell(fmt.Sprintf("rm -f %s && ln -s %s %s", layout.Service, layout.Binary, layout.Service))
-	if err != nil {
+	if current, err := r.d.Shell("readlink " + layout.Service); err == nil {
+		if strings.TrimSpace(current) == layout.Binary {
+			return "already " + layout.Binary, true, nil
+		}
+	}
+
+	if _, err := r.d.Shell(fmt.Sprintf("rm -f %s && ln -s %s %s", layout.Service, layout.Binary, layout.Service)); err != nil {
 		return "", false, err
 	}
 	target, err := r.d.Shell("readlink " + layout.Service)
-	return strings.TrimSpace(target), false, err
+	if err != nil {
+		return "", false, err
+	}
+
+	r.reboot = true
+	return strings.TrimSpace(target), false, nil
 }
 
 // stopService releases the running binary: /system cannot be remounted read-only while a
@@ -265,6 +290,10 @@ func hidePackages(r *run) (string, bool, error) {
 	if len(hid) == 0 && len(stopped) == 0 {
 		return fmt.Sprintf("%d already hidden, none running", len(services.Hidden)), true, nil
 	}
+
+	// A package that was running has been stopped, but nothing here stops it from being started again
+	// by whatever asked for it last. A boot with it hidden from the start is the state we are after.
+	r.reboot = true
 	return fmt.Sprintf("hid %d of %d, stopped %d", len(hid), len(services.Hidden), len(stopped)), false, nil
 }
 
@@ -278,6 +307,9 @@ func gateProps(r *run) (string, bool, error) {
 	if len(changed) == 0 {
 		return fmt.Sprintf("%d already set", len(services.Gated)), true, nil
 	}
+
+	// init reads these when it starts a service, so nothing changes for the services already running.
+	r.reboot = true
 	return fmt.Sprintf("set %d of %d, effective next boot", len(changed), len(services.Gated)), false, nil
 }
 

@@ -30,6 +30,14 @@ func (h heartbeat) Run(ctx context.Context) error {
 	t := time.NewTicker(heartbeatEvery)
 	defer t.Stop()
 
+	// Once at the start, before the first tick. The readings are published into entities that hold
+	// their last value until Home Assistant asks, so a device that waited for the tick would report
+	// nothing at all for the first five minutes — and a restart is exactly when somebody is looking.
+	// No log line here: boot already said it is resident.
+	if h.sample != nil {
+		h.sample()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():

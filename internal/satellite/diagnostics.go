@@ -122,7 +122,7 @@ func (d *diagnostics) storage() {
 			Category: esphome.CategoryDiagnostic,
 		},
 		OnPress: func() {
-			gone, freed := wake.Purge(layout.ModelDir, inUseWakeWords())
+			gone, freed := wake.Lib().Purge(inUseWakeWords())
 			slog.Info("cache purged", "models", gone, "bytes", freed)
 			d.measure()
 		},
@@ -188,7 +188,7 @@ func (d *diagnostics) measure() {
 		return
 	}
 
-	_, cached := wake.Cached(layout.ModelDir, inUseWakeWords())
+	_, cached := wake.Cached(wake.Lib().Dir(), inUseWakeWords())
 	d.cached.Set(float32(cached / 1024))
 
 	free, err := layout.Free(layout.StateDir)

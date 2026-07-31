@@ -39,6 +39,9 @@ func disableBootAnimation(r *run) (string, bool, error) {
 	if len(done) == 0 {
 		return "already stubbed", true, nil
 	}
+
+	// These only ever run at boot, so this one is not settled until then by definition.
+	r.reboot = true
 	return strings.Join(done, ", "), false, nil
 }
 

@@ -103,11 +103,10 @@ func newRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = render(cmd.Context(), cmd.OutOrStdout(), "Restarting echod", "✓ echod restarted",
+			return render(cmd.Context(), cmd.OutOrStdout(), "Restarting echod", "✓ echod restarted",
 				func(report installer.Reporter) error {
 					return installer.Restart(cmd.Context(), d, report)
 				})
-			return err
 		},
 	}
 
