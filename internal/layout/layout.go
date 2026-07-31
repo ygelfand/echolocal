@@ -15,6 +15,17 @@ const (
 	StateDir = "/data/misc/echolocal"
 	KeyPath  = StateDir + "/psk"
 	NamePath = StateDir + "/name"
+
+	// PrevBinary is the binary an update replaced, kept until the new one has proved itself. Its
+	// presence at boot is what says a trial never finished, so nothing may leave one lying around.
+	// OldBinary is where a proven update files it, one generation back.
+	PrevBinary = Binary + ".prev"
+	OldBinary  = Binary + ".old"
+
+	// UpdatingPath holds the version being tried, so a rollback can say which one it took out. It is
+	// under /data because the boot hook reads it after a restore has already remounted /system back to
+	// read-only.
+	UpdatingPath = StateDir + "/updating"
 )
 
 // echod runs as Amazon's ledcontroller service: taking over the definition removes the only
@@ -26,12 +37,15 @@ const (
 	ServiceName  = "ledcontroller"
 )
 
-// AnimationScripts are the boot animation wrappers init runs; both call ledctrl, which waits on
-// a binder service echod does not publish.
-var AnimationScripts = []string{
-	"/system/bin/start_animation.sh",
-	"/system/bin/stop_animation.sh",
-}
+// The boot animation wrappers init runs; both call ledctrl, which waits on a binder service echod does
+// not publish. StartAnimation runs on the way up and StopAnimation once Android reports the boot
+// finished, which is the difference that decides what may go in them.
+const (
+	StartAnimation = "/system/bin/start_animation.sh"
+	StopAnimation  = "/system/bin/stop_animation.sh"
+)
+
+var AnimationScripts = []string{StartAnimation, StopAnimation}
 
 // SELinux labels. A service's domain comes from the label of the file init execs, and
 // system_file has no transition rule, which leaves echod in init's own domain.
@@ -45,6 +59,16 @@ const (
 const (
 	StartedProp = "echolocal.started"
 	StateProp   = "echolocal.state"
+
+	// TrialProp marks that a process this boot already took an update and has not committed it.
+	// Deliberately not a persist property: it has to survive init restarting echod, which is what
+	// makes a second attempt recognisable, and it has to be forgotten across a reboot, which is what
+	// gives the boot hook its turn.
+	TrialProp = "echolocal.trial"
+
+	// RolledBackProp is set by the boot hook when it puts the previous binary back, so the failure
+	// reaches Home Assistant instead of only logcat.
+	RolledBackProp = "echolocal.rolledback"
 )
 
 // LogTag is echod's logcat tag: `adb logcat -s echolocal`.

@@ -22,6 +22,11 @@ type heartbeat struct {
 	// sample publishes the readings that drift — the disk, the temperatures, the cores. Nil when there
 	// is nothing to publish them to.
 	sample func()
+
+	// settled runs on the ticks and not on the first sample, which makes it the cheapest evidence
+	// available that this process is not going to fall over immediately: it got to a tick. An update
+	// waiting to be believed is kept on the strength of it.
+	settled func()
 }
 
 func (heartbeat) Name() string { return "heartbeat" }
@@ -46,6 +51,9 @@ func (h heartbeat) Run(ctx context.Context) error {
 			slog.Info("alive")
 			if h.sample != nil {
 				h.sample()
+			}
+			if h.settled != nil {
+				h.settled()
 			}
 		}
 	}

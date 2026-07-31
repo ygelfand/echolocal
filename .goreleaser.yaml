@@ -1,10 +1,11 @@
 version: 2
 
-# Only echoctl is released here. echod is cross-compiled for android/arm in the
-# pinned NDK image (`make echod`) and embedded into echoctl by `make payload`.
 before:
   hooks:
-    - go mod tidy
+    - make vet
+    - make test
+    - make payload
+    - make manifest
 
 builds:
   - id: echoctl
@@ -12,6 +13,8 @@ builds:
     binary: echoctl
     env:
       - CGO_ENABLED=0
+    tags:
+      - payload
     goos:
       - linux
       - darwin
@@ -31,6 +34,9 @@ archives:
 
 release:
   prerelease: auto
+  extra_files:
+    - glob: ./bin/echod
+    - glob: ./bin/manifest.json
 
 checksum:
   name_template: "checksums.txt"

@@ -5,6 +5,15 @@ import "math"
 // HomeAssistant is Home Assistant's brand blue.
 var HomeAssistant = Color{R: 0x18, G: 0xBC, B: 0xF2}
 
+// Solid is every segment in one colour.
+func Solid(c Color) []Color {
+	out := make([]Color, Segments)
+	for i := range out {
+		out[i] = c
+	}
+	return out
+}
+
 // Arc lights a clockwise fraction of the ring, from 0 to 1, dimming the leading segment by
 // whatever is left over. Twelve segments cannot show thirty volume steps, so the partial
 // segment is what makes each step visible — the same trick Amazon's firmware used.

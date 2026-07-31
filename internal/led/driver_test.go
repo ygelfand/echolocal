@@ -50,8 +50,26 @@ func shown(t *testing.T, r *Ring) Color {
 }
 
 // settle waits for the render loop to write. The driver renders as soon as it is woken, so this only
-// has to outlast a scheduling hop.
+// has to outlast a scheduling hop. It cannot simply be made generous: a timed claim expires on its own
+// deadline, and a test watching one expire needs to look before it does.
 func settle() { time.Sleep(40 * time.Millisecond) }
+
+// waitFor is settle for something that has to change: it polls until the ring shows what is expected,
+// which is what a test wants when a scheduling hop under load is the only thing in the way. A fixed
+// sleep either flakes or is slower than every run needs to be.
+func waitFor(t *testing.T, r *Ring, want Color) Color {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	var got Color
+	for time.Now().Before(deadline) {
+		if got = shown(t, r); got == want {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return got
+}
 
 func solid(c Color) []Color {
 	out := make([]Color, Segments)
@@ -290,15 +308,13 @@ func TestARoomReactionShowsTheLightThroughItsSilence(t *testing.T) {
 	}
 
 	loud.Store(true)
-	settle()
-	if got := shown(t, d.ring); got != blue {
+	if got := waitFor(t, d.ring, blue); got != blue {
 		t.Errorf("a loud room shows %+v, want the reaction", got)
 	}
 
 	// And back, without anything being claimed or released in between.
 	loud.Store(false)
-	settle()
-	if got := shown(t, d.ring); got != green {
+	if got := waitFor(t, d.ring, green); got != green {
 		t.Errorf("once the room went quiet the ring shows %+v, want the light again", got)
 	}
 }

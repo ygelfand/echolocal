@@ -108,6 +108,9 @@ func New(cfg Config) (*Satellite, error) {
 	k.Log = newActivity()
 	ents.Add(k.Log.entities()...)
 
+	k.Update = newUpdater(cfg.Version)
+	ents.Add(k.Update.entities()...)
+
 	// The action button drives the conversation, which needs the satellite that is built below.
 	s := &Satellite{kit: k, mute: mute}
 
@@ -238,6 +241,13 @@ func (s *Satellite) SetActiveWakeWords(ids []string) {
 // Sample publishes the diagnostics that drift on their own: free space, temperatures, cores, load and
 // memory. Called from the heartbeat, so they share one timestamp instead of each keeping its own timer.
 func (s *Satellite) Sample() { s.kit.Diag.Sample() }
+
+// CheckUpdate looks for a newer build and publishes what it found, without installing anything.
+//
+// It has to be driven from here because nothing drives it from Home Assistant: esphome entities do not
+// poll, so the only CHECK that ever arrives is somebody pressing refresh. A device left alone would
+// never learn a release exists.
+func (s *Satellite) CheckUpdate(ctx context.Context) { s.kit.Update.Check(ctx) }
 
 // PipelineReady reports whether Home Assistant has a voice pipeline listening. Wake detection runs
 // before that happens, but nothing can be done with a detection until it does, so this is what the

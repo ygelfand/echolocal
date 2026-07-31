@@ -20,7 +20,26 @@ type Stored struct {
 	Microphone Microphone `json:"microphone,omitzero"`
 	Wake       Wake       `json:"wake,omitzero"`
 	Ring       Ring       `json:"ring,omitzero"`
+	Update     Update     `json:"update,omitzero"`
 }
+
+// Update is which releases the device follows. The channel is a name rather than a URL: where each one
+// points is compiled in, so this cannot be used to send the device somewhere else for its next binary.
+type Update struct {
+	Channel *string `json:"channel,omitempty"`
+}
+
+// ChannelOr is the stored channel, or fallback when nothing has been chosen.
+func (u Update) ChannelOr(fallback string) string {
+	if u.Channel == nil {
+		return fallback
+	}
+	return *u.Channel
+}
+
+// Stored reports whether a channel was ever chosen, so a restore can tell "never set" from "set to the
+// default".
+func (u Update) Stored() bool { return u.Channel != nil }
 
 // Ring is the light, apart from what Home Assistant holds for the light entity itself. Each of these
 // is an animation by name, or empty for none, and none of them are appearances the light was set to:
@@ -157,6 +176,8 @@ func SetRingReaction(v string) error { return store().SetRingReaction(v) }
 func SetRingTrouble(v string) error  { return store().SetRingTrouble(v) }
 func SetRingMuted(v string) error    { return store().SetRingMuted(v) }
 func SetRingLight(v Light) error     { return store().SetRingLight(v) }
+
+func SetUpdateChannel(v string) error { return store().SetUpdateChannel(v) }
 
 func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(slot, id) }
 func SetWakeThreshold(slot int, v float64) error { return store().SetWakeThreshold(slot, v) }
@@ -316,6 +337,10 @@ func (st *Store) SetRingMuted(v string) error {
 // SetRingLight saves the whole appearance at once, since that is how it is set.
 func (st *Store) SetRingLight(v Light) error {
 	return st.Update(func(s *Stored) { s.Ring.Light = v })
+}
+
+func (st *Store) SetUpdateChannel(v string) error {
+	return st.Update(func(s *Stored) { s.Update.Channel = &v })
 }
 
 func (st *Store) SetWakeWord(slot int, id string) error {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/update"
 )
 
 // The boot animation is driven from two init services in /init.csm.project.rc:
@@ -18,11 +19,10 @@ import (
 //
 // The rc file is in the boot ramdisk, but the scripts it runs are in /system, so replacing them
 // is enough. echod owns the ring by the time either would run.
-var animationStub = `#!/system/bin/sh
-# Installed by EchoLocal, replacing a ledctrl call that waits forever on a binder service echod
-# does not publish. echod drives the ring instead.
-exit 0
-`
+//
+// What goes in them is internal/update's to define, because the one init runs on the way up is also
+// where a failed update is undone — and echod rewrites these itself when they fall behind, so two
+// definitions would drift and the rollback is not a thing to be wrong about.
 
 // disableBootAnimation replaces both animation scripts, keeping the originals alongside.
 func disableBootAnimation(r *run) (string, bool, error) {
@@ -45,10 +45,12 @@ func disableBootAnimation(r *run) (string, bool, error) {
 	return strings.Join(done, ", "), false, nil
 }
 
-// stubScript reports whether it had to write the stub.
+// stubScript reports whether it had to write the hook.
 func stubScript(r *run, path string) (bool, error) {
+	want := update.Script(path)
+
 	current, err := r.d.ReadFile(path)
-	if err == nil && string(current) == animationStub {
+	if err == nil && string(current) == want {
 		return false, nil
 	}
 
@@ -63,7 +65,7 @@ func stubScript(r *run, path string) (bool, error) {
 		}
 	}
 
-	if err := r.d.WriteFile(path, []byte(animationStub), 0o755); err != nil {
+	if err := r.d.WriteFile(path, []byte(want), 0o755); err != nil {
 		return false, err
 	}
 	return true, r.d.Chcon(layout.OurLabel, path)

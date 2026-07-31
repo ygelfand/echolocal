@@ -27,7 +27,15 @@ const (
 
 	// WorkElsewhere is another device answering a wake word this one also heard.
 	WorkElsewhere
+
+	// WorkUpdate is echod replacing itself, and WorkCommit the boot afterwards that keeps it.
+	WorkUpdate
+	WorkCommit
 )
+
+// UpdateColor is what the ring is left showing while the process is gone: the same teal as the work
+// that got it there, held still because nothing is running to animate it.
+var UpdateColor = Color{R: 0x00, G: 0xB0, B: 0xC0}
 
 // busyLimit is the longest any one piece of work may hold the ring. Whatever ends a busy indication is
 // a signal from elsewhere, and a signal that never arrives would otherwise animate the device for
@@ -41,7 +49,11 @@ func (w Work) appearance() (string, Color) {
 	case WorkWakeWord:
 		return EffectChase, Color{R: 0xFF, G: 0x9A, B: 0x00}
 	case WorkElsewhere:
-		return EffectChase, Color{R: 0x00, G: 0xB0, B: 0xC0}
+		return EffectChase, Color{R: 0x80, G: 0x40, B: 0xC0}
+	case WorkUpdate:
+		return EffectChase, UpdateColor
+	case WorkCommit:
+		return EffectChase, Color{R: 0x60, G: 0xD8, B: 0xE0}
 	}
 	return EffectChase, Color{R: 0xFF, G: 0xFF, B: 0xFF}
 }
@@ -52,6 +64,10 @@ func (w Work) String() string {
 		return "wake word"
 	case WorkElsewhere:
 		return "answered elsewhere"
+	case WorkUpdate:
+		return "update"
+	case WorkCommit:
+		return "keeping an update"
 	}
 	return "work"
 }

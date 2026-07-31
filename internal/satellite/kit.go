@@ -29,5 +29,6 @@ type kit struct {
 	Wake   *wakeControl
 	Log    *activity
 	Diag   *diagnostics
+	Update *updater
 	Voice  *esphome.VoiceSatellite
 }

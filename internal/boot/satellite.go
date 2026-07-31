@@ -28,6 +28,7 @@ func addSatellite(group *service.Group, sat *satellite.Satellite, source *mic.So
 		addWake(group, sat, source, leds)
 	}
 
+	group.Add(updates{sat: sat}, forever())
 	group.Add(runner{name: "logs", run: sat.PipeLogs}, forever())
 	group.Add(runner{name: "api", run: sat.Serve}, forever())
 }

@@ -1,8 +1,16 @@
 .DEFAULT_GOAL := help
 
-VERSION ?= 0.0.0
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+BASE := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+GIT_TAG := $(shell git describe --tags --exact-match 2>/dev/null)
+EPOCH := $(shell date -u +%s)
+BUILT_FROM := $(shell git status --porcelain 2>/dev/null | grep -q . && echo dirty || echo $(GIT_COMMIT))
+VERSION ?= $(if $(GIT_TAG),$(GIT_TAG),$(BASE)-dev.$(EPOCH)_$(BUILT_FROM))
+
+REPO ?= ygelfand/echolocal
+RELEASES ?= https://github.com/$(REPO)/releases
 
 LDFLAGS := -X 'main.Version=$(VERSION)' \
 	-X 'main.GitCommit=$(GIT_COMMIT)' \
@@ -161,6 +169,44 @@ shell: ## Open a root shell on a connected device
 .PHONY: install
 install: ## go install echoctl into $$GOPATH/bin
 	go install -ldflags "$(LDFLAGS)" ./cmd/echoctl
+
+AT ?= $(VERSION)
+FROM ?= $(RELEASES)/download/$(AT)
+PAGE ?= $(RELEASES)/tag/$(AT)
+
+.PHONY: manifest
+manifest: build-echod ## Write the manifest a device fetches to find this build
+	@mkdir -p $(BUILD_DIR)
+	go run ./cmd/mkmanifest \
+		-version "$(AT)" \
+		-file $(BUILD_DIR)/echod \
+		-url "$(FROM)/echod" \
+		-title "EchoLocal $(AT)" \
+		-release-url "$(PAGE)" \
+		-out $(BUILD_DIR)/manifest.json
+	@cat $(BUILD_DIR)/manifest.json
+
+.PHONY: release-dev
+release-dev: ## Publish this working tree to the dev channel, without pushing anything
+	@command -v gh >/dev/null || { echo "needs the gh CLI: brew install gh"; exit 1; }
+	@$(MAKE) --no-print-directory manifest FROM=$(RELEASES)/download/dev PAGE=$(RELEASES)/tag/dev
+	@gh release view dev >/dev/null 2>&1 || \
+		gh release create dev --prerelease --title dev --notes "Rolling build for devices on the dev channel."
+	gh release upload dev $(BUILD_DIR)/echod $(BUILD_DIR)/manifest.json --clobber
+	@echo "dev channel now serves $(VERSION)"
+
+.PHONY: release
+release: ## Release the version in VERSION
+	@$(MAKE) --no-print-directory tag TAG=$(BASE)
+
+.PHONY: tag
+tag:
+	@test -n "$(TAG)" || { echo "usage: make release, make release-dev, or make tag TAG=0.4.2"; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "the working tree is dirty"; exit 1; }
+	@git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null && { echo "$(TAG) already exists"; exit 1; } || true
+	git tag -a "$(TAG)" -m "EchoLocal $(TAG)"
+	git push origin "$(TAG)"
+	@echo "pushed $(TAG) — the release workflow builds it from here"
 
 .PHONY: snapshot
 snapshot: ## Build a local goreleaser snapshot
