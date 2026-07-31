@@ -18,12 +18,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
-// troubleFlash is how long the ring shows a failure, and troubleColor what it shows. Red is not used
-// anywhere else, so it never has to be told apart from an effect or a volume arc.
-const troubleFlash = 1500 * time.Millisecond
-
-var troubleColor = led.Color{R: 0xC0, G: 0x00, B: 0x00}
-
 // errDuplicate is what Home Assistant reports to the devices that lost a race to answer: "Duplicate
 // wake-up detected for Glados". Every satellite in earshot hears the wake word and starts a turn, and
 // only the first is served.
@@ -596,14 +590,7 @@ func (c *conversation) disarm() {
 // so ending the turn that failed cannot take the indication away with it.
 func (c *conversation) trouble() {
 	chime(c.sound, toneTrouble)
-
-	// Which animation is the user's choice, and None is one of the answers: the chime has already said
-	// it, and some rooms would rather the ring stayed out of it.
-	name := settings.Get().Ring.TroubleOr(settings.DefaultTrouble)
-	if name == "" {
-		return
-	}
-	c.leds.Claim(led.PriorityTrouble).ShowFor(led.Content{Effect: name, Base: troubleColor}, troubleFlash)
+	troubleRing(c.leds)
 }
 
 // phraseFor is what Home Assistant expects a turn to report for one of its wake word slots: the

@@ -193,11 +193,13 @@ func (u *updater) Install(ctx context.Context) {
 	err := update.Install(ctx, found, func(at float32) { u.progress(found, at) })
 
 	// Home Assistant learns nothing from the command it sent — the update entity has no way to say an
-	// install failed, and the card just goes back to offering it. So the failure has to arrive as state.
+	// install failed, and the card just goes back to offering it. So the failure has to arrive as state,
+	// and on the ring for somebody standing in front of the device.
 	if err != nil {
 		slog.Error("installing an update failed", "version", found.Version, "err", err)
 		u.publish(found)
 		u.settled(EventFailed, "installing "+found.Version+" failed: "+err.Error())
+		troubleRing(u.leds)
 		return
 	}
 	update.Restart("update to " + found.Version)
