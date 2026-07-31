@@ -47,6 +47,7 @@ func Run(ctx context.Context, cfg Config) error {
 	_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", alog.Uptime()))
 	_ = prop.Set(layout.StateProp, "starting")
 
+	procs()
 	dns.Use()
 
 	if err := settings.LoadError(); err != nil {
