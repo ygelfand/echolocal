@@ -30,8 +30,6 @@ type Manifest struct {
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
 
-	// Title and Notes are shown on Home Assistant's update card, Notes as the release notes. ReleaseURL
-	// is what its link goes to.
 	Title      string `json:"title,omitempty"`
 	Notes      string `json:"notes,omitempty"`
 	ReleaseURL string `json:"release_url,omitempty"`
@@ -45,14 +43,16 @@ const manifestTimeout = 10 * time.Second
 // captive portal or a mistake.
 const maxManifest = 64 << 10
 
-// Fetch reads the manifest at url and checks that it describes something installable. A manifest that
-// arrives without a version or without somewhere to fetch the binary from is a broken release, and
+// Fetch reads the channel's manifest and checks that it describes something installable. A manifest
+// that arrives without a version or without somewhere to fetch the binary from is a broken release, and
 // saying so here is better than failing half way through an install.
-func Fetch(ctx context.Context, url string) (Manifest, error) {
+func Fetch(ctx context.Context, c Channel) (Manifest, error) {
 	var m Manifest
 
 	ctx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
+
+	url := c.URL()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

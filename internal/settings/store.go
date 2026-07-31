@@ -27,6 +27,10 @@ type Stored struct {
 // points is compiled in, so this cannot be used to send the device somewhere else for its next binary.
 type Update struct {
 	Channel *string `json:"channel,omitempty"`
+
+	// Status is how the last attempt ended. Saved because the process that learns of a rollback is the
+	// one that just started, so an unsaved answer would be forgotten by the next restart.
+	Status *string `json:"status,omitempty"`
 }
 
 // ChannelOr is the stored channel, or fallback when nothing has been chosen.
@@ -35,6 +39,14 @@ func (u Update) ChannelOr(fallback string) string {
 		return fallback
 	}
 	return *u.Channel
+}
+
+// StatusOr is how the last attempt ended, or fallback when there has never been one.
+func (u Update) StatusOr(fallback string) string {
+	if u.Status == nil {
+		return fallback
+	}
+	return *u.Status
 }
 
 // Stored reports whether a channel was ever chosen, so a restore can tell "never set" from "set to the
@@ -178,6 +190,7 @@ func SetRingMuted(v string) error    { return store().SetRingMuted(v) }
 func SetRingLight(v Light) error     { return store().SetRingLight(v) }
 
 func SetUpdateChannel(v string) error { return store().SetUpdateChannel(v) }
+func SetUpdateStatus(v string) error  { return store().SetUpdateStatus(v) }
 
 func SetWakeWord(slot int, id string) error      { return store().SetWakeWord(slot, id) }
 func SetWakeThreshold(slot int, v float64) error { return store().SetWakeThreshold(slot, v) }
@@ -341,6 +354,10 @@ func (st *Store) SetRingLight(v Light) error {
 
 func (st *Store) SetUpdateChannel(v string) error {
 	return st.Update(func(s *Stored) { s.Update.Channel = &v })
+}
+
+func (st *Store) SetUpdateStatus(v string) error {
+	return st.Update(func(s *Stored) { s.Update.Status = &v })
 }
 
 func (st *Store) SetWakeWord(slot int, id string) error {

@@ -153,6 +153,10 @@ func Run(ctx context.Context, cfg Config) error {
 			update.Commit()
 			held.Done()
 			beat.settled = nil
+
+			if sat := ready.Load(); sat != nil {
+				sat.UpdateKept(cfg.Version)
+			}
 		}
 	}
 	group.Add(beat)

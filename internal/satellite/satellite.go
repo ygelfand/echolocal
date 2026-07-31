@@ -108,7 +108,7 @@ func New(cfg Config) (*Satellite, error) {
 	k.Log = newActivity()
 	ents.Add(k.Log.entities()...)
 
-	k.Update = newUpdater(cfg.Version)
+	k.Update = newUpdater(k, cfg.Version)
 	ents.Add(k.Update.entities()...)
 
 	// The action button drives the conversation, which needs the satellite that is built below.
@@ -241,6 +241,12 @@ func (s *Satellite) SetActiveWakeWords(ids []string) {
 // Sample publishes the diagnostics that drift on their own: free space, temperatures, cores, load and
 // memory. Called from the heartbeat, so they share one timestamp instead of each keeping its own timer.
 func (s *Satellite) Sample() { s.kit.Diag.Sample() }
+
+// UpdateKept says an update has been running long enough to be believed, so the outcome can be reported
+// where somebody will see it rather than only in the log.
+func (s *Satellite) UpdateKept(version string) {
+	s.kit.Update.settled(EventInstalled, "installed "+version)
+}
 
 // CheckUpdate looks for a newer build and publishes what it found, without installing anything.
 //

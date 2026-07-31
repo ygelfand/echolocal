@@ -40,7 +40,7 @@ var UpdateColor = Color{R: 0x00, G: 0xB0, B: 0xC0}
 // busyLimit is the longest any one piece of work may hold the ring. Whatever ends a busy indication is
 // a signal from elsewhere, and a signal that never arrives would otherwise animate the device for
 // ever.
-const busyLimit = 30 * time.Second
+const busyLimit = time.Minute
 
 // appearance is the motion and colour for a kind of work. One motion for all of them on purpose: it
 // means "working", and it is the colour that says at what.
