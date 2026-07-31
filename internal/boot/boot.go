@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ygelfand/echolocal/internal/alog"
+	"github.com/ygelfand/echolocal/internal/dns"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/mic"
@@ -45,6 +46,8 @@ func Run(ctx context.Context, cfg Config) error {
 
 	_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", alog.Uptime()))
 	_ = prop.Set(layout.StateProp, "starting")
+
+	dns.Use()
 
 	if err := settings.LoadError(); err != nil {
 		slog.Error("reading saved settings failed, continuing with defaults", "err", err)

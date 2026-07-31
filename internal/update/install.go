@@ -38,7 +38,7 @@ func Install(ctx context.Context, m Manifest, progress func(float32)) error {
 	}
 	defer installing.Unlock()
 
-	if err := m.valid(); err != nil {
+	if err := m.Valid(); err != nil {
 		return err
 	}
 

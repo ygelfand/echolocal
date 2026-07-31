@@ -71,10 +71,12 @@ func Fetch(ctx context.Context, url string) (Manifest, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxManifest)).Decode(&m); err != nil {
 		return m, fmt.Errorf("update: reading the manifest at %s: %w", url, err)
 	}
-	return m, m.valid()
+	return m, m.Valid()
 }
 
-func (m Manifest) valid() error {
+// Valid reports whether the manifest describes something installable, which is checked both where one
+// is written and where one is read.
+func (m Manifest) Valid() error {
 	switch {
 	case m.Version == "":
 		return fmt.Errorf("update: the manifest names no version")

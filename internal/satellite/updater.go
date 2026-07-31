@@ -22,6 +22,7 @@ import (
 type updater struct {
 	entity  *esphome.Update
 	channel *esphome.Select
+	look    *esphome.Button
 
 	// running is what this build is, which never changes while it is the one running.
 	running string
@@ -55,6 +56,18 @@ func newUpdater(version string) *updater {
 	bind(u.channel, update.Channels(),
 		func(c update.Channel) update.Channel { return c },
 		func(c update.Channel) error { return settings.SetUpdateChannel(c.Label()) })
+
+	// Home Assistant only asks the device to look when somebody calls homeassistant.update_entity, which
+	// is a service call rather than anything on screen. This is that, where it can be found.
+	u.look = &esphome.Button{
+		Base: esphome.Base{
+			ObjectID: "check_for_updates",
+			Name:     "Check for updates",
+			Icon:     "mdi:cloud-search",
+			Category: esphome.CategoryDiagnostic,
+		},
+		OnPress: func() { go alog.Safely("update check", func() { u.Check(context.Background()) }) },
+	}
 
 	return u
 }
@@ -155,4 +168,6 @@ func (u *updater) publish(found update.Manifest) {
 	})
 }
 
-func (u *updater) entities() []esphome.Entity { return []esphome.Entity{u.entity, u.channel} }
+func (u *updater) entities() []esphome.Entity {
+	return []esphome.Entity{u.entity, u.channel, u.look}
+}
