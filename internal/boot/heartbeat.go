@@ -54,6 +54,7 @@ func (h heartbeat) Run(ctx context.Context) error {
 			}
 			if h.settled != nil {
 				h.settled()
+				h.settled = nil
 			}
 		}
 	}

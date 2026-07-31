@@ -144,15 +144,10 @@ func Run(ctx context.Context, cfg Config) error {
 		beat.sample = sat.Sample
 	}
 
-	// An update on trial is shown while it is on trial, and kept once this process has reached a beat.
-	// Reaching one is not much of a test, but it is the only evidence there is, and it is enough to tell
-	// a binary that runs from one that dies on the way up.
+	// An update is kept once this process has reached a beat.
 	if onTrial {
-		held := leds.Busy().Start(led.WorkCommit)
 		beat.settled = func() {
 			update.Commit()
-			held.Done()
-			beat.settled = nil
 
 			if sat := ready.Load(); sat != nil {
 				sat.UpdateKept(cfg.Version)

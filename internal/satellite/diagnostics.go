@@ -3,9 +3,11 @@ package satellite
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/ygelfand/echolocal/internal/firewall"
 	"github.com/ygelfand/echolocal/internal/hardware"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/settings"
@@ -35,6 +37,9 @@ type diagnostics struct {
 	coresOnline *esphome.Sensor
 	load        *esphome.Sensor
 	memory      *esphome.Sensor
+
+	adb *esphome.Switch
+	ip  *esphome.TextSensor
 }
 
 // The thermal zones worth showing, by the name the kernel gives them. The rest are board sensors that
@@ -44,12 +49,16 @@ const (
 	radioZone = "mtktswmt"
 )
 
+// adbPort is where adbd listens: the boot image sets service.adb.tcp.port, and this is that port.
+const adbPort = 5555
+
 func newDiagnostics(k *kit, wake func(int)) *diagnostics {
 	spk := k.Speaker
 	d := &diagnostics{}
 
 	d.storage()
 	d.hardware()
+	d.remote()
 
 	if spk != nil {
 		// A reply is 16 kHz audio fetched over HTTP and stretched here, so judging a resampling by
@@ -81,6 +90,64 @@ func newDiagnostics(k *kit, wake func(int)) *diagnostics {
 		})
 	}
 	return d
+}
+
+// remote opens the port adbd listens on, for getting at a device that is not on a cable.
+//
+// Deliberately not saved: the rule does not survive a reboot, so a switch that came back on would be
+// claiming something that is not true. It is read from the chain instead, which also gets it right when
+// echod restarts under a rule it left behind.
+func (d *diagnostics) remote() {
+	d.adb = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "remote_adb",
+			Name:     "Remote adb",
+			Icon:     "mdi:bug-outline",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+
+	open, err := firewall.Opened(adbPort)
+	if err != nil {
+		slog.Error("reading the firewall failed", "port", adbPort, "err", err)
+	}
+	d.adb.Set(open)
+
+	d.adb.OnCommand = func(on bool) {
+		change, what := firewall.Close, "closing"
+		if on {
+			change, what = firewall.Open, "opening"
+		}
+
+		if err := change(adbPort); err != nil {
+			slog.Error(what+" the adb port failed", "port", adbPort, "err", err)
+			d.adb.Set(!on)
+			return
+		}
+
+		slog.Warn("remote adb", "open", on, "port", adbPort)
+		d.adb.Set(on)
+	}
+
+	// The protocol's device info carries the mac and no address, so this is the only place Home Assistant
+	// can learn where the device actually is.
+	d.ip = &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "ip_address",
+			Name:     "IP address",
+			Icon:     "mdi:ip-network",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+	d.address()
+}
+
+func (d *diagnostics) address() {
+	var ips []string
+	for _, ip := range routable() {
+		ips = append(ips, ip.String())
+	}
+	d.ip.Set(strings.Join(ips, ", "))
 }
 
 // storage builds what the device says about its own disk. Cached is what could be deleted without
@@ -207,6 +274,7 @@ func (d *diagnostics) Sample() {
 	}
 	d.measure()
 	d.board()
+	d.address()
 }
 
 // board reads the hardware and publishes what it reported. A sensor with no reading is left alone
@@ -261,6 +329,7 @@ func (d *diagnostics) entities() []esphome.Entity {
 	ents := []esphome.Entity{
 		d.cached, d.free, d.purge,
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory,
+		d.adb, d.ip,
 	}
 	if d.testPlayback != nil {
 		ents = append(ents, d.testPlayback)
