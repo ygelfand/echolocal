@@ -12,10 +12,15 @@ package setup
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/prop"
 )
+
+// pinControl dumps and drives every pin on the SoC. It is how the vendor audio HAL reaches the
+// microphone mute line, which is the one thing here that must be nobody else's.
+const pinControl = "/sys/devices/soc/1000b000.pinctrl/mt_gpio"
 
 // Action is one change and why echod wants it.
 type Action struct {
@@ -42,6 +47,20 @@ var Actions = []Action{
 	stop("perfrecoveryd", "Amazon's performance monitoring"),
 	stop("avahi-daemon", "Amazon's mDNS, for Spotify Connect; echod advertises itself"),
 	stop("drm", "drmserver, for protected media playback"),
+	{
+		Name: "take the pin controller back from mediaserver",
+		Reason: "the vendor audio HAL clears the microphone mute line while it sets up an input path, " +
+			"which unmutes a device the user left muted",
+		// Amazon's csm_audio_init.sh grants it: "mediaserver service needs to access mt_gpio file in
+		// order to access mute LED on MUTE button ... chown root.media". Dropping the group write takes
+		// it back. echod drives the line through /sys/class/gpio, which is root's, so this costs us
+		// nothing and leaves mediaserver running — stopping it is not an option, because AudioService
+		// inside system_server then retries forever and says so every time.
+		//
+		// Every boot: sysfs modes are the kernel's defaults again after a restart, and the vendor
+		// script re-grants it.
+		Do: func() error { return os.Chmod(pinControl, 0o644) },
+	},
 	{
 		Name:   "silence AmazonUsageStatsService",
 		Reason: "logs the network state on a timer from inside system_server",
