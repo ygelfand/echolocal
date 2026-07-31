@@ -115,6 +115,14 @@ func (p *hwParams) setInterval(param int, v uint32) {
 	p.set(off+8, 1<<2)
 }
 
+// interval reads a value back. The ioctl refines what it was given and returns what the hardware will
+// actually do, which is not always what was asked for — and writing in a period the hardware is not
+// using sounds broken rather than merely gappy.
+func (p *hwParams) interval(param int) uint32 {
+	off := intervalOff + (param-firstInterval)*intervalLen
+	return binary.LittleEndian.Uint32(p[off:])
+}
+
 // snd_xferi: a signed long, a pointer and an unsigned long, so 24 bytes here.
 type xferi struct {
 	result int64
@@ -185,6 +193,10 @@ func Open(card, device int, cfg Config) (*Capture, error) {
 	if err := ioctl(f.Fd(), ioctlHwParams, unsafe.Pointer(&p)); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("hw_params: %w", err)
+	}
+	if err := granted(&p, cfg); err != nil {
+		_ = f.Close()
+		return nil, err
 	}
 	if err := ioctlArgless(f.Fd(), ioctlPrepare); err != nil {
 		_ = f.Close()

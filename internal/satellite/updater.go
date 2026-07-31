@@ -20,10 +20,11 @@ import (
 // itself — and asks for one with a command. All the device does is say what it is running, say what it
 // found, and act when told. There is no list of versions in the protocol and no way for Home Assistant
 // to ask for a particular one.
-// Event types for the two ways an attempt ends.
+// Event types for the ways an attempt ends.
 const (
 	EventInstalled  = "installed"
 	EventRolledBack = "rolled_back"
+	EventFailed     = "failed"
 )
 
 type updater struct {
@@ -99,7 +100,7 @@ func newUpdater(k *kit, version string) *updater {
 			Name:     "Update outcome",
 			Icon:     "mdi:package-up",
 		},
-		Types: []string{EventInstalled, EventRolledBack},
+		Types: []string{EventInstalled, EventRolledBack, EventFailed},
 	}
 
 	// A rollback happened before this process existed, so the boot hook left the version in a property.
@@ -191,9 +192,12 @@ func (u *updater) Install(ctx context.Context) {
 	u.progress(found, 0)
 	err := update.Install(ctx, found, func(at float32) { u.progress(found, at) })
 
+	// Home Assistant learns nothing from the command it sent — the update entity has no way to say an
+	// install failed, and the card just goes back to offering it. So the failure has to arrive as state.
 	if err != nil {
 		slog.Error("installing an update failed", "version", found.Version, "err", err)
 		u.publish(found)
+		u.settled(EventFailed, "installing "+found.Version+" failed: "+err.Error())
 		return
 	}
 	update.Restart("update to " + found.Version)

@@ -3,6 +3,7 @@ module github.com/ygelfand/echolocal
 go 1.26
 
 require (
+	github.com/charmbracelet/huh v1.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
@@ -11,7 +12,6 @@ require (
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
-	github.com/charmbracelet/huh v1.0.0 // indirect
 	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/flynn/noise v1.1.0 // indirect

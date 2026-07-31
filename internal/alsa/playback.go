@@ -60,6 +60,10 @@ func OpenPlayback(card, device int, cfg Config) (*Playback, error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("hw_params: %w", err)
 	}
+	if err := granted(&p, cfg); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	if err := ioctlArgless(f.Fd(), ioctlPrepare); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("prepare: %w", err)
@@ -70,6 +74,29 @@ func OpenPlayback(card, device int, cfg Config) (*Playback, error) {
 		cfg:        cfg,
 		frameBytes: cfg.Channels * cfg.Bits / 8,
 	}, nil
+}
+
+// granted refuses a stream the hardware would run differently from how it was asked to.
+//
+// Failing here is the point: a caller writes in whole periods of the size it configured, so a period or
+// rate the driver quietly changed means every write is misaligned with what the hardware consumes, and
+// the result is audible as noise and wrong-sounding audio rather than as an error.
+func granted(p *hwParams, cfg Config) error {
+	for _, got := range []struct {
+		what  string
+		param int
+		want  uint32
+	}{
+		{"period size", paramPeriodSize, uint32(cfg.PeriodSize)},
+		{"periods", paramPeriods, uint32(cfg.Periods)},
+		{"rate", paramRate, uint32(cfg.Rate)},
+		{"channels", paramChannels, uint32(cfg.Channels)},
+	} {
+		if have := p.interval(got.param); have != got.want {
+			return fmt.Errorf("alsa: the driver gives %s %d, not %d", got.what, have, got.want)
+		}
+	}
+	return nil
 }
 
 // FrameBytes is the size of one interleaved frame across all channels.
