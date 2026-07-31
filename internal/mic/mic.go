@@ -26,8 +26,8 @@ const (
 	Card          = 0
 	CaptureDevice = 24
 
-	period  = 256
-	periods = 10
+	period  = FrameSamples
+	periods = 8
 )
 
 // Mics is how many of the nine channels are microphones. ch7 and ch8 are the playback loopback.

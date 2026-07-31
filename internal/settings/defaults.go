@@ -16,9 +16,9 @@ const (
 	DefaultFollowUp = 0
 
 	// Milliseconds of a streamed reply to collect before playing it. Home Assistant paces itself to
-	// stay this far ahead of a device it assumes plays everything on arrival, so it is what it expects
-	// to be enough. A pipeline whose speech arrives slower than it plays needs more.
-	DefaultBuffer = 384
+	// stay 384 ms ahead, so holding that much consumes the whole lead: measured, 384 gave 8 seams in a
+	// 13 second reply and 650 gave one.
+	DefaultBuffer = 650
 
 	// Analog gain on the array in dB, where the vendor ran it.
 	DefaultMicGain = 20
