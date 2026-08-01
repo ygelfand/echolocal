@@ -39,6 +39,10 @@ const (
 	// lit for as long as someone leaves the device muted is both a light nobody asked for and, on this
 	// hardware, an audible one.
 	DefaultMuted = ""
+
+	// The Bluetooth proxy is off unless asked for: it keeps a radio scanning that shares an antenna
+	// with wifi.
+	DefaultBluetoothProxy = false
 )
 
 // ReactionOr reports the animation that follows the room, TroubleOr what a failure shows and MutedOr
@@ -135,6 +139,14 @@ func (m Microphone) LevelingOr(def bool) bool {
 		return def
 	}
 	return *m.Leveling
+}
+
+// ProxyOr reports whether the device also forwards BLE advertisements.
+func (b Bluetooth) ProxyOr(def bool) bool {
+	if b.Proxy == nil {
+		return def
+	}
+	return *b.Proxy
 }
 
 // GainOr reports the analog gain on the array, in dB.

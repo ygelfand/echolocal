@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
@@ -58,6 +59,9 @@ type Satellite struct {
 	turn    *conversation
 	buttons *buttonEvents
 	name    string
+
+	reconnect chan struct{}
+	announced sync.Once
 }
 
 // New builds the server and its entities. It does not listen; call Serve.
@@ -102,6 +106,8 @@ func New(cfg Config) (*Satellite, error) {
 	k.Wake = newWakeControl(k, WakeSlots)
 	ents.Add(k.Wake.entities()...)
 
+	k.BLE = newBluetooth()
+
 	opts := newOptions(k)
 	ents.Add(opts.entities()...)
 
@@ -112,7 +118,7 @@ func New(cfg Config) (*Satellite, error) {
 	ents.Add(k.Update.entities()...)
 
 	// The action button drives the conversation, which needs the satellite that is built below.
-	s := &Satellite{kit: k, mute: mute}
+	s := &Satellite{kit: k, mute: mute, reconnect: make(chan struct{}, 1)}
 
 	s.buttons = newButtonEvents()
 	ents.Add(s.buttons.entities()...)
@@ -162,6 +168,11 @@ func New(cfg Config) (*Satellite, error) {
 		s.turn = newConversation(k)
 		srv.Handler = esphome.Chain(ents, k.Voice)
 	}
+
+	k.BLE.reconnect = s.Reconnect
+	srv.Info.BluetoothFeatures = k.BLE.Features()
+	srv.Handler = esphome.Chain(srv.Handler, k.BLE.proxy)
+
 	return s, nil
 }
 
@@ -317,14 +328,48 @@ func (s *Satellite) WakeSlot(slot int) {
 // Serve listens until ctx is cancelled, advertising over mDNS so Home Assistant finds the
 // device without being told an address.
 func (s *Satellite) Serve(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.srv.Addr)
-	if err != nil {
-		return fmt.Errorf("satellite: listen %s: %w", s.srv.Addr, err)
+	for {
+		ln, err := net.Listen("tcp", s.srv.Addr)
+		if err != nil {
+			return fmt.Errorf("satellite: listen %s: %w", s.srv.Addr, err)
+		}
+
+		s.announced.Do(func() {
+			go alog.Safely("mdns", func() { s.advertise(ctx, ln.Addr().(*net.TCPAddr).Port) })
+		})
+
+		serving, stop := context.WithCancel(ctx)
+		go func() {
+			select {
+			case <-s.reconnect:
+			case <-serving.Done():
+			}
+			stop()
+		}()
+
+		err = s.srv.Serve(serving, ln)
+		stop()
+
+		if err != nil || ctx.Err() != nil {
+			return err
+		}
+
+		// Between serving and listening again nothing reads Info, which is the only moment it can be
+		// changed: a client is told what the device is once, when it connects.
+		if s.kit.BLE != nil {
+			s.srv.Info.BluetoothFeatures = s.kit.BLE.Features()
+		}
+		slog.Info("serving again", "bluetooth", s.srv.Info.BluetoothFeatures)
 	}
+}
 
-	go alog.Safely("mdns", func() { s.advertise(ctx, ln.Addr().(*net.TCPAddr).Port) })
-
-	return s.srv.Serve(ctx, ln)
+// Reconnect drops every client and serves afresh, which is how a change to what the device says it is
+// reaches Home Assistant.
+func (s *Satellite) Reconnect() {
+	select {
+	case s.reconnect <- struct{}{}:
+	default:
+	}
 }
 
 // advertise publishes the addresses the device actually has, and republishes them when they change.

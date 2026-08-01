@@ -7,8 +7,6 @@ package services
 // `pm hide` persists, so this is applied once at install rather than re-applied each boot. It is
 // paired with a force-stop because hiding a package blocks future launches but leaves a running
 // process alive, and a live audio client keeps mediaserver holding the PCM devices.
-//
-// Note two entries are not com.amazon.* — a prefix filter would miss them.
 var Hidden = []Package{
 	{"amazon.speech.davs.davcservice", "Alexa voice service; holds capture"},
 	{"amazon.speech.sim", "owns the mute button and mic mute state"},
@@ -53,6 +51,7 @@ var Hidden = []Package{
 	{"com.amazon.NativeAccessorProxyServices", "Alexa SIM directive and OOBE receivers"},
 	{"com.amazon.whad", "whole-home audio; advertises a control plane on the LAN"},
 	{"com.amazon.cmb", "listens on udp 5000, which Amazon's firewall opens for it"},
+	{"com.android.bluetooth", "Android's Bluetooth stack; holds /dev/stpbt"},
 }
 
 // Package is one package and why it goes.

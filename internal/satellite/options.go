@@ -28,6 +28,7 @@ type options struct {
 	microphone *esphome.Select
 	gain       *esphome.Number
 	leveling   *esphome.Switch
+	bluetooth  *esphome.Switch
 	resampling *esphome.Select
 
 	// What a failure shows on the ring. Momentary, so nothing has to be told when it changes: whoever
@@ -38,10 +39,11 @@ type options struct {
 	// The hardware the knobs drive, held so restoring can apply them.
 	mic *mic.Source
 	spk *speaker.Player
+	ble *bluetooth
 }
 
 func newOptions(k *kit) *options {
-	o := &options{mic: k.Mic, spk: k.Speaker}
+	o := &options{mic: k.Mic, spk: k.Speaker, ble: k.BLE}
 
 	o.microphone = &esphome.Select{
 		Base: esphome.Base{
@@ -95,6 +97,24 @@ func newOptions(k *kit) *options {
 		},
 	}
 	bind(o.resampling, speaker.Resamplings(), o.spk.SetResampling, settings.SetSpeakerResampling)
+
+	o.bluetooth = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "bluetooth_proxy",
+			Name:     "Bluetooth proxy",
+			Icon:     "mdi:bluetooth",
+			Category: esphome.CategoryConfig,
+		},
+	}
+	o.bluetooth.Set(settings.Get().Bluetooth.ProxyOr(settings.DefaultBluetoothProxy))
+	o.bluetooth.OnCommand = func(on bool) {
+		o.bluetooth.Set(on)
+		if err := settings.SetBluetoothProxy(on); err != nil {
+			slog.Error("saving the bluetooth proxy setting failed", "err", err)
+			return
+		}
+		o.ble.Enable(on)
+	}
 
 	o.trouble = &esphome.Select{
 		Base: esphome.Base{
@@ -237,5 +257,5 @@ func chosenEffect(sel *esphome.Select) string {
 }
 
 func (o *options) entities() []esphome.Entity {
-	return []esphome.Entity{o.microphone, o.gain, o.leveling, o.resampling, o.trouble}
+	return []esphome.Entity{o.microphone, o.gain, o.leveling, o.resampling, o.trouble, o.bluetooth}
 }

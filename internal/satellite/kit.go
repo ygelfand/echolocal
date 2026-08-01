@@ -31,4 +31,5 @@ type kit struct {
 	Diag   *diagnostics
 	Update *updater
 	Voice  *esphome.VoiceSatellite
+	BLE    *bluetooth
 }

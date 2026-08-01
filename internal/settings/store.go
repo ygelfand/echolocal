@@ -21,6 +21,12 @@ type Stored struct {
 	Wake       Wake       `json:"wake,omitzero"`
 	Ring       Ring       `json:"ring,omitzero"`
 	Update     Update     `json:"update,omitzero"`
+	Bluetooth  Bluetooth  `json:"bluetooth,omitzero"`
+}
+
+// Bluetooth is whether the device also acts as a BLE proxy for Home Assistant.
+type Bluetooth struct {
+	Proxy *bool `json:"proxy,omitempty"`
 }
 
 // Update is which releases the device follows. The channel is a name rather than a URL: where each one
@@ -184,6 +190,8 @@ func SetMicGain(db int) error      { return store().SetMicGain(db) }
 
 func SetMicLeveling(v bool) error { return store().SetMicLeveling(v) }
 
+func SetBluetoothProxy(v bool) error { return store().SetBluetoothProxy(v) }
+
 func SetRingReaction(v string) error { return store().SetRingReaction(v) }
 func SetRingTrouble(v string) error  { return store().SetRingTrouble(v) }
 func SetRingMuted(v string) error    { return store().SetRingMuted(v) }
@@ -329,6 +337,10 @@ func (st *Store) SetMicMixing(v Mixing) error {
 
 func (st *Store) SetMicLeveling(v bool) error {
 	return st.Update(func(s *Stored) { s.Microphone.Leveling = &v })
+}
+
+func (st *Store) SetBluetoothProxy(v bool) error {
+	return st.Update(func(s *Stored) { s.Bluetooth.Proxy = &v })
 }
 
 func (st *Store) SetMicGain(db int) error {
