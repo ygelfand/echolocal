@@ -1,0 +1,501 @@
+// Package media plays audio from a url through the speaker: what Home Assistant sends the
+// media player, streamed rather than downloaded.
+package media
+
+import (
+	"bufio"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/ygelfand/echolocal/internal/alog"
+	"github.com/ygelfand/echolocal/internal/speaker"
+)
+
+const (
+	// ahead is how much audio may sit in the speaker's queue, in frames. It is what covers a pause in
+	// the download, and it is also what has to be handed back when something else takes the speaker,
+	// so it buys smoothness rather than being free.
+	ahead = speaker.Rate
+
+	// pace is how often the stream looks to see whether the queue has room.
+	pace = 100 * time.Millisecond
+
+	// chunk is how much is taken off the wire at once, about a sixth of a second.
+	chunk = 32 * 1024
+
+	// stall is how long one read may produce nothing before the track is given up on.
+	stall = 30 * time.Second
+)
+
+// frame is one sample on every channel.
+const frame = speaker.Channels * 2
+
+// Player plays a url through the speaker. Home Assistant converts the source with ffmpeg first, so
+// what arrives is a WAV header followed by samples already at the playback rate: no decoder here,
+// and nothing to resample.
+//
+// It streams rather than downloading. A track runs for minutes and the device has no room for one,
+// so the stream keeps a second or so ahead of the speaker and reads no faster than it plays.
+//
+// It is the speaker driver's background: a reply or an announcement takes the speaker and this
+// yields, carrying on from where it was rather than starting again.
+type Player struct {
+	out     *speaker.Player
+	changed func()
+
+	mu    sync.Mutex
+	track *track
+
+	// holds counts what has taken the speaker: a turn, a reply, an announcement. Playing resumes
+	// when the last of them gives it back, which is why it counts rather than being a flag.
+	holds  int
+	paused bool
+
+	// gate is closed to let the stream carry on, and non-nil for as long as it may not.
+	gate chan struct{}
+
+	// rewind is what was queued but not heard when the speaker was taken away, put back at the
+	// front when playing resumes so the track carries on rather than jumping forward.
+	rewind []int16
+
+	// write is held while samples go into the queue, so taking the queue away cannot be followed by
+	// the stream refilling it behind the sound that displaced it.
+	write sync.Mutex
+}
+
+// track is one thing being played. Identity is the point: a track that has been replaced knows not
+// to report itself finished.
+type track struct {
+	url    string
+	cancel context.CancelFunc
+}
+
+// New builds the player and registers it with the speaker driver. changed is called whenever what
+// it is doing changes, which is what tells Home Assistant.
+func New(sound *speaker.Driver, out *speaker.Player, changed func()) *Player {
+	m := &Player{out: out, changed: changed}
+	sound.Yields(m)
+	return m
+}
+
+// Play starts a url, replacing whatever was playing.
+//
+// It does not take the speaker from a reply or an announcement that is sounding. Those are seconds
+// long and end on their own, and the track waits behind them rather than talking over them.
+func (m *Player) Play(url string) {
+	if m == nil {
+		slog.Warn("asked to play media with no speaker", "url", url)
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t := &track{url: url, cancel: cancel}
+
+	m.mu.Lock()
+	previous := m.track
+	m.track, m.paused, m.rewind = t, false, nil
+	if m.holds == 0 {
+		m.unblock()
+	} else {
+		m.block()
+	}
+	m.mu.Unlock()
+
+	previous.stop()
+	m.flush()
+	m.changed()
+	slog.Info("playing media", "url", url)
+
+	go alog.Safely("media", func() {
+		err := m.stream(ctx, url)
+		if err != nil && ctx.Err() == nil {
+			slog.Error("playing media failed", "err", err)
+		}
+		m.finished(t)
+	})
+}
+
+// Pause stops the track where it is. What was queued but not heard is kept, so resuming does not
+// skip it.
+func (m *Player) Pause() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	if m.track == nil || m.paused {
+		m.mu.Unlock()
+		return
+	}
+	m.paused = true
+	m.block()
+	ours := m.holds == 0
+	m.mu.Unlock()
+
+	if ours {
+		m.keep()
+	}
+	m.changed()
+}
+
+// Unpause carries on from where Pause stopped.
+func (m *Player) Unpause() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	if m.track == nil || !m.paused {
+		m.mu.Unlock()
+		return
+	}
+	m.paused = false
+	if m.holds == 0 {
+		m.unblock()
+	}
+	m.mu.Unlock()
+
+	m.changed()
+}
+
+// Stop ends the track. There is nothing to come back to afterwards.
+func (m *Player) Stop() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	t := m.track
+	m.track, m.paused, m.rewind = nil, false, nil
+	m.unblock()
+	m.mu.Unlock()
+
+	if t == nil {
+		return
+	}
+	t.stop()
+	m.flush()
+	m.changed()
+}
+
+// Suspend implements speaker.Background: something else wants the speaker.
+func (m *Player) Suspend() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	m.holds++
+	if m.track == nil || m.holds > 1 {
+		m.mu.Unlock()
+		return
+	}
+	m.block()
+	m.mu.Unlock()
+
+	m.keep()
+}
+
+// Resume implements speaker.Background: the speaker is free again.
+func (m *Player) Resume() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.holds > 0 {
+		m.holds--
+	}
+	if m.holds == 0 && !m.paused {
+		m.unblock()
+	}
+}
+
+// Playing reports whether a track is loaded and not paused, which is what Home Assistant is told.
+// A track that is only waiting for a reply to finish is still playing: it is going to carry on
+// without anyone asking it to.
+func (m *Player) Playing() (playing, paused bool) {
+	if m == nil {
+		return false, false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.track != nil && !m.paused, m.track != nil && m.paused
+}
+
+// block and unblock hold and release the stream. Both want mu.
+func (m *Player) block() {
+	if m.gate == nil {
+		m.gate = make(chan struct{})
+	}
+}
+
+func (m *Player) unblock() {
+	if m.gate != nil {
+		close(m.gate)
+		m.gate = nil
+	}
+}
+
+// flush throws away audio that is ours to throw away. While something else holds the speaker the
+// queue belongs to it, and emptying it would cut off a reply.
+func (m *Player) flush() {
+	m.mu.Lock()
+	held := m.holds > 0
+	m.mu.Unlock()
+	if held {
+		return
+	}
+
+	m.write.Lock()
+	defer m.write.Unlock()
+	m.out.Drain()
+}
+
+// keep empties the queue and remembers what was in it. Taken rather than dropped: this is the
+// middle of a song, and what has not been heard is where playing has to start again from.
+func (m *Player) keep() {
+	m.write.Lock()
+	defer m.write.Unlock()
+
+	kept := m.out.Take()
+
+	m.mu.Lock()
+	m.rewind = kept
+	m.mu.Unlock()
+}
+
+// replay puts back what Suspend took, once the speaker is ours again.
+func (m *Player) replay() {
+	m.write.Lock()
+	defer m.write.Unlock()
+
+	m.mu.Lock()
+	back := m.rewind
+	if m.gate != nil || len(back) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	m.rewind = nil
+	m.mu.Unlock()
+
+	m.out.Play(back)
+}
+
+// finished clears the track once it has played out, unless it has already been replaced.
+func (m *Player) finished(t *track) {
+	m.mu.Lock()
+	if m.track != t {
+		m.mu.Unlock()
+		return
+	}
+	m.track, m.paused, m.rewind = nil, false, nil
+	m.unblock()
+	m.mu.Unlock()
+
+	slog.Info("media finished", "url", t.url)
+	m.changed()
+}
+
+func (t *track) stop() {
+	if t != nil {
+		t.cancel()
+	}
+}
+
+// stream fetches the url and feeds it to the speaker as it arrives.
+func (m *Player) stream(ctx context.Context, url string) error {
+	// No timeout on the client: a track takes as long as it takes. What is bounded is a single read,
+	// because a wedged connection otherwise holds the track open for as long as the kernel keeps
+	// retrying — minutes of a player reporting that it is playing while nothing comes out.
+	fetch, giveUp := context.WithCancel(ctx)
+	defer giveUp()
+
+	req, err := http.NewRequestWithContext(fetch, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", url, resp.Status)
+	}
+
+	body := bufio.NewReaderSize(resp.Body, chunk)
+	if err := header(body); err != nil {
+		return err
+	}
+
+	buf := make([]byte, chunk)
+	for {
+		if err := m.wait(ctx); err != nil {
+			return err
+		}
+
+		// Armed only around the read: a track waiting for a turn to finish is not stalled, and
+		// counting that time would end it for being interrupted.
+		watchdog := time.AfterFunc(stall, giveUp)
+		n, err := io.ReadFull(body, buf)
+		watchdog.Stop()
+
+		if n >= frame {
+			m.feed(buf[:n-n%frame])
+		}
+		switch {
+		case err == nil:
+		case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+			return m.settle(ctx)
+		case fetch.Err() != nil && ctx.Err() == nil:
+			return fmt.Errorf("nothing arrived for %s", stall)
+		default:
+			return err
+		}
+	}
+}
+
+// wait holds the stream until it may play and the queue has room for more.
+func (m *Player) wait(ctx context.Context) error {
+	for {
+		m.mu.Lock()
+		gate := m.gate
+		m.mu.Unlock()
+
+		if gate != nil {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+
+		m.replay()
+		if m.out.Queued() < ahead {
+			return nil
+		}
+
+		select {
+		case <-time.After(pace):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// settle waits for what has been queued to play out, so the track is not reported finished while
+// the last of it is still sounding.
+func (m *Player) settle(ctx context.Context) error {
+	for {
+		if err := m.wait(ctx); err != nil {
+			return err
+		}
+		if m.out.Queued() == 0 {
+			return nil
+		}
+
+		select {
+		case <-time.After(pace):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (m *Player) feed(pcm []byte) {
+	samples := make([]int16, len(pcm)/2)
+	for i := range samples {
+		samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*2:]))
+	}
+	m.queue(samples)
+}
+
+// queue hands samples over, unless the speaker was taken away in the meantime.
+func (m *Player) queue(samples []int16) {
+	m.write.Lock()
+	defer m.write.Unlock()
+
+	m.mu.Lock()
+	blocked := m.gate != nil
+	m.mu.Unlock()
+	if blocked {
+		return
+	}
+
+	m.out.Play(samples)
+}
+
+// header reads past the WAV header and leaves the reader on the first sample.
+//
+// Home Assistant streams the file as ffmpeg produces it, which means the sizes in the header were
+// written before the length was known: the data chunk runs until the connection ends, whatever it
+// claims. The format is worth checking, though — the wrong rate or channel count is a track played
+// at the wrong speed rather than an error anyone would see.
+func header(r *bufio.Reader) error {
+	var riff [12]byte
+	if _, err := io.ReadFull(r, riff[:]); err != nil {
+		return fmt.Errorf("reading the WAVE header: %w", err)
+	}
+	if string(riff[0:4]) != "RIFF" || string(riff[8:12]) != "WAVE" {
+		return fmt.Errorf("not a WAVE stream: %q", riff[0:4])
+	}
+
+	for {
+		var head [8]byte
+		if _, err := io.ReadFull(r, head[:]); err != nil {
+			return fmt.Errorf("reading a WAVE chunk: %w", err)
+		}
+		id := string(head[0:4])
+		size := int64(binary.LittleEndian.Uint32(head[4:8]))
+
+		if id == "data" {
+			return nil
+		}
+
+		// Everything before the samples is a handful of bytes. A size larger than that is a stream
+		// that is not what it says it is, and allocating from it is how that becomes our problem.
+		if size > chunk {
+			return fmt.Errorf("%q chunk is %d bytes", id, size)
+		}
+
+		body := make([]byte, size+size%2)
+		if _, err := io.ReadFull(r, body); err != nil {
+			return fmt.Errorf("reading the %q chunk: %w", id, err)
+		}
+		if id == "fmt " {
+			if err := supported(body[:size]); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// supported checks a fmt chunk against what the codec takes.
+func supported(fmtChunk []byte) error {
+	if len(fmtChunk) < 16 {
+		return fmt.Errorf("short fmt chunk: %d bytes", len(fmtChunk))
+	}
+
+	channels := binary.LittleEndian.Uint16(fmtChunk[2:])
+	rate := binary.LittleEndian.Uint32(fmtChunk[4:])
+	bits := binary.LittleEndian.Uint16(fmtChunk[14:])
+
+	if channels != speaker.Channels || rate != speaker.Rate || bits != 16 {
+		return fmt.Errorf("cannot play %d Hz %d channel %d bit audio", rate, channels, bits)
+	}
+	return nil
+}

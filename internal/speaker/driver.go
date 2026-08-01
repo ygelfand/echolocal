@@ -21,9 +21,29 @@ type Driver struct {
 
 	mu  sync.Mutex
 	now *Claim
+	bg  Background
 }
 
 func NewDriver(p *Player) *Driver { return &Driver{p: p} }
+
+// Background is a long sound that yields to the others rather than being taken from: media, which
+// plays for minutes and cannot be started again from where it was. Everything else is an errand
+// that runs to the end, so a claim is enough for it.
+type Background interface {
+	// Suspend stops filling the queue and empties what is in it. It is called before the claim that
+	// displaced it queues anything, so the two never fight over the same audio.
+	Suspend()
+
+	// Resume carries on, if the caller is still what it was suspended for.
+	Resume()
+}
+
+// Yields registers the background sound. There is one.
+func (d *Driver) Yields(b Background) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.bg = b
+}
 
 // Claim takes the speaker and does whatever it takes to make the sound: play queues audio and
 // returns, and the claim ends once what it queued has played out. It must return when ctx is done,
@@ -33,14 +53,18 @@ func (d *Driver) Claim(name string, play func(ctx context.Context, p *Player) er
 	c := &Claim{name: name, cancel: cancel, done: make(chan struct{})}
 
 	d.mu.Lock()
-	previous := d.now
+	previous, bg := d.now, d.bg
 	d.now = c
 	d.mu.Unlock()
 
+	if bg != nil {
+		bg.Suspend()
+	}
 	previous.preempt(d.p)
 
 	go func() {
 		defer close(c.done)
+		defer d.release(c)
 
 		if err := play(ctx, d.p); err != nil {
 			c.fail(err)
@@ -49,6 +73,23 @@ func (d *Driver) Claim(name string, play func(ctx context.Context, p *Player) er
 		c.mark(d.await(ctx))
 	}()
 	return c
+}
+
+// release lets the background sound carry on, once nothing else wants the speaker. A claim that was
+// displaced releases nothing: the one that took it from it is still playing.
+func (d *Driver) release(c *Claim) {
+	d.mu.Lock()
+	bg := d.bg
+	if d.now != c {
+		d.mu.Unlock()
+		return
+	}
+	d.now = nil
+	d.mu.Unlock()
+
+	if bg != nil {
+		bg.Resume()
+	}
 }
 
 // Interject makes a sound without taking the speaker from what has it. Short feedback — a volume

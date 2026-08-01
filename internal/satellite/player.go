@@ -1,13 +1,17 @@
 package satellite
 
 import (
+	"context"
 	"log/slog"
 	"math"
+	"sync/atomic"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/media"
 	"github.com/ygelfand/echolocal/internal/settings"
 	"github.com/ygelfand/echolocal/internal/speaker"
 )
@@ -27,6 +31,11 @@ type mediaPlayer struct {
 	leds    *led.Driver
 	speaker *speaker.Player
 	sound   *speaker.Driver
+	media   *media.Player
+
+	// speaking is set while a reply or an announcement is sounding, which Home Assistant is told is
+	// playing: its mapper has no case for announcing and raises on it.
+	speaking atomic.Bool
 
 	step int
 }
@@ -39,8 +48,14 @@ func newMediaPlayer(k *kit) *mediaPlayer {
 			Features: esphome.MediaPlayerFeatureVolumeSet |
 				esphome.MediaPlayerFeatureVolumeStep |
 				esphome.MediaPlayerFeatureVolumeMute |
+				esphome.MediaPlayerFeaturePlayMedia |
+				esphome.MediaPlayerFeaturePlay |
+				esphome.MediaPlayerFeaturePause |
+				esphome.MediaPlayerFeatureStop |
+				esphome.MediaPlayerFeatureBrowseMedia |
 				esphome.MediaPlayerFeatureAnnounce,
-			SupportedFormats: announceFormat,
+			SupportsPause:    true,
+			SupportedFormats: mediaFormat,
 		},
 		jack: &esphome.BinarySensor{
 			Base:        esphome.Base{ObjectID: "headphones", Name: "Headphones", Icon: "mdi:headphones", Category: esphome.CategoryDiagnostic},
@@ -51,6 +66,10 @@ func newMediaPlayer(k *kit) *mediaPlayer {
 		sound:   k.Sound,
 	}
 	p.mp.OnCommand = p.command
+
+	if k.Sound != nil && spk != nil {
+		p.media = media.New(k.Sound, spk, p.refresh)
+	}
 
 	if spk != nil {
 		spk.OnOutput = func(out speaker.Output) {
@@ -76,9 +95,22 @@ func (p *mediaPlayer) entities() []esphome.Entity { return []esphome.Entity{p.mp
 
 // command handles what Home Assistant sends. Volume arrives as a fraction; the buttons and the
 // vendor's curves work in steps, so it is rounded to one.
+//
+// It runs on the connection's read loop, so nothing here may wait for audio: starting a track hands
+// it to a goroutine and returns.
 func (p *mediaPlayer) command(c esphome.MediaCommand) {
 	if c.HasVolume {
 		p.set(int(math.Round(float64(c.Volume) * VolumeSteps)))
+	}
+
+	// An announcement is a url too, but a short one at the pipeline's rate, and it interrupts rather
+	// than replacing what is playing. It goes through the same path as one from the voice assistant.
+	if c.HasMediaURL && c.MediaURL != "" {
+		if c.Announcement {
+			p.announce(c.MediaURL)
+		} else {
+			p.media.Play(c.MediaURL)
+		}
 	}
 	if !c.HasCommand {
 		return
@@ -93,10 +125,80 @@ func (p *mediaPlayer) command(c esphome.MediaCommand) {
 		p.mute(true)
 	case esphome.MediaPlayerUnmute:
 		p.mute(false)
-	case esphome.MediaPlayerStop, esphome.MediaPlayerPause:
-		p.mp.SetState(esphome.MediaPlayerIdle)
+	case esphome.MediaPlayerStop:
+		p.media.Stop()
+	case esphome.MediaPlayerPause:
+		p.media.Pause()
 	case esphome.MediaPlayerPlay:
-		p.mp.SetState(esphome.MediaPlayerPlaying)
+		p.media.Unpause()
+	case esphome.MediaPlayerToggle:
+		if playing, _ := p.media.Playing(); playing {
+			p.media.Pause()
+		} else {
+			p.media.Unpause()
+		}
+	}
+}
+
+// announce plays a url over whatever is going on, which is what Home Assistant means by one: a
+// doorbell or a spoken alert, not a track.
+func (p *mediaPlayer) announce(url string) {
+	if p.sound == nil {
+		return
+	}
+
+	p.sounding(true)
+	claim := p.sound.Claim("announce", func(ctx context.Context, spk *speaker.Player) error {
+		samples, err := fetch(ctx, url)
+		if err != nil {
+			return err
+		}
+		spk.PlayVoice(samples)
+		spk.PlayVoice(make([]int16, speaker.VoiceRate*replyTail/1000))
+		return nil
+	})
+
+	// The claim ends once the audio has been heard, not once it has been queued, so this is where
+	// the player stops saying it is playing.
+	go alog.Safely("announce", func() {
+		<-claim.Done()
+		p.sounding(false)
+
+		if err := claim.Err(); err != nil {
+			slog.Error("playing the announcement failed", "url", url, "err", err)
+		}
+	})
+}
+
+// sounding marks a reply or an announcement as playing, and puts back whatever the player was
+// doing once it ends.
+func (p *mediaPlayer) sounding(on bool) {
+	p.speaking.Store(on)
+	p.refresh()
+}
+
+// duck and unduck are a turn taking the speaker for as long as it runs, rather than for one sound.
+// A conversation is several sounds with listening in between, and music through the middle of it
+// would be heard by the microphones as well as by the room.
+func (p *mediaPlayer) duck() { p.media.Suspend() }
+
+func (p *mediaPlayer) unduck() { p.media.Resume() }
+
+// refresh tells Home Assistant what the player is doing.
+func (p *mediaPlayer) refresh() {
+	p.mp.SetState(p.state())
+}
+
+func (p *mediaPlayer) state() esphome.MediaPlayerState {
+	playing, paused := p.media.Playing()
+
+	switch {
+	case playing || p.speaking.Load():
+		return esphome.MediaPlayerPlaying
+	case paused:
+		return esphome.MediaPlayerPaused
+	default:
+		return esphome.MediaPlayerIdle
 	}
 }
 

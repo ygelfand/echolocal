@@ -48,7 +48,10 @@ var pathSequence = map[Output][]kctl{
 	OutputSpeaker: {
 		{name: "Audio_DacMux_Setting", value: "Off"},
 		{name: "Right Channel Only", value: "On"},
-		{name: driverGain, level: 6},
+
+		// 15 is as far as this speaker goes; 18 breaks up. Ext_Amp_Gain, the other way to get level,
+		// has no pinctrl state in the device tree and cannot be driven at all.
+		{name: driverGain, level: 15},
 	},
 	OutputHeadphone: {
 		{name: "Ignore Ramp Up", value: "On"},

@@ -15,11 +15,14 @@ import (
 	"github.com/ygelfand/echolocal/internal/speaker"
 )
 
-// announceFormat is what Home Assistant is asked to convert announcements and media to. It runs
-// the conversion through ffmpeg, so asking for plain WAV at the pipeline's rate means no decoder
-// here: strip the header and the rest is samples.
-var announceFormat = []esphome.MediaFormat{
-	{Format: "wav", SampleRate: speaker.VoiceRate, Channels: 1, SampleBytes: 2},
+// mediaFormat is what Home Assistant is asked to convert to. It runs the conversion through ffmpeg,
+// so asking for plain WAV means no decoder here: strip the header and the rest is samples.
+//
+// Music gets the codec's own rate and both channels, so nothing is resampled and nothing is thrown
+// away. Announcements stay at the pipeline's rate: they are one voice, and the bandwidth would buy
+// nothing but a longer wait before the device says anything.
+var mediaFormat = []esphome.MediaFormat{
+	{Format: "wav", SampleRate: speaker.Rate, Channels: speaker.Channels, SampleBytes: 2},
 	{Format: "wav", SampleRate: speaker.VoiceRate, Channels: 1, SampleBytes: 2, Announcement: true},
 }
 
@@ -32,10 +35,8 @@ func (t *conversation) announce(a esphome.Announce) {
 
 	// One claim covers both urls, so silencing an announcement stops the whole thing rather than
 	// letting the second one start once the first has been drained.
+	t.player.sounding(true)
 	claim := t.sound.Claim("announce", func(ctx context.Context, _ *speaker.Player) error {
-		t.player.mp.SetState(esphome.MediaPlayerAnnouncing)
-		defer t.player.mp.SetState(esphome.MediaPlayerIdle)
-
 		for _, url := range []string{a.PreannounceMediaID, a.MediaID} {
 			if url == "" {
 				continue
@@ -49,6 +50,7 @@ func (t *conversation) announce(a esphome.Announce) {
 
 	go alog.Safely("announce", func() {
 		<-claim.Done()
+		t.player.sounding(false)
 
 		if err := claim.Err(); err != nil {
 			slog.Error("playing the announcement failed", "err", err)
@@ -65,7 +67,7 @@ func (t *conversation) announce(a esphome.Announce) {
 	})
 }
 
-// play fetches audio and queues it. Home Assistant serves it converted to announceFormat. Waiting
+// play fetches audio and queues it. Home Assistant serves it converted to mediaFormat. Waiting
 // for it to be heard is the driver's, not ours: this returns as soon as it has been handed over.
 func (t *conversation) play(ctx context.Context, url string) error {
 	samples, err := fetch(ctx, url)

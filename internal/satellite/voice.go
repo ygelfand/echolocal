@@ -131,6 +131,10 @@ type conversation struct {
 	stopAudio func()
 	deadline  *time.Timer
 
+	// holding is whether the turn has taken the speaker from a track, so that taking it twice or
+	// giving it back twice cannot happen however the turn ends.
+	holding bool
+
 	// followUp says this turn was opened without a wake word, so hearing nothing is a normal ending
 	// rather than Home Assistant having gone away.
 	followUp bool
@@ -266,7 +270,7 @@ func (c *conversation) handle(e event) {
 		if c.phase == phaseListening {
 			c.think()
 		}
-		c.player.mp.SetState(esphome.MediaPlayerAnnouncing)
+		c.player.sounding(true)
 
 	case evStreamStart:
 		// The turn has to be claimed before the audio arrives: Home Assistant closes the run as soon
@@ -366,7 +370,12 @@ func (c *conversation) handle(e event) {
 		sounding := c.sound.Busy()
 		c.sound.Silence()
 
-		if c.phase == phaseIdle && !sounding {
+		// A track is not one sound and outlives any claim, so stopping it is its own call. Cancel ends
+		// it rather than pausing it: nothing is coming back to carry on from.
+		playing, paused := c.player.media.Playing()
+		c.player.media.Stop()
+
+		if c.phase == phaseIdle && !sounding && !playing && !paused {
 			return
 		}
 		slog.Info("cancelled", "phase", c.phase, "slot", c.slot+1, "sounding", sounding)
@@ -427,10 +436,13 @@ func (c *conversation) start(n nextTurn) {
 	if c.phase != phaseIdle {
 		slog.Info("conversation interrupted", "was", c.phase, "from", c.slot+1, "slot", slot+1)
 		c.sound.Silence()
+
+		// Held back before the turn ends, so that ending it does not hand the speaker back to a track
+		// for the moment it takes the next turn to open.
+		c.pending = &nextTurn{slot: slot}
 		c.idle("interrupted")
 
 		// The stopped run has yet to close, and its last events are still on their way.
-		c.pending = &nextTurn{slot: slot}
 		c.grace = time.NewTimer(graceStart)
 		return
 	}
@@ -471,7 +483,8 @@ func (c *conversation) start(n nextTurn) {
 
 	c.enter(phaseListening)
 	c.reply = reply{}
-	c.player.mp.SetState(esphome.MediaPlayerIdle)
+
+	c.hold(true)
 
 	if effect := c.wake.Effect(slot); effect != "" {
 		c.claim.Play(effect, c.ring.Base())
@@ -519,7 +532,7 @@ func (c *conversation) speak(url string) {
 	if effect := c.wake.Effect(c.slot); effect != "" {
 		c.claim.PlayReversed(effect, c.ring.Base())
 	}
-	c.player.mp.SetState(esphome.MediaPlayerAnnouncing)
+	c.player.sounding(true)
 
 	// The deadline is left as it was. Text arriving is not the pipeline delivering: it still owes the
 	// audio, and the limit it was given when the device stopped listening goes on running until some
@@ -559,8 +572,9 @@ func (c *conversation) idle(why string) {
 
 	c.enter(phaseIdle)
 	c.claim.Clear()
-	c.player.mp.SetState(esphome.MediaPlayerIdle)
+	c.player.sounding(false)
 	c.reply = reply{}
+	c.hold(c.pending != nil)
 
 	if was != phaseIdle {
 		slog.Info("turn ended", "was", was, "slot", c.slot+1, "why", why)
@@ -588,6 +602,27 @@ func (c *conversation) clearPending() {
 		c.grace.Stop()
 		c.grace = nil
 	}
+
+	// A turn that is not going to open cannot be what a track is waiting for.
+	if c.phase == phaseIdle {
+		c.hold(false)
+	}
+}
+
+// hold takes the speaker away from a track for as long as a turn needs it, and is what gives it
+// back. A turn is several sounds with listening in between, so it holds it across all of them
+// rather than one claim at a time.
+func (c *conversation) hold(on bool) {
+	if on == c.holding {
+		return
+	}
+	c.holding = on
+
+	if on {
+		c.player.duck()
+		return
+	}
+	c.player.unduck()
 }
 
 // arm gives the current phase a limit; disarm removes it. Each phase sets its own, so a slow model

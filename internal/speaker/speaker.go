@@ -302,6 +302,17 @@ func (p *Player) Play(samples []int16) {
 	p.mu.Unlock()
 }
 
+// Take empties the queue and hands back what had not been played, so a sound that yields to another
+// can carry on from where it was rather than skipping whatever it had queued.
+func (p *Player) Take() []int16 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	pending := p.pending
+	p.pending = nil
+	return pending
+}
+
 // PlayVoice queues 16 kHz mono audio, which is what Home Assistant's pipeline sends. The codec
 // only accepts 48 kHz stereo, so it is interpolated up and duplicated across both channels. The
 // resampler carries state between calls, so a reply delivered in chunks is one continuous signal.
