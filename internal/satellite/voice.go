@@ -11,6 +11,7 @@ import (
 	"github.com/ygelfand/go-esphome-device/api"
 
 	"github.com/ygelfand/echolocal/internal/alog"
+	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/led"
 	"github.com/ygelfand/echolocal/internal/mic"
 	"github.com/ygelfand/echolocal/internal/settings"
@@ -109,6 +110,7 @@ type conversation struct {
 	ring   *ringLight
 	leds   *led.Driver
 	log    *activity
+	mute   *gpio.Mute
 
 	events chan event
 
@@ -172,6 +174,7 @@ func newConversation(k *kit) *conversation {
 		ring:    k.Ring,
 		leds:    k.LEDs,
 		log:     k.Log,
+		mute:    k.Mute,
 		events:  make(chan event, 32),
 	}
 
@@ -393,9 +396,25 @@ func (c *conversation) handle(e event) {
 	}
 }
 
+// muted reports whether the microphones are cut. A device that could not take the pin has none.
+func (c *conversation) muted() (bool, error) {
+	if c.mute == nil {
+		return false, nil
+	}
+	return c.mute.Get()
+}
+
 // start opens a turn on the pipeline paired with a slot.
 func (c *conversation) start(n nextTurn) {
 	slot := n.slot
+
+	// A cut microphone hears nothing, so a turn started from a button would stream silence until it
+	// gave up — and worse, would look like the device is listening while it is muted.
+	if muted, err := c.muted(); err == nil && muted {
+		slog.Info("microphone muted, not starting a turn", "slot", slot+1)
+		c.trouble()
+		return
+	}
 
 	// Saying the wake word while the device is still listening is part of the sentence, not a new
 	// request: acting on it would cut off what the user is in the middle of saying. Once it is
