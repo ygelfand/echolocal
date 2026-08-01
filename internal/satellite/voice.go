@@ -322,6 +322,7 @@ func (c *conversation) handle(e event) {
 			// Continual conversation: the slot keeps listening after every reply, not only the ones
 			// Home Assistant asked to continue.
 			if c.pending == nil && c.wake.FollowUp(slot) > 0 {
+				slog.Info("listening again after the reply", "slot", slot+1, "for", c.wake.FollowUp(slot))
 				c.pending = &nextTurn{slot: slot, followUp: true}
 			}
 			c.startPending()
@@ -492,7 +493,9 @@ func (c *conversation) start(n nextTurn) {
 
 	c.arm(c.listenFor(n))
 	c.startAudio(slot)
-	slog.Info("turn started", "slot", slot+1, "phrase", phrase)
+	// The phrase is logged for a follow-up too, because it is what chose the pipeline — not because
+	// anyone said it.
+	slog.Info("turn started", "slot", slot+1, "phrase", phrase, "follow_up", n.followUp)
 }
 
 // listenFor is how long a turn may listen. A follow-up gets its own, shorter, window when the slot

@@ -116,7 +116,7 @@ func newUpdater(k *kit, version string) *updater {
 // settled records how an attempt ended, for a device somebody looks at later and for an automation that
 // wants to hear about it now.
 func (u *updater) settled(event, status string) {
-	u.status.Set(status)
+	u.status.Set(fit(status))
 	u.events.Trigger(event)
 
 	if err := settings.SetUpdateStatus(status); err != nil {

@@ -1,6 +1,8 @@
 package satellite
 
 import (
+	"unicode/utf8"
+
 	esphome "github.com/ygelfand/go-esphome-device"
 )
 
@@ -45,12 +47,33 @@ func (a *activity) Heard(text string) {
 	if a == nil || text == "" {
 		return
 	}
-	a.heard.Set(text)
+	a.heard.Set(fit(text))
 }
 
 func (a *activity) Replied(text string) {
 	if a == nil || text == "" {
 		return
 	}
-	a.reply.Set(text)
+	a.reply.Set(fit(text))
+}
+
+// stateLimit is the longest state Home Assistant will store — MAX_LENGTH_STATE_STATE in
+// homeassistant/const.py. Anything longer is refused and the entity reads unknown instead, so a
+// long reply loses the whole sensor rather than its tail. It counts characters, not bytes.
+const stateLimit = 255
+
+// fit shortens text to what Home Assistant accepts. The whole of it is in the log either way.
+func fit(text string) string {
+	if utf8.RuneCountInString(text) <= stateLimit {
+		return text
+	}
+
+	kept := 0
+	for i := range text {
+		if kept == stateLimit-1 {
+			return text[:i] + "…"
+		}
+		kept++
+	}
+	return text
 }
