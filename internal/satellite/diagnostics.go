@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
@@ -40,6 +41,19 @@ type diagnostics struct {
 
 	adb *esphome.Switch
 	ip  *esphome.TextSensor
+
+	signal *esphome.Sensor
+	rxRate *esphome.Sensor
+	txRate *esphome.Sensor
+	ads    *esphome.Sensor
+
+	ble  *bluetooth
+	last struct {
+		at       time.Time
+		rx, tx   float64
+		reports  uint64
+		recorded bool
+	}
 }
 
 // The thermal zones worth showing, by the name the kernel gives them. The rest are board sensors that
@@ -58,7 +72,9 @@ func newDiagnostics(k *kit, wake func(int)) *diagnostics {
 
 	d.storage()
 	d.hardware()
+	d.radio()
 	d.remote()
+	d.ble = k.BLE
 
 	if spk != nil {
 		// A reply is 16 kHz audio fetched over HTTP and stretched here, so judging a resampling by
@@ -196,6 +212,43 @@ func (d *diagnostics) storage() {
 	}
 }
 
+// radio builds what the wireless side reports: the link, what it carries, and what the Bluetooth
+// proxy hears. They share one antenna, so these belong together — scanning is paid for in throughput.
+func (d *diagnostics) radio() {
+	d.signal = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "wifi_signal", Name: "Wifi signal", Icon: "mdi:wifi",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "dBm",
+		DeviceClass: "signal_strength",
+		StateClass:  esphome.StateClassMeasurement,
+	}
+
+	rate := func(id, name, icon string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: icon, Category: esphome.CategoryDiagnostic,
+			},
+			Unit:       "kB/s",
+			StateClass: esphome.StateClassMeasurement,
+			Decimals:   1,
+		}
+	}
+	d.rxRate = rate("wifi_received", "Wifi received", "mdi:download-network")
+	d.txRate = rate("wifi_sent", "Wifi sent", "mdi:upload-network")
+
+	d.ads = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "ble_advertisements", Name: "BLE advertisements", Icon: "mdi:bluetooth-audio",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:       "/s",
+		StateClass: esphome.StateClassMeasurement,
+		Decimals:   1,
+	}
+}
+
 // hardware builds what the board says about itself. Two temperatures rather than four: the CPU answers
 // "is it working hard" and the combo chip answers "is it the radio", and the board sensors answer
 // nothing anybody asks.
@@ -275,6 +328,43 @@ func (d *diagnostics) Sample() {
 	d.measure()
 	d.board()
 	d.address()
+	d.wireless()
+}
+
+// wireless publishes the link and the two things competing for it. Rates come from what changed since
+// the last beat, so the first one after a start reports nothing rather than counting from boot.
+func (d *diagnostics) wireless() {
+	if d.signal == nil {
+		return
+	}
+
+	signal, rx, tx := hardware.Reader{}.Wifi()
+	set(d.signal, signal)
+
+	var reports uint64
+	if d.ble != nil {
+		reports = d.ble.radio.Reports()
+	}
+
+	now := time.Now()
+	was := d.last
+	d.last.at, d.last.rx, d.last.tx, d.last.reports, d.last.recorded = now, rx.Value, tx.Value, reports, true
+
+	if !was.recorded {
+		return
+	}
+	secs := now.Sub(was.at).Seconds()
+	if secs <= 0 {
+		return
+	}
+
+	if rx.Known {
+		d.rxRate.Set(float32((rx.Value - was.rx) / secs / 1024))
+	}
+	if tx.Known {
+		d.txRate.Set(float32((tx.Value - was.tx) / secs / 1024))
+	}
+	d.ads.Set(float32(float64(reports-was.reports) / secs))
 }
 
 // board reads the hardware and publishes what it reported. A sensor with no reading is left alone
@@ -329,7 +419,7 @@ func (d *diagnostics) entities() []esphome.Entity {
 	ents := []esphome.Entity{
 		d.cached, d.free, d.purge,
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory,
-		d.adb, d.ip,
+		d.adb, d.ip, d.signal, d.rxRate, d.txRate, d.ads,
 	}
 	if d.testPlayback != nil {
 		ents = append(ents, d.testPlayback)

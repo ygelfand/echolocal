@@ -93,6 +93,47 @@ func (r Reader) Memory() (available, total Reading) {
 	return available, total
 }
 
+// Wifi is what the radio reports: the signal in dBm, and the bytes carried since boot.
+//
+// The kernel keeps the signal as an unsigned byte, so anything above 127 is a negative dBm.
+func (r Reader) Wifi() (signal, rx, tx Reading) {
+	if body, err := os.ReadFile(r.path("proc/net/wireless")); err == nil {
+		for line := range strings.SplitSeq(string(body), "\n") {
+			name, rest, ok := strings.Cut(line, ":")
+			if !ok || strings.TrimSpace(name) != wifiInterface {
+				continue
+			}
+			if fields := strings.Fields(rest); len(fields) >= 3 {
+				if level := parse(strings.TrimSuffix(fields[2], ".")); level.Known {
+					if level.Value > 127 {
+						level.Value -= 256
+					}
+					signal = level
+				}
+			}
+		}
+	}
+
+	body, err := os.ReadFile(r.path("proc/net/dev"))
+	if err != nil {
+		return signal, Reading{}, Reading{}
+	}
+
+	for line := range strings.SplitSeq(string(body), "\n") {
+		name, rest, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(name) != wifiInterface {
+			continue
+		}
+		if fields := strings.Fields(rest); len(fields) >= 9 {
+			rx, tx = parse(fields[0]), parse(fields[8])
+		}
+	}
+	return signal, rx, tx
+}
+
+// wifiInterface is the only one on this board.
+const wifiInterface = "wlan0"
+
 // count reads a cpu list like "0-3" or "0-1,3" and reports how many it names.
 func (r Reader) count(path string) Reading {
 	list, err := text(r.path(path))
