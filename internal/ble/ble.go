@@ -27,6 +27,13 @@ const (
 	cmdLEScanEnable = 0x200C
 )
 
+// How much of the time the radio listens, in units of 0.625 ms: 18.75 ms out of every 200 ms. Wifi
+// and Bluetooth share one antenna here, so a window equal to the interval never gives it back.
+const (
+	scanInterval = 320
+	scanWindow   = 30
+)
+
 // Advertisement is one LE advertising report.
 type Advertisement struct {
 	Address     [6]byte
@@ -140,10 +147,12 @@ func (r *Radio) Stop() {
 
 // begin resets the controller and starts scanning. Held with mu.
 func (r *Radio) begin(active bool) error {
-	scanType := byte(0x00)
+	scan := make([]byte, 7)
 	if active {
-		scanType = 0x01
+		scan[0] = 0x01
 	}
+	binary.LittleEndian.PutUint16(scan[1:], scanInterval)
+	binary.LittleEndian.PutUint16(scan[3:], scanWindow)
 
 	for _, step := range []struct {
 		name   string
@@ -151,7 +160,7 @@ func (r *Radio) begin(active bool) error {
 		params []byte
 	}{
 		{"reset", cmdReset, nil},
-		{"scan parameters", cmdLEScanParams, []byte{scanType, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00}},
+		{"scan parameters", cmdLEScanParams, scan},
 		{"scan enable", cmdLEScanEnable, []byte{0x01, 0x00}},
 	} {
 		if err := command(r.fd, step.opcode, step.params); err != nil {
