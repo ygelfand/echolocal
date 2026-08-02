@@ -2,57 +2,11 @@ package boot
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
-	"github.com/ygelfand/echolocal/internal/gpio"
 	"github.com/ygelfand/echolocal/internal/layout"
-	"github.com/ygelfand/echolocal/internal/led"
 )
-
-// Taking the hardware. Whatever is free, Android takes, so each of these is held for the life of the
-// process rather than opened per use.
-
-// prepareRing takes the ring off the driver that has been animating it since power-on.
-func prepareRing() *led.Ring {
-	ring := led.New()
-
-	// The driver animates the ring itself from power-on and keeps repainting over whatever we write,
-	// including our blank frames. Amazon's ledcontroller turned this off before driving frames; taking
-	// its place means taking that over too.
-	if err := ring.SetBootAnimation(false); err != nil {
-		slog.Error("disabling driver boot animation failed", "err", err)
-	}
-
-	// The global drive current is an attenuation index rather than a level: 0 is full current and 3 a
-	// quarter of it, which is where the driver leaves it at probe and does not survive a reboot. So the
-	// ring runs at a quarter of what the hardware can do unless this asks for the rest, every boot.
-	//
-	// Worth knowing which brightness is which, because they are not equivalent: current is a DC change
-	// and silent, where dimming by PWM duty makes the driver audible.
-	if err := ring.SetCurrent(0); err != nil {
-		slog.Error("setting led_current failed", "err", err)
-	}
-	return ring
-}
-
-func takeMute() (*gpio.Mute, *gpio.MuteLED) {
-	mute, err := gpio.NewMute()
-	if err != nil {
-		slog.Error("mute unavailable", "err", err)
-	}
-
-	muteLED, err := gpio.NewMuteLED()
-	if err != nil {
-		slog.Error("mute LED unavailable", "err", err)
-		return mute, nil
-	}
-	if err := muteLED.SetBright(true); err != nil {
-		slog.Error("setting mute LED bright failed", "err", err)
-	}
-	return mute, muteLED
-}
 
 // listenAddr is the port the installer opened in the firewall.
 func listenAddr() string { return fmt.Sprintf(":%d", layout.Port) }

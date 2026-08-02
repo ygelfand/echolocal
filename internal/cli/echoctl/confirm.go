@@ -7,9 +7,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/ygelfand/echolocal/internal/bootimg"
-	"github.com/ygelfand/echolocal/internal/device"
-	"github.com/ygelfand/echolocal/internal/installer"
+	"github.com/ygelfand/echolocal/internal/host/bootimg"
+	"github.com/ygelfand/echolocal/internal/host/device"
+	"github.com/ygelfand/echolocal/internal/host/installer"
 )
 
 // payload resolves what to install: what the build ships, or a file when one was named. A build

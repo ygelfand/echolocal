@@ -8,8 +8,8 @@ import (
 
 	"github.com/zserge/microwakeword"
 
-	"github.com/ygelfand/echolocal/internal/oww"
-	"github.com/ygelfand/echolocal/internal/tflite"
+	"github.com/ygelfand/echolocal/internal/lib/oww"
+	"github.com/ygelfand/echolocal/internal/lib/tflite"
 )
 
 // DefaultModel is what a device that has never been configured listens for, by id. Something rather

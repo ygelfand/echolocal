@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/lib/audio"
 )
 
 func newToolsCmd() *cobra.Command {

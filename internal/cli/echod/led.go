@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/hardware/led"
 )
 
 func newLEDCmd() *cobra.Command {

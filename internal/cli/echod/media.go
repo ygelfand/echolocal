@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/media"
-	"github.com/ygelfand/echolocal/internal/speaker"
+	"github.com/ygelfand/echolocal/internal/feature/media"
+	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 )
 
 func newMediaCmd() *cobra.Command {
@@ -53,7 +53,7 @@ func newMediaCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			sound := speaker.NewDriver(p)
-			player := media.New(sound, p, func() {})
+			player := media.NewStream(sound, p, func() {})
 
 			player.Play(args[0])
 

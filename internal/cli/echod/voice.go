@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/speaker"
+	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 )
 
 func newVoiceCmd() *cobra.Command {

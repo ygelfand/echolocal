@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/alog"
-	"github.com/ygelfand/echolocal/internal/mic"
-	"github.com/ygelfand/echolocal/internal/settings"
+	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/hardware/mic"
 )
 
 // Defaults for a model that arrives without a manifest, which most do.
@@ -338,7 +338,7 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 
 // judge turns one slot's score into a detection, a near miss, or nothing. Held with mu.
 func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic.Source) {
-	cutoff := settings.DefaultThreshold
+	cutoff := config.DefaultThreshold
 	if e.Threshold != nil {
 		cutoff = e.Threshold(n)
 	}

@@ -3,7 +3,7 @@ package boot
 import (
 	"testing"
 
-	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/hardware/led"
 )
 
 // warm stands in for the engine: which slots have scored, and nothing else.

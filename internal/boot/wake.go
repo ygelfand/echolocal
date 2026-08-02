@@ -3,9 +3,11 @@ package boot
 import (
 	"log/slog"
 
-	"github.com/ygelfand/echolocal/internal/led"
-	"github.com/ygelfand/echolocal/internal/mic"
-	"github.com/ygelfand/echolocal/internal/satellite"
+	"github.com/ygelfand/echolocal/internal/feature/diag"
+	"github.com/ygelfand/echolocal/internal/feature/voice"
+	"github.com/ygelfand/echolocal/internal/feature/wakeword"
+	"github.com/ygelfand/echolocal/internal/hardware/led"
+	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/service"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
@@ -15,11 +17,12 @@ import (
 // The engine is the service. This is the part that knows what the user chose, which the engine does
 // not: which words go in which slot, and what to tell Home Assistant about the ones that would not
 // load.
-func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source, leds *led.Driver) {
+func addWake(group *service.Group, source *mic.Source, leds *led.Driver) {
+	turn := voice.Get()
 	library := wake.Lib()
-	engine := wake.New(satellite.WakeSlots, source)
-	engine.Threshold = sat.WakeThreshold
-	engine.OnDetect = sat.WakeDetected
+	engine := wake.New(wakeword.Slots, source)
+	engine.Threshold = wakeword.Threshold
+	engine.OnDetect = turn.Start
 
 	busy := newWakeBusy(leds.Busy(), engine.Ready)
 	engine.OnReady = busy.scored
@@ -36,7 +39,7 @@ func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source,
 
 		var accepted []string
 		var loaded []int
-		for slot := range satellite.WakeSlots {
+		for slot := range wakeword.Slots {
 			if slot >= len(ids) || ids[slot] == "" {
 				engine.Clear(slot)
 				continue
@@ -68,11 +71,13 @@ func addWake(group *service.Group, sat *satellite.Satellite, source *mic.Source,
 	// when the user changes one, so an engine that came back empty would leave the device deaf while
 	// it went on advertising wake words it was not listening for.
 	engine.Load = func() error {
-		sat.SetActiveWakeWords(load(sat.ActiveWakeWords()))
+		turn.SetActiveWakeWords(load(turn.ActiveWakeWords()))
 		return nil
 	}
 
-	sat.OnWakeWord(load)
+	// A selection both downloads models and lets go of the ones it replaced, so it is the one thing
+	// that moves either number the disk reports.
+	turn.OnWakeWord(load, diag.Get().Measure)
 
 	group.Add(engine, forever())
 

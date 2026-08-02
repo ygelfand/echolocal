@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/alsa"
-	"github.com/ygelfand/echolocal/internal/audio"
+	"github.com/ygelfand/echolocal/internal/lib/alsa"
+	"github.com/ygelfand/echolocal/internal/lib/audio"
 )
 
 func newMicCmd() *cobra.Command {

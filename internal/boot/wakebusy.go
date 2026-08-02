@@ -3,7 +3,7 @@ package boot
 import (
 	"sync"
 
-	"github.com/ygelfand/echolocal/internal/led"
+	"github.com/ygelfand/echolocal/internal/hardware/led"
 )
 
 // wakeBusy shows the ring working from the moment a wake word selection arrives until every slot it

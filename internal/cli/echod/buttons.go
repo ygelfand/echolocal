@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/input"
+	"github.com/ygelfand/echolocal/internal/lib/input"
 )
 
 func newButtonsCmd() *cobra.Command {

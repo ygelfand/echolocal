@@ -8,7 +8,7 @@ import (
 
 	"github.com/zserge/microwakeword"
 
-	"github.com/ygelfand/echolocal/internal/mic"
+	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 

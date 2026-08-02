@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/device"
-	"github.com/ygelfand/echolocal/internal/wifi"
+	"github.com/ygelfand/echolocal/internal/android/wifi"
+	"github.com/ygelfand/echolocal/internal/host/device"
 )
 
 // joinTimeout covers association and DHCP.

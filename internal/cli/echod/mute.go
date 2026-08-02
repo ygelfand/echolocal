@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/gpio"
+	"github.com/ygelfand/echolocal/internal/hardware/gpio"
 )
 
 func newMuteCmd() *cobra.Command {

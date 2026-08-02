@@ -11,19 +11,22 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync/atomic"
 
 	"github.com/ygelfand/echolocal/internal/alog"
-	"github.com/ygelfand/echolocal/internal/dns"
+	"github.com/ygelfand/echolocal/internal/android/dns"
+	"github.com/ygelfand/echolocal/internal/android/prop"
+	"github.com/ygelfand/echolocal/internal/android/setup"
+	"github.com/ygelfand/echolocal/internal/component"
+	_ "github.com/ygelfand/echolocal/internal/component/all"
+	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/firmware"
+	"github.com/ygelfand/echolocal/internal/feature/voice"
+	"github.com/ygelfand/echolocal/internal/hardware/buttons"
+	"github.com/ygelfand/echolocal/internal/hardware/led"
+	"github.com/ygelfand/echolocal/internal/hardware/mic"
+	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
-	"github.com/ygelfand/echolocal/internal/led"
-	"github.com/ygelfand/echolocal/internal/mic"
-	"github.com/ygelfand/echolocal/internal/prop"
-	"github.com/ygelfand/echolocal/internal/satellite"
 	"github.com/ygelfand/echolocal/internal/service"
-	"github.com/ygelfand/echolocal/internal/settings"
-	"github.com/ygelfand/echolocal/internal/setup"
-	"github.com/ygelfand/echolocal/internal/speaker"
 	"github.com/ygelfand/echolocal/internal/update"
 )
 
@@ -50,8 +53,15 @@ func Run(ctx context.Context, cfg Config) error {
 	procs()
 	dns.Use()
 
-	if err := settings.LoadError(); err != nil {
-		slog.Error("reading saved settings failed, continuing with defaults", "err", err)
+	// What this process was told, put where everything else reads its settings from, so nothing has to
+	// be handed a struct to find out what the device is called or which build it is.
+	config.Started(config.Device{
+		Name:    name(cfg.Name),
+		Version: cfg.Version,
+		Addr:    listenAddr(),
+	})
+	if err := config.LoadError(); err != nil {
+		slog.Error("reading the saved config failed, continuing with defaults", "err", err)
 	}
 
 	setup.Apply()
@@ -75,7 +85,8 @@ func Run(ctx context.Context, cfg Config) error {
 	// is left showing: nothing, or a colour saying the device is coming back.
 	var restarting string
 
-	ring := prepareRing()
+	leds := led.Get()
+	ring := leds.Ring()
 	defer func() {
 		if restarting != "" {
 			// Deliberately left lit. Nothing is running to animate anything once this returns, and a
@@ -92,20 +103,11 @@ func Run(ctx context.Context, cfg Config) error {
 	}()
 
 	group := service.New()
-
-	leds := led.NewDriver(ring)
 	group.Add(leds, forever())
 
 	// The boot animation runs until Home Assistant has a pipeline listening, which is the point the
-	// device can actually answer. The satellite does not exist yet, so readiness is asked through a
-	// pointer filled in once it does.
-	var ready atomic.Pointer[satellite.Satellite]
-	startSplash(ctx, leds, func() bool {
-		s := ready.Load()
-		return s != nil && s.PipelineReady()
-	})
-
-	mute, muteLED := takeMute()
+	// device can actually answer.
+	startSplash(ctx, leds, voice.Get().Ready)
 
 	// The audio devices are held for the life of the process: whatever is free, Android takes. The
 	// handles are made here and the services take the hardware, so a device lost to Android can be
@@ -113,46 +115,38 @@ func Run(ctx context.Context, cfg Config) error {
 	//
 	// The speaker also feeds silence while idle, because the amplifier hisses when nothing drives the
 	// DAC and toggling it pops.
-	spk := speaker.New()
+	spk := speaker.Get()
 	group.Add(spk, forever())
-	sound := speaker.NewDriver(spk)
 
-	source := mic.New()
+	source := mic.Get()
 	group.Add(source, forever())
 
-	sat, err := satellite.New(satellite.Config{
-		Name:    name(cfg.Name),
-		Version: cfg.Version,
-		Addr:    listenAddr(),
-		Ring:    leds,
-		Mute:    mute,
-		MuteLED: muteLED,
-		Speaker: spk,
-		Sound:   sound,
-		Mic:     source,
-	})
-	if err != nil {
-		slog.Error("satellite unavailable", "err", err)
-	} else {
-		ready.Store(sat)
-		addSatellite(group, sat, source, leds)
-	}
+	// Buttons should work whatever else is wrong, so they must not be downstream of a network listener
+	// or lost to one read error. What each one does is its own feature's listener.
+	group.Add(buttons.Get(), forever())
 
-	// The heartbeat samples what drifts, so a device with no satellite still beats and simply has
-	// nothing to publish.
-	beat := heartbeat{}
-	if sat := ready.Load(); sat != nil {
-		beat.sample = sat.Sample
-	}
+	// Detection comes up before the API, so Home Assistant cannot read the wake words while they are
+	// still loading and be told about one that then fails.
+	addWake(group, source, leds)
+
+	// Everything the device remembers, put back in the order the components registered and before the
+	// API is listening: how the device behaves is not Home Assistant's business. Silent — restoring is
+	// not an event, so nothing chimes and nothing reaches the logbook.
+	component.Default().Restore(config.Get())
+	slog.Info("state restored")
+
+	// Everything that registered itself, now that the hardware it stands on is off Android.
+	component.Default().AddTo(group)
+
+	// The heartbeat samples what drifts. Every component that has something to publish answers here,
+	// so they share one timestamp instead of each keeping its own timer.
+	beat := heartbeat{sample: component.Default().Sample}
 
 	// An update is kept once this process has reached a beat.
 	if onTrial {
 		beat.settled = func() {
 			update.Commit()
-
-			if sat := ready.Load(); sat != nil {
-				sat.UpdateKept(cfg.Version)
-			}
+			firmware.Get().Settled(firmware.EventInstalled, "installed "+cfg.Version)
 		}
 	}
 	group.Add(beat)
@@ -160,7 +154,7 @@ func Run(ctx context.Context, cfg Config) error {
 	slog.Info("resident")
 	_ = prop.Set(layout.StateProp, "resident")
 
-	err = run(ctx, group, &restarting)
+	err := run(ctx, group, &restarting)
 
 	slog.Info("stopping", "restarting", restarting)
 	_ = prop.Set(layout.StateProp, "stopped")

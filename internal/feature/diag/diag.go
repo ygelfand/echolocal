@@ -1,0 +1,408 @@
+// Package diag is what the device says about itself: its temperature, its cores, its disk, its link,
+// and where on the network it is. Nothing here changes what it does.
+package diag
+
+import (
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	esphome "github.com/ygelfand/go-esphome-device"
+
+	"github.com/ygelfand/echolocal/internal/android/firewall"
+	"github.com/ygelfand/echolocal/internal/component"
+	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
+	"github.com/ygelfand/echolocal/internal/feature/wakeword"
+	"github.com/ygelfand/echolocal/internal/hardware/metrics"
+	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/wake"
+)
+
+func init() {
+	component.Register(component.Network, Get(), component.Order(90))
+}
+
+// The thermal zones worth showing, by the name the kernel gives them. The rest are board sensors that
+// answer no question anybody asks.
+const (
+	cpuZone   = "mtktscpu"
+	radioZone = "mtktswmt"
+)
+
+// adbPort is where adbd listens: the boot image sets service.adb.tcp.port, and this is that port.
+const adbPort = 5555
+
+type Diag struct {
+	testPlayback *esphome.Button
+
+	cached *esphome.Sensor
+	free   *esphome.Sensor
+	purge  *esphome.Button
+
+	temperature *esphome.Sensor
+	radioTemp   *esphome.Sensor
+	cores       *esphome.Sensor
+	coresOnline *esphome.Sensor
+	load        *esphome.Sensor
+	memory      *esphome.Sensor
+
+	adb *esphome.Switch
+	ip  *esphome.TextSensor
+
+	signal *esphome.Sensor
+	rxRate *esphome.Sensor
+	txRate *esphome.Sensor
+	ads    *esphome.Sensor
+
+	last struct {
+		at       time.Time
+		rx, tx   float64
+		reports  uint64
+		recorded bool
+	}
+}
+
+var (
+	once   sync.Once
+	shared *Diag
+)
+
+func Get() *Diag {
+	once.Do(func() {
+		shared = &Diag{}
+		shared.storage()
+		shared.hardware()
+		shared.radio()
+		shared.remote()
+		shared.playback()
+	})
+	return shared
+}
+
+func (d *Diag) Name() string { return "diagnostics" }
+
+func (d *Diag) Entities() []esphome.Entity {
+	return []esphome.Entity{
+		d.cached, d.free, d.purge,
+		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory,
+		d.adb, d.ip, d.signal, d.rxRate, d.txRate, d.ads,
+		d.testPlayback,
+	}
+}
+
+// playback is a known signal through the reply path with nothing in front of it. A reply is 16 kHz
+// audio fetched over HTTP and stretched here, so judging a resampling by ear against a reply
+// confounds the filter with the network and with whatever the pipeline said.
+func (d *Diag) playback() {
+	spk := speaker.Get()
+
+	d.testPlayback = &esphome.Button{
+		Base: esphome.Base{
+			ObjectID: "test_playback",
+			Name:     "Test playback",
+			Icon:     "mdi:waveform",
+			Category: esphome.CategoryDiagnostic,
+		},
+		OnPress: func() {
+			slog.Info("test playback", "resampling", spk.Resampling(), "step", spk.Step())
+			spk.PlayVoice(speaker.VoiceSweep())
+		},
+	}
+}
+
+// remote opens the port adbd listens on, for getting at a device that is not on a cable.
+//
+// Deliberately not saved: the rule does not survive a reboot, so a switch that came back on would be
+// claiming something that is not true. It is read from the chain instead, which also gets it right when
+// echod restarts under a rule it left behind.
+func (d *Diag) remote() {
+	d.adb = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "remote_adb",
+			Name:     "Remote adb",
+			Icon:     "mdi:bug-outline",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+
+	open, err := firewall.Opened(adbPort)
+	if err != nil {
+		slog.Error("reading the firewall failed", "port", adbPort, "err", err)
+	}
+	d.adb.Set(open)
+
+	d.adb.OnCommand = func(on bool) {
+		change, what := firewall.Close, "closing"
+		if on {
+			change, what = firewall.Open, "opening"
+		}
+
+		if err := change(adbPort); err != nil {
+			slog.Error(what+" the adb port failed", "port", adbPort, "err", err)
+			d.adb.Set(!on)
+			return
+		}
+
+		slog.Warn("remote adb", "open", on, "port", adbPort)
+		d.adb.Set(on)
+	}
+
+	// The protocol's device info carries the mac and no address, so this is the only place Home Assistant
+	// can learn where the device actually is.
+	d.ip = &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "ip_address",
+			Name:     "IP address",
+			Icon:     "mdi:ip-network",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+	d.address()
+}
+
+func (d *Diag) address() {
+	var ips []string
+	for _, ip := range metrics.Addresses() {
+		ips = append(ips, ip.String())
+	}
+	d.ip.Set(strings.Join(ips, ", "))
+}
+
+// storage builds what the device says about its own disk. Cached is what could be deleted without
+// losing anything: wake word models no slot is listening for, which Home Assistant still offers and
+// will serve again on the next selection. Nothing else is cache yet.
+//
+// Reported in kilobytes because the protocol carries a state as a float32, which counts bytes exactly
+// only to sixteen megabytes. Home Assistant converts for display, so a size class in kB can still be
+// read in MB.
+func (d *Diag) storage() {
+	d.cached = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "cached_data",
+			Name:     "Cached data",
+			Icon:     "mdi:cached",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "kB",
+		DeviceClass: "data_size",
+		StateClass:  esphome.StateClassMeasurement,
+	}
+	d.free = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "free_space",
+			Name:     "Free space",
+			Icon:     "mdi:harddisk",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "kB",
+		DeviceClass: "data_size",
+		StateClass:  esphome.StateClassMeasurement,
+	}
+
+	d.purge = &esphome.Button{
+		Base: esphome.Base{
+			ObjectID: "purge_cache",
+			Name:     "Purge cache",
+			Icon:     "mdi:delete-sweep",
+			Category: esphome.CategoryDiagnostic,
+		},
+		OnPress: func() {
+			gone, freed := wake.Lib().Purge(inUse())
+			slog.Info("cache purged", "models", gone, "bytes", freed)
+			d.Measure()
+		},
+	}
+}
+
+// radio builds what the wireless side reports: the link, what it carries, and what the Bluetooth
+// proxy hears. They share one antenna, so these belong together — scanning is paid for in throughput.
+func (d *Diag) radio() {
+	d.signal = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "wifi_signal", Name: "Wifi signal", Icon: "mdi:wifi",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "dBm",
+		DeviceClass: "signal_strength",
+		StateClass:  esphome.StateClassMeasurement,
+	}
+
+	rate := func(id, name, icon string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: icon, Category: esphome.CategoryDiagnostic,
+			},
+			Unit:       "kB/s",
+			StateClass: esphome.StateClassMeasurement,
+			Decimals:   1,
+		}
+	}
+	d.rxRate = rate("wifi_received", "Wifi received", "mdi:download-network")
+	d.txRate = rate("wifi_sent", "Wifi sent", "mdi:upload-network")
+
+	d.ads = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "ble_advertisements", Name: "BLE advertisements", Icon: "mdi:bluetooth-audio",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:       "/s",
+		StateClass: esphome.StateClassMeasurement,
+		Decimals:   1,
+	}
+}
+
+// hardware builds what the board says about itself. Two temperatures rather than four: the CPU answers
+// "is it working hard" and the combo chip answers "is it the radio", and the board sensors answer
+// nothing anybody asks.
+//
+// Cores are reported twice on purpose. This kernel hotplugs them, so a device with four can be running
+// two, and echod's share of a CPU means something different depending on which number you hold it
+// against.
+func (d *Diag) hardware() {
+	temp := func(id, name, icon string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: icon, Category: esphome.CategoryDiagnostic,
+			},
+			Unit:        "°C",
+			DeviceClass: "temperature",
+			StateClass:  esphome.StateClassMeasurement,
+			Decimals:    1,
+		}
+	}
+	d.temperature = temp("cpu_temperature", "CPU temperature", "mdi:thermometer")
+	d.radioTemp = temp("radio_temperature", "Radio temperature", "mdi:thermometer")
+
+	count := func(id, name string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: "mdi:cpu-64-bit", Category: esphome.CategoryDiagnostic,
+			},
+			StateClass: esphome.StateClassMeasurement,
+		}
+	}
+	d.cores = count("cpu_cores", "CPU cores")
+	d.coresOnline = count("cpu_cores_online", "CPU cores online")
+
+	d.load = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "load_average", Name: "Load average", Icon: "mdi:gauge",
+			Category: esphome.CategoryDiagnostic,
+		},
+		StateClass: esphome.StateClassMeasurement,
+		Decimals:   2,
+	}
+	d.memory = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "memory_available", Name: "Memory available", Icon: "mdi:memory",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "kB",
+		DeviceClass: "data_size",
+		StateClass:  esphome.StateClassMeasurement,
+	}
+}
+
+// Measure republishes what the disk holds. Called at start-up and after anything that adds to the cache
+// or takes from it, so the number is right the moment a purge finishes rather than a minute later.
+func (d *Diag) Measure() {
+	_, cached := wake.Cached(wake.Lib().Dir(), inUse())
+	d.cached.Set(float32(cached / 1024))
+
+	free, err := layout.Free(layout.StateDir)
+	if err != nil {
+		slog.Error("reading free space failed", "dir", layout.StateDir, "err", err)
+		return
+	}
+	d.free.Set(float32(free / 1024))
+}
+
+// Restore is the disk as it stands at start-up, which the slots decide: a model no slot wants is
+// cache. It runs with the rest so the numbers are there before Home Assistant asks.
+func (d *Diag) Restore(config.Config) { d.Measure() }
+
+// Sample publishes everything that drifts on its own: the disk, and what the board says about itself.
+// Called on the heartbeat, so these all come from the same moment and line up when something is wrong.
+func (d *Diag) Sample() {
+	d.Measure()
+	d.board()
+	d.address()
+	d.wireless()
+}
+
+// wireless publishes the link and the two things competing for it. Rates come from what changed since
+// the last beat, so the first one after a start reports nothing rather than counting from boot.
+func (d *Diag) wireless() {
+	signal, rx, tx := metrics.Reader{}.Wifi()
+	set(d.signal, signal)
+
+	reports := bluetooth.Get().Reports()
+
+	now := time.Now()
+	was := d.last
+	d.last.at, d.last.rx, d.last.tx, d.last.reports, d.last.recorded = now, rx.Value, tx.Value, reports, true
+
+	if !was.recorded {
+		return
+	}
+	secs := now.Sub(was.at).Seconds()
+	if secs <= 0 {
+		return
+	}
+
+	if rx.Known {
+		d.rxRate.Set(float32((rx.Value - was.rx) / secs / 1024))
+	}
+	if tx.Known {
+		d.txRate.Set(float32((tx.Value - was.tx) / secs / 1024))
+	}
+	d.ads.Set(float32(float64(reports-was.reports) / secs))
+}
+
+// board reads the hardware and publishes what it reported. A sensor with no reading is left alone
+// rather than set to zero: a board without that sensor should show unknown, not a plausible lie.
+func (d *Diag) board() {
+	r := metrics.Reader{}
+
+	temps := r.Temperatures()
+	set(d.temperature, reading(temps, cpuZone))
+	set(d.radioTemp, reading(temps, radioZone))
+
+	present, online := r.Cores()
+	set(d.cores, present)
+	set(d.coresOnline, online)
+
+	one, _ := r.Load()
+	set(d.load, one)
+
+	available, _ := r.Memory()
+	set(d.memory, available)
+}
+
+// reading picks one thermal zone out of what was found.
+func reading(temps map[string]float64, zone string) metrics.Reading {
+	v, ok := temps[zone]
+	return metrics.Reading{Value: v, Known: ok}
+}
+
+func set(s *esphome.Sensor, r metrics.Reading) {
+	if r.Known {
+		s.Set(float32(r.Value))
+	}
+}
+
+// inUse is what the slots are set to, which is what a purge has to leave alone.
+func inUse() []string {
+	saved := config.Get().Wake
+
+	var ids []string
+	for slot := range wakeword.Slots {
+		if id := saved.Slot(slot).ID; id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

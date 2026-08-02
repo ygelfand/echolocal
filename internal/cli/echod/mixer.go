@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/alsa"
+	"github.com/ygelfand/echolocal/internal/lib/alsa"
 )
 
 func newMixerCmd() *cobra.Command {

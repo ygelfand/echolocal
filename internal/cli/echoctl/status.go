@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/installer"
+	"github.com/ygelfand/echolocal/internal/host/installer"
 	"github.com/ygelfand/echolocal/internal/layout"
 )
 

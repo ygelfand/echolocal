@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ygelfand/echolocal/internal/device"
-	"github.com/ygelfand/echolocal/internal/installer"
+	"github.com/ygelfand/echolocal/internal/host/device"
+	"github.com/ygelfand/echolocal/internal/host/installer"
 )
 
 // rebootChoice is what the flags said. Nothing given means ask, which is why this is not a bool.

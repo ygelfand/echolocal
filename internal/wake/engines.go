@@ -7,7 +7,7 @@ import (
 
 	"github.com/zserge/microwakeword"
 
-	"github.com/ygelfand/echolocal/internal/oww"
+	"github.com/ygelfand/echolocal/internal/lib/oww"
 )
 
 // Kind is which engine runs a wake word.

@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/alsa"
+	"github.com/ygelfand/echolocal/internal/lib/alsa"
 )
 
 // The playback codec accepts one format only.

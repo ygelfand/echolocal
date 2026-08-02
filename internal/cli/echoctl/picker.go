@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ygelfand/echolocal/internal/device"
+	"github.com/ygelfand/echolocal/internal/host/device"
 )
 
 // ErrCancelled means the user dismissed a prompt.

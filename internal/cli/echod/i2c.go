@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/i2c"
+	"github.com/ygelfand/echolocal/internal/lib/i2c"
 )
 
 func newI2CCmd() *cobra.Command {

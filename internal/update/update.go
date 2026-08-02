@@ -11,8 +11,8 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/layout"
-	"github.com/ygelfand/echolocal/internal/prop"
 )
 
 // Paths and properties are variables rather than constants so a test can point them somewhere it is
