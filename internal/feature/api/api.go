@@ -66,7 +66,9 @@ func (a *API) Start(context.Context) error {
 
 	device := config.Get().Device
 	ents := esphome.NewEntities()
-	ents.Add(component.Default().Entities()...)
+	if err := ents.Add(component.Default().Entities()...); err != nil {
+		return err
+	}
 
 	a.name = layout.Slug(device.Name)
 	a.srv = &esphome.Server{
@@ -85,6 +87,8 @@ func (a *API) Start(context.Context) error {
 		Logger: slog.Default(),
 		// Persist a key Home Assistant pushes, or the next connection reverts to the old one.
 		OnSetEncryptionKey: func(k esphome.PSK) error { return writePSK(layout.KeyPath, k) },
+
+		OnSubscribed: func() { component.Subscribed.Emit(struct{}{}) },
 
 		// The handlers components answer for themselves rather than through an entity: the voice
 		// satellite's pipeline traffic, and the Bluetooth proxy's subscribe and set-mode messages.

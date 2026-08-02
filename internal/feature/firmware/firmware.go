@@ -43,6 +43,9 @@ type Firmware struct {
 
 	mu    sync.Mutex
 	found update.Manifest
+
+	announced  sync.Once
+	rolledBack string
 }
 
 var (
@@ -107,7 +110,6 @@ func build() *Firmware {
 			Category: esphome.CategoryDiagnostic,
 		},
 	}
-	u.status.Set(config.Get().Update.Status)
 
 	u.events = &esphome.Event{
 		Base: esphome.Base{
@@ -118,25 +120,49 @@ func build() *Firmware {
 		Types: []string{EventInstalled, EventRolledBack, EventFailed},
 	}
 
-	// A rollback happened before this process existed, so the boot hook left the version in a property.
-	// The event may go nowhere if Home Assistant has not connected yet, which is why the status is saved:
-	// that is the part somebody can still find afterwards.
-	if was := update.RolledBack(); was != "" {
-		u.Settled(EventRolledBack, "rolled back from "+was)
-	}
+	// What the boot hook took out, if anything. Read once: it describes this boot, and reading clears
+	// the property.
+	u.rolledBack = update.RolledBack()
 
+	// Off the hook's goroutine, which is the connection's read loop.
+	component.Subscribed.Listen(func(struct{}) { safe.Go("update announce", u.announce) })
 	return u
+}
+
+// announce tells Home Assistant about a build it has not been told about, once there is somebody to
+// tell. However the binary got there — an update, an install by hand, a rollback — it either differs
+// from what was last reported or it does not, so nothing has to remember to call this and an ordinary
+// restart says nothing.
+//
+// LastVersion moves only once the event has gone out, so a change made while the device was alone is
+// reported on the next connection rather than lost.
+func (u *Firmware) announce() {
+	u.announced.Do(func() {
+		if config.Get().Update.LastVersion == layout.Version {
+			return
+		}
+
+		event, detail := EventInstalled, "installed "+layout.Version
+		if u.rolledBack != "" {
+			event, detail = EventRolledBack, "rolled back from "+u.rolledBack
+		}
+		u.Settled(event, detail)
+
+		if err := config.Set().Update().LastVersion(layout.Version); err != nil {
+			slog.Error("saving the reported version failed", "err", err)
+		}
+	})
 }
 
 // Settled records how an attempt ended, for a device somebody looks at later and for an automation
 // that wants to hear about it now.
+//
+// The sensor is not saved. It is the outcome of something this process saw, and a restart has not
+// seen it — republishing it every boot turns one event into a permanent claim, and one that a manual
+// install makes untrue.
 func (u *Firmware) Settled(event, status string) {
 	u.status.Set(component.Fit(status))
 	u.events.Trigger(event)
-
-	if err := config.Set().Update().Status(status); err != nil {
-		slog.Error("saving the update status failed", "err", err)
-	}
 }
 
 // Channel is the stream this device follows, as last chosen.

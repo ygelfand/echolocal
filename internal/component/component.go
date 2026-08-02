@@ -102,3 +102,10 @@ type Sampler interface {
 // A hook rather than a call, so a component can ask for one without knowing what is listening — the
 // server is a component like any other and may not exist.
 var Reconnect hook.Hook[struct{}]
+
+// Subscribed fires when Home Assistant asks for state, which is the first moment anything sent to it
+// will arrive. Something that happened while the device was alone waits for this.
+//
+// It fires on every connection, so a listener has to decide for itself whether it still has anything
+// to say.
+var Subscribed hook.Hook[struct{}]
