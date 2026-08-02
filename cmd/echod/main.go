@@ -3,14 +3,4 @@ package main
 
 import "github.com/ygelfand/echolocal/internal/cli/echod"
 
-// Set via -ldflags at build time.
-var (
-	Version   = "dev"
-	GitCommit = "unknown"
-	BuildDate = "unknown"
-)
-
-func main() {
-	echod.Version, echod.GitCommit, echod.BuildDate = Version, GitCommit, BuildDate
-	echod.Execute()
-}
+func main() { echod.Execute() }

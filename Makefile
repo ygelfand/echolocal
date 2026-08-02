@@ -12,9 +12,10 @@ VERSION ?= $(if $(GIT_TAG),$(GIT_TAG),$(BASE)-dev.$(EPOCH)_$(BUILT_FROM))
 REPO ?= ygelfand/echolocal
 RELEASES ?= https://github.com/$(REPO)/releases
 
-LDFLAGS := -X 'main.Version=$(VERSION)' \
-	-X 'main.GitCommit=$(GIT_COMMIT)' \
-	-X 'main.BuildDate=$(BUILD_DATE)'
+BUILDVARS := github.com/ygelfand/echolocal/internal/layout
+LDFLAGS := -X '$(BUILDVARS).Version=$(VERSION)' \
+	-X '$(BUILDVARS).GitCommit=$(GIT_COMMIT)' \
+	-X '$(BUILDVARS).BuildDate=$(BUILD_DATE)'
 
 BUILD_DIR := bin
 ASSET_DIR := internal/assets/payload
@@ -43,6 +44,7 @@ DEVICE_TMP := /data/local/tmp
 # It is installed as Amazon's ledcontroller service: that kills the spinning ring by removing
 # its driver, and init then starts echod from on post-fs-data and restarts it if it exits.
 ECHOD_DIR := /system/app/echod
+STATE_DIR := /data/misc/echolocal
 LEDD := /system/bin/ledcontroller
 LEDD_LABEL_ORIG := u:object_r:ledd_exec:s0
 
@@ -127,10 +129,15 @@ dist: payload ## Full build: echod, the boot image, then echoctl carrying both
 
 .PHONY: install-echod
 install-echod: build-echod ## Install echod into /system/app/echod, restarting it if installed
+# This is a manual copy, not an upgrade, so the trial an update may have left open is cleared with it.
+# Otherwise the restart below looks like a binary that took an update and died without committing, and
+# echod reboots the device to put the old one back — taking this install with it.
 	@$(ADB) shell 'setprop ctl.stop ledcontroller; sleep 1; \
-		mount -o remount,rw /system && mkdir -p $(ECHOD_DIR)'
+		mount -o remount,rw /system && mkdir -p $(ECHOD_DIR) && \
+		rm -f $(ECHOD_DIR)/echod.prev $(ECHOD_DIR)/echod.old'
 	@$(ADB) push $(BUILD_DIR)/echod $(ECHOD_DIR)/echod >/dev/null
 	@$(ADB) shell 'chmod 755 $(ECHOD_DIR)/echod; mount -o remount,ro /system; \
+		rm -f $(STATE_DIR)/updating; setprop echolocal.trial ""; setprop echolocal.rolledback ""; \
 		[ -L $(LEDD) ] && setprop ctl.start ledcontroller; ls -lZ $(ECHOD_DIR)/echod'
 
 .PHONY: install-service
