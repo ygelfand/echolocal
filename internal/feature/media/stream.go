@@ -112,7 +112,7 @@ func (m *Stream) Play(url string) {
 	slog.Info("playing media", "url", url)
 
 	safe.Go("media", func() {
-		err := m.run(ctx, url)
+		err := m.run(ctx, t, url)
 		if err != nil && ctx.Err() == nil {
 			slog.Error("playing media failed", "err", err)
 		}
@@ -312,7 +312,7 @@ func (t *track) stop() {
 }
 
 // run fetches the url and feeds it to the speaker as it arrives.
-func (m *Stream) run(ctx context.Context, url string) error {
+func (m *Stream) run(ctx context.Context, t *track, url string) error {
 	// No timeout on the client: a track takes as long as it takes. What is bounded is a single read,
 	// because a wedged connection otherwise holds the track open for as long as the kernel keeps
 	// retrying — minutes of a player reporting that it is playing while nothing comes out.
@@ -352,7 +352,7 @@ func (m *Stream) run(ctx context.Context, url string) error {
 		watchdog.Stop()
 
 		if n >= frame {
-			m.feed(buf[:n-n%frame])
+			m.feed(t, buf[:n-n%frame])
 		}
 		switch {
 		case err == nil:
@@ -414,23 +414,29 @@ func (m *Stream) settle(ctx context.Context) error {
 	}
 }
 
-func (m *Stream) feed(pcm []byte) {
+func (m *Stream) feed(t *track, pcm []byte) {
 	samples := make([]int16, len(pcm)/2)
 	for i := range samples {
 		samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*2:]))
 	}
-	m.queue(samples)
+	m.queue(t, samples)
 }
 
-// queue hands samples over, unless the speaker was taken away in the meantime.
-func (m *Stream) queue(samples []int16) {
+// queue hands samples over, unless the speaker was taken away in the meantime or this is no longer
+// the track being played.
+//
+// The track has to be checked as well as the gate. Stopping opens the gate to release the goroutine
+// waiting on it, and what that goroutine does next is read whatever the socket already holds — so
+// without this it can put a chunk of a track that has been stopped into a queue that was just
+// flushed, and the speaker plays it.
+func (m *Stream) queue(t *track, samples []int16) {
 	m.write.Lock()
 	defer m.write.Unlock()
 
 	m.mu.Lock()
-	blocked := m.gate != nil
+	stale := m.gate != nil || m.track != t
 	m.mu.Unlock()
-	if blocked {
+	if stale {
 		return
 	}
 
