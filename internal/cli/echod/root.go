@@ -7,12 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
 
-var (
-	Version   = "dev"
-	GitCommit = "unknown"
-	BuildDate = "unknown"
+	"github.com/ygelfand/echolocal/internal/layout"
 )
 
 var cfgFile string
@@ -25,7 +21,7 @@ func newRoot() *cobra.Command {
 			"voice satellite. The tools subtree exposes the same hardware access for\n" +
 			"diagnostics.",
 		SilenceUsage: true,
-		Version:      fmt.Sprintf("%s (%s, %s)", Version, GitCommit, BuildDate),
+		Version:      layout.VersionString(),
 	}
 
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default /system/etc/echolocal/echod.yaml)")

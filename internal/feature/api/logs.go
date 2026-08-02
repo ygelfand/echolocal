@@ -8,7 +8,7 @@ import (
 
 	proto "github.com/ygelfand/go-esphome-device/api"
 
-	"github.com/ygelfand/echolocal/internal/alog"
+	"github.com/ygelfand/echolocal/internal/android/logd"
 )
 
 // waitForReader is how often to look for a client having subscribed. Nothing is lost while waiting,
@@ -20,7 +20,7 @@ const waitForReader = time.Second
 //
 // The lines come by channel because sending them is a socket write, on whatever goroutine logged.
 func (a *API) pipeLogs(ctx context.Context) {
-	lines := alog.Lines()
+	lines := logd.Lines()
 
 	for {
 		// Until something is listening there is nowhere to put a line, so they are left in the buffer

@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
 	"github.com/ygelfand/echolocal/internal/lib/hook"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 // The playback codec accepts one format only: 48 kHz, S16_LE, stereo.
@@ -246,7 +246,7 @@ func (p *Player) Run(ctx context.Context) error {
 	p.amp(true)
 	slog.Info("playback path up", "output", out)
 	p.OnOutput.Emit(out)
-	go alog.Safely("jack watcher", func() { p.watchJack(ctx) })
+	safe.Go("jack watcher", func() { p.watchJack(ctx) })
 
 	for {
 		if err := ctx.Err(); err != nil {

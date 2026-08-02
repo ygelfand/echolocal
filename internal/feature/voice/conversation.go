@@ -10,7 +10,6 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 	"github.com/ygelfand/go-esphome-device/api"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/activity"
 	"github.com/ygelfand/echolocal/internal/feature/feedback"
@@ -21,6 +20,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 	"github.com/ygelfand/echolocal/internal/wake"
 )
 
@@ -546,7 +546,7 @@ func (c *conversation) speak(url string) {
 	}
 
 	held := c.sound.Claim("reply", errand)
-	go alog.Safely("reply", func() {
+	safe.Go("reply", func() {
 		<-held.Done()
 
 		if err := held.Err(); err != nil {
@@ -740,7 +740,7 @@ func (c *conversation) startAudio(slot int) {
 	c.stopAudio = cancel
 
 	// slot is captured rather than read from the loop's state, which the streamer does not own.
-	go alog.Safely("turn audio", func() { c.stream(ctx, slot) })
+	safe.Go("turn audio", func() { c.stream(ctx, slot) })
 }
 
 func (c *conversation) stopStreaming() {

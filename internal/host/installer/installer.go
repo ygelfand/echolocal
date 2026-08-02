@@ -200,6 +200,9 @@ func installBinary(r *run) (string, bool, error) {
 	if _, err := r.d.Shell("mkdir -p " + layout.Dir); err != nil {
 		return "", false, err
 	}
+	if err := clearTrial(r); err != nil {
+		return "", false, err
+	}
 	if err := r.d.WriteFile(layout.Binary, r.cfg.Echod, 0o755); err != nil {
 		return "", false, err
 	}
@@ -208,6 +211,16 @@ func installBinary(r *run) (string, bool, error) {
 		return "", false, err
 	}
 	return label, false, nil
+}
+
+// clearTrial throws away what a self-update left open. Installing is a replacement, not an upgrade:
+// the binary that opened the trial is being overwritten, so the boot hook must not put it back, and
+// echod must not read the restart that follows as a trial that died.
+func clearTrial(r *run) error {
+	_, err := r.d.Shell(fmt.Sprintf("rm -f %s %s %s; setprop %s ''; setprop %s ''",
+		layout.PrevBinary, layout.OldBinary, layout.UpdatingPath,
+		layout.TrialProp, layout.RolledBackProp))
+	return err
 }
 
 // backupService keeps Amazon's binary. Moving it a second time would move our own symlink

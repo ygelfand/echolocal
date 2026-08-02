@@ -6,9 +6,9 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 // announce plays what Home Assistant asks for, then reports back. It runs off the connection's
@@ -31,7 +31,7 @@ func (t *conversation) announce(a esphome.Announce) {
 		return nil
 	})
 
-	go alog.Safely("announce", func() {
+	safe.Go("announce", func() {
 		<-claim.Done()
 		t.player.Sounding(false)
 

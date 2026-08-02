@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 // Defaults for a model that arrives without a manifest, which most do.
@@ -329,7 +329,7 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 			slog.Info("wake word ready", "slot", i+1, "id", s.model.ID)
 			if e.OnReady != nil {
 				n := i
-				go alog.Safely("wake word ready", func() { e.OnReady(n) })
+				safe.Go("wake word ready", func() { e.OnReady(n) })
 			}
 		}
 		e.judge(i, s, score, now, source)
@@ -385,6 +385,6 @@ func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic
 	s.crossing, s.peak = score, score
 
 	if e.OnDetect != nil {
-		go alog.Safely("wake detected", func() { e.OnDetect(n) })
+		safe.Go("wake detected", func() { e.OnDetect(n) })
 	}
 }

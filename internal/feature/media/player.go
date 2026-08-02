@@ -15,12 +15,12 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 func init() {
@@ -199,7 +199,7 @@ func (p *Player) announce(url string) {
 
 	// The claim ends once the audio has been heard, not once it has been queued, so this is where
 	// the player stops saying it is playing.
-	go alog.Safely("announce", func() {
+	safe.Go("announce", func() {
 		<-claim.Done()
 		p.Sounding(false)
 

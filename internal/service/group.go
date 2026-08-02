@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ygelfand/echolocal/internal/alog"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 // Group runs a set of services and keeps them running.
@@ -97,7 +97,7 @@ func (g *Group) Run(ctx context.Context) error {
 		started = append(started, e)
 
 		wg.Add(1)
-		go alog.Safely("service "+e.svc.Name(), func() {
+		safe.Go("service "+e.svc.Name(), func() {
 			defer wg.Done()
 			g.supervise(ctx, e)
 		})

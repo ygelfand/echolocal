@@ -12,7 +12,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/android/dns"
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/android/setup"
@@ -23,49 +22,41 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/voice"
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
+	"github.com/ygelfand/echolocal/internal/hardware/metrics"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 	"github.com/ygelfand/echolocal/internal/service"
 	"github.com/ygelfand/echolocal/internal/update"
 )
-
-// Config is what the device needs to know that it cannot work out for itself.
-type Config struct {
-	// Name is what Home Assistant calls the device. Empty takes the name recorded at install.
-	Name string
-
-	// Version is the build, reported to Home Assistant and logged.
-	Version string
-}
 
 // Run brings everything up and stays until ctx is cancelled.
 //
 // Hardware that cannot be taken is logged and left out: a device with no speaker still answers, and
 // nothing here is worth refusing to start over.
-func Run(ctx context.Context, cfg Config) error {
-	slog.Info("echod starting", "version", cfg.Version,
+func Run(ctx context.Context) error {
+	slog.Info("echod starting", "version", layout.Version,
 		"pid", os.Getpid(), "uid", os.Getuid(), "context", selinuxContext())
 
-	_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", alog.Uptime()))
+	_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", metrics.Uptime()))
 	_ = prop.Set(layout.StateProp, "starting")
 
 	procs()
 	dns.Use()
 
 	// What this process was told, put where everything else reads its settings from, so nothing has to
-	// be handed a struct to find out what the device is called or which build it is.
+	// be handed a struct to find out what the device is called or where it listens.
 	config.Started(config.Device{
-		Name:    name(cfg.Name),
-		Version: cfg.Version,
-		Addr:    listenAddr(),
+		Name: name(),
+		Addr: listenAddr(),
 	})
 	if err := config.LoadError(); err != nil {
 		slog.Error("reading the saved config failed, continuing with defaults", "err", err)
 	}
 
 	setup.Apply()
-	go alog.Safely("late setup", func() { setup.ApplyLate(ctx) })
+	safe.Go("late setup", func() { setup.ApplyLate(ctx) })
 
 	// Before any hardware: an update that was installed and never settled either gets its turn here or
 	// sends the device round for another boot, where something outside this binary can put the old one
@@ -146,7 +137,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if onTrial {
 		beat.settled = func() {
 			update.Commit()
-			firmware.Get().Settled(firmware.EventInstalled, "installed "+cfg.Version)
+			firmware.Get().Settled(firmware.EventInstalled, "installed "+layout.Version)
 		}
 	}
 	group.Add(beat)

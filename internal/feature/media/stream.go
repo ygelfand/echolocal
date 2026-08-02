@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 const (
@@ -87,7 +87,7 @@ func NewStream(sound *speaker.Driver, out *speaker.Player, changed func()) *Stre
 //
 // It does not take the speaker from a reply or an announcement that is sounding. Those are seconds
 // long and end on their own, and the track waits behind them rather than talking over them.
-func (m *Stream)Play(url string) {
+func (m *Stream) Play(url string) {
 	if m == nil {
 		slog.Warn("asked to play media with no speaker", "url", url)
 		return
@@ -111,7 +111,7 @@ func (m *Stream)Play(url string) {
 	m.changed()
 	slog.Info("playing media", "url", url)
 
-	go alog.Safely("media", func() {
+	safe.Go("media", func() {
 		err := m.run(ctx, url)
 		if err != nil && ctx.Err() == nil {
 			slog.Error("playing media failed", "err", err)
@@ -122,7 +122,7 @@ func (m *Stream)Play(url string) {
 
 // Pause stops the track where it is. What was queued but not heard is kept, so resuming does not
 // skip it.
-func (m *Stream)Pause() {
+func (m *Stream) Pause() {
 	if m == nil {
 		return
 	}
@@ -144,7 +144,7 @@ func (m *Stream)Pause() {
 }
 
 // Unpause carries on from where Pause stopped.
-func (m *Stream)Unpause() {
+func (m *Stream) Unpause() {
 	if m == nil {
 		return
 	}
@@ -164,7 +164,7 @@ func (m *Stream)Unpause() {
 }
 
 // Stop ends the track. There is nothing to come back to afterwards.
-func (m *Stream)Stop() {
+func (m *Stream) Stop() {
 	if m == nil {
 		return
 	}
@@ -184,7 +184,7 @@ func (m *Stream)Stop() {
 }
 
 // Suspend implements speaker.Background: something else wants the speaker.
-func (m *Stream)Suspend() {
+func (m *Stream) Suspend() {
 	if m == nil {
 		return
 	}
@@ -202,7 +202,7 @@ func (m *Stream)Suspend() {
 }
 
 // Resume implements speaker.Background: the speaker is free again.
-func (m *Stream)Resume() {
+func (m *Stream) Resume() {
 	if m == nil {
 		return
 	}
@@ -221,7 +221,7 @@ func (m *Stream)Resume() {
 // Playing reports whether a track is loaded and not paused, which is what Home Assistant is told.
 // A track that is only waiting for a reply to finish is still playing: it is going to carry on
 // without anyone asking it to.
-func (m *Stream)Playing() (playing, paused bool) {
+func (m *Stream) Playing() (playing, paused bool) {
 	if m == nil {
 		return false, false
 	}
@@ -232,13 +232,13 @@ func (m *Stream)Playing() (playing, paused bool) {
 }
 
 // block and unblock hold and release the stream. Both want mu.
-func (m *Stream)block() {
+func (m *Stream) block() {
 	if m.gate == nil {
 		m.gate = make(chan struct{})
 	}
 }
 
-func (m *Stream)unblock() {
+func (m *Stream) unblock() {
 	if m.gate != nil {
 		close(m.gate)
 		m.gate = nil
@@ -247,7 +247,7 @@ func (m *Stream)unblock() {
 
 // flush throws away audio that is ours to throw away. While something else holds the speaker the
 // queue belongs to it, and emptying it would cut off a reply.
-func (m *Stream)flush() {
+func (m *Stream) flush() {
 	m.mu.Lock()
 	held := m.holds > 0
 	m.mu.Unlock()
@@ -262,7 +262,7 @@ func (m *Stream)flush() {
 
 // keep empties the queue and remembers what was in it. Taken rather than dropped: this is the
 // middle of a song, and what has not been heard is where playing has to start again from.
-func (m *Stream)keep() {
+func (m *Stream) keep() {
 	m.write.Lock()
 	defer m.write.Unlock()
 
@@ -274,7 +274,7 @@ func (m *Stream)keep() {
 }
 
 // replay puts back what Suspend took, once the speaker is ours again.
-func (m *Stream)replay() {
+func (m *Stream) replay() {
 	m.write.Lock()
 	defer m.write.Unlock()
 
@@ -291,7 +291,7 @@ func (m *Stream)replay() {
 }
 
 // finished clears the track once it has played out, unless it has already been replaced.
-func (m *Stream)finished(t *track) {
+func (m *Stream) finished(t *track) {
 	m.mu.Lock()
 	if m.track != t {
 		m.mu.Unlock()
@@ -367,7 +367,7 @@ func (m *Stream) run(ctx context.Context, url string) error {
 }
 
 // wait holds the stream until it may play and the queue has room for more.
-func (m *Stream)wait(ctx context.Context) error {
+func (m *Stream) wait(ctx context.Context) error {
 	for {
 		m.mu.Lock()
 		gate := m.gate
@@ -397,7 +397,7 @@ func (m *Stream)wait(ctx context.Context) error {
 
 // settle waits for what has been queued to play out, so the track is not reported finished while
 // the last of it is still sounding.
-func (m *Stream)settle(ctx context.Context) error {
+func (m *Stream) settle(ctx context.Context) error {
 	for {
 		if err := m.wait(ctx); err != nil {
 			return err
@@ -414,7 +414,7 @@ func (m *Stream)settle(ctx context.Context) error {
 	}
 }
 
-func (m *Stream)feed(pcm []byte) {
+func (m *Stream) feed(pcm []byte) {
 	samples := make([]int16, len(pcm)/2)
 	for i := range samples {
 		samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*2:]))
@@ -423,7 +423,7 @@ func (m *Stream)feed(pcm []byte) {
 }
 
 // queue hands samples over, unless the speaker was taken away in the meantime.
-func (m *Stream)queue(samples []int16) {
+func (m *Stream) queue(samples []int16) {
 	m.write.Lock()
 	defer m.write.Unlock()
 

@@ -1,4 +1,4 @@
-package alog
+package logd
 
 import (
 	"bytes"
@@ -13,14 +13,17 @@ func TestPriorityMapsLevels(t *testing.T) {
 		level slog.Level
 		want  byte
 	}{
-		{slog.LevelDebug, Debug},
-		{slog.LevelInfo, Info},
-		{slog.LevelWarn, Warn},
-		{slog.LevelError, Error},
+		{slog.LevelDebug, 3},
+		{slog.LevelInfo, 4},
+		{slog.LevelWarn, 5},
+		{slog.LevelError, 6},
 	}
 	for _, c := range cases {
-		if got := priority(c.level); got != c.want {
-			t.Errorf("priority(%v) = %d, want %d", c.level, got, c.want)
+		if got := Priority(c.level); got != c.want {
+			t.Errorf("Priority(%v) = %d, want %d", c.level, got, c.want)
+		}
+		if got := Level(c.want); got != c.level {
+			t.Errorf("Level(%d) = %v, want %v", c.want, got, c.level)
 		}
 	}
 }

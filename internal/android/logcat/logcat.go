@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ygelfand/echolocal/internal/alog"
+	"github.com/ygelfand/echolocal/internal/android/logd"
 )
 
 const socket = "/dev/socket/logdr"
@@ -93,19 +93,5 @@ func parse(pkt []byte) (Entry, bool) {
 		return Entry{}, false
 	}
 
-	return Entry{Level: severity(body[0]), Tag: parts[0], Text: parts[1]}, true
-}
-
-// severity maps Android's priorities onto slog's, so what was an error there reads as one here.
-// Anything above Error is Android's fatal, which is still an error.
-func severity(priority byte) slog.Level {
-	switch {
-	case priority >= alog.Error:
-		return slog.LevelError
-	case priority == alog.Warn:
-		return slog.LevelWarn
-	case priority == alog.Info:
-		return slog.LevelInfo
-	}
-	return slog.LevelDebug
+	return Entry{Level: logd.Level(body[0]), Tag: parts[0], Text: parts[1]}, true
 }

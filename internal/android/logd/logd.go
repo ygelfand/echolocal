@@ -1,27 +1,30 @@
-package alog
+// Package logd writes echod's log to Android's log daemon, which is where `adb logcat` reads it.
+//
+// Lines are stamped with the uptime rather than the wall clock, because the clock is wrong until
+// something sets it and a device that has just booted may never have been told.
+package logd
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ygelfand/echolocal/internal/hardware/metrics"
 )
 
-// streamDepth is how much a reader may fall behind before it starts losing the oldest lines. logd
-// still has every one of them.
+// streamDepth is how far a reader of Lines may fall behind before it starts losing the oldest. The
+// daemon still has every one of them.
 const streamDepth = 256
 
-// Handler writes slog records to logd, and to a fallback writer so a run from an adb shell shows
-// output too. Lines carry the uptime, because what matters about echod's log is when something
-// happened relative to boot.
+// Handler writes slog records to the daemon, and to a fallback writer so running echod by hand from
+// an adb shell still prints something.
 type Handler struct {
-	l        *Logger
+	conn     *conn
 	fallback io.Writer
 	attrs    []slog.Attr
 	group    string
@@ -47,8 +50,8 @@ type stream struct {
 // on whatever goroutine had something to say, including the one feeding audio.
 var out = stream{lines: make(chan Line, streamDepth)}
 
-// Lines is the log from now on, for anything that wants to carry it somewhere else. Nobody reading
-// costs one buffer and then nothing.
+// Lines is the log from now on, for anything that wants to carry it somewhere else — the API sends
+// it to Home Assistant. With nobody reading it costs one buffer and then nothing.
 func Lines() <-chan Line { return out.lines }
 
 // publish makes room by throwing away the oldest line rather than the newest: a live log is worth
@@ -76,25 +79,25 @@ func (s *stream) publish(l Line) {
 	}
 }
 
-// NewHandler connects to logd. It never fails: without logd the handler writes to fallback only,
-// since echod must not die for want of logging.
+// NewHandler never fails: with no daemon it writes to fallback only, since echod must not die for
+// want of logging.
 func NewHandler(tag string, fallback io.Writer) *Handler {
 	h := &Handler{fallback: fallback, mu: &sync.Mutex{}}
 
-	l, err := New(tag)
+	c, err := dial(tag)
 	if err != nil {
 		fmt.Fprintf(fallback, "logcat unavailable: %v\n", err)
 		return h
 	}
-	h.l = l
+	h.conn = c
 	return h
 }
 
 func (h *Handler) Close() error {
-	if h.l == nil {
+	if h.conn == nil {
 		return nil
 	}
-	return h.l.Close()
+	return h.conn.Close()
 }
 
 func (h *Handler) Enabled(_ context.Context, level slog.Level) bool {
@@ -115,7 +118,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 
 func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[%8.2f] %s", Uptime(), r.Message)
+	fmt.Fprintf(&b, "[%8.2f] %s", metrics.Uptime(), r.Message)
 
 	for _, a := range h.attrs {
 		appendAttr(&b, h.group, a)
@@ -133,12 +136,12 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	defer h.mu.Unlock()
 
 	if h.fallback != nil {
-		fmt.Fprintf(h.fallback, "%s %s\n", level(r.Level), line)
+		fmt.Fprintf(h.fallback, "%s %s\n", Letter(r.Level), line)
 	}
-	if h.l == nil {
+	if h.conn == nil {
 		return nil
 	}
-	return h.l.Write(priority(r.Level), line)
+	return h.conn.write(Priority(r.Level), line)
 }
 
 func appendAttr(b *strings.Builder, group string, a slog.Attr) {
@@ -163,54 +166,4 @@ func value(v slog.Value) string {
 		return strconv.Quote(s)
 	}
 	return s
-}
-
-// priority maps slog levels onto Android's, so errors show as E in logcat rather than I.
-func priority(l slog.Level) byte {
-	switch {
-	case l >= slog.LevelError:
-		return Error
-	case l >= slog.LevelWarn:
-		return Warn
-	case l >= slog.LevelInfo:
-		return Info
-	default:
-		return Debug
-	}
-}
-
-func level(l slog.Level) string {
-	switch {
-	case l >= slog.LevelError:
-		return "E"
-	case l >= slog.LevelWarn:
-		return "W"
-	case l >= slog.LevelInfo:
-		return "I"
-	default:
-		return "D"
-	}
-}
-
-// Safely runs f, turning a panic into a log line rather than a dead process. Every goroutine needs
-// its own: a panic in one cannot be recovered anywhere else, and init discards our stderr, so an
-// uncaught one looks like a silent restart.
-func Safely(what string, f func()) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("recovered from a panic", "in", what, "panic", r, "stack", string(debug.Stack()))
-		}
-	}()
-	f()
-}
-
-// Uptime is seconds since boot.
-func Uptime() float64 {
-	b, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return 0
-	}
-	first, _, _ := strings.Cut(string(b), " ")
-	v, _ := strconv.ParseFloat(first, 64)
-	return v
 }

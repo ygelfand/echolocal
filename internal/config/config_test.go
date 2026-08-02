@@ -199,7 +199,7 @@ func TestStartupOptionsAreNotPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	st.started(Device{Name: "kitchen", Version: "1.2.3", Addr: ":6053"})
+	st.started(Device{Name: "kitchen", Addr: ":6053"})
 
 	if got := st.Get().Device.Name; got != "kitchen" {
 		t.Errorf("name = %q", got)

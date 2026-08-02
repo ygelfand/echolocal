@@ -14,11 +14,12 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/feedback"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
+	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 	"github.com/ygelfand/echolocal/internal/update"
 )
 
@@ -40,9 +41,6 @@ type Firmware struct {
 	status  *esphome.TextSensor
 	events  *esphome.Event
 
-	// running is what this build is, which never changes while it is the one running.
-	running string
-
 	mu    sync.Mutex
 	found update.Manifest
 }
@@ -58,7 +56,7 @@ func Get() *Firmware {
 }
 
 func build() *Firmware {
-	u := &Firmware{running: config.Get().Device.Version}
+	u := &Firmware{}
 
 	u.entity = &esphome.Update{
 		Base: esphome.Base{
@@ -69,7 +67,9 @@ func build() *Firmware {
 		DeviceClass: "firmware",
 		OnCommand:   u.command,
 	}
-	u.publish(update.Manifest{Version: u.running})
+
+	// Up to date until a check says otherwise, rather than an entity with no versions in it.
+	u.publish(update.Manifest{Version: layout.Version})
 
 	u.channel = &esphome.Select{
 		Base: esphome.Base{
@@ -96,7 +96,7 @@ func build() *Firmware {
 			Icon:     "mdi:cloud-search",
 			Category: esphome.CategoryDiagnostic,
 		},
-		OnPress: func() { go alog.Safely("update check", func() { u.Check(context.Background()) }) },
+		OnPress: func() { safe.Go("update check", func() { u.Check(context.Background()) }) },
 	}
 
 	u.status = &esphome.TextSensor{
@@ -166,7 +166,7 @@ func (u *Firmware) Check(ctx context.Context) {
 	u.found = found
 	u.mu.Unlock()
 
-	slog.Info("update check", "channel", channel.Label(), "running", u.running, "offered", found.Version)
+	slog.Info("update check", "channel", channel.Label(), "running", layout.Version, "offered", found.Version)
 	u.publish(found)
 }
 
@@ -175,10 +175,10 @@ func (u *Firmware) Check(ctx context.Context) {
 func (u *Firmware) command(cmd esphome.UpdateCommand) {
 	switch cmd {
 	case esphome.UpdateCheck:
-		go alog.Safely("update check", func() { u.Check(context.Background()) })
+		safe.Go("update check", func() { u.Check(context.Background()) })
 
 	case esphome.UpdateInstall:
-		go alog.Safely("update install", func() { u.Install(context.Background()) })
+		safe.Go("update install", func() { u.Install(context.Background()) })
 	}
 }
 
@@ -193,8 +193,8 @@ func (u *Firmware) Install(ctx context.Context) {
 	found := u.found
 	u.mu.Unlock()
 
-	if found.Version == "" || found.Version == u.running {
-		slog.Warn("an install was asked for with nothing to install", "running", u.running)
+	if found.Version == "" || found.Version == layout.Version {
+		slog.Warn("an install was asked for with nothing to install", "running", layout.Version)
 		return
 	}
 
@@ -236,7 +236,7 @@ func (u *Firmware) publish(found update.Manifest) { u.entity.Set(u.state(found))
 // The channel is the device's, not the release's, so it is not something a manifest could say.
 func (u *Firmware) state(found update.Manifest) esphome.UpdateState {
 	return esphome.UpdateState{
-		CurrentVersion: u.running,
+		CurrentVersion: layout.Version,
 		LatestVersion:  found.Version,
 		Title:          "EchoLocal (" + u.Channel().Label() + " channel)",
 		ReleaseSummary: found.Notes,

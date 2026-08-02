@@ -16,12 +16,12 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
 	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 func init() {
@@ -77,7 +77,7 @@ func (a *API) Start(context.Context) error {
 			MACAddress:        mac,
 			Manufacturer:      layout.Manufacturer,
 			Model:             layout.Model,
-			Version:           device.Version,
+			Version:           layout.Version,
 			VoiceFeatures:     voice.Features,
 			BluetoothFeatures: bluetooth.Get().Features(),
 		},
@@ -96,7 +96,7 @@ func (a *API) Start(context.Context) error {
 // Run listens until ctx is cancelled, advertising over mDNS so Home Assistant finds the device
 // without being told an address.
 func (a *API) Run(ctx context.Context) error {
-	go alog.Safely("logs", func() { a.pipeLogs(ctx) })
+	safe.Go("logs", func() { a.pipeLogs(ctx) })
 
 	for {
 		ln, err := net.Listen("tcp", a.srv.Addr)
@@ -105,7 +105,7 @@ func (a *API) Run(ctx context.Context) error {
 		}
 
 		a.announced.Do(func() {
-			go alog.Safely("mdns", func() { a.advertise(ctx, ln.Addr().(*net.TCPAddr).Port) })
+			safe.Go("mdns", func() { a.advertise(ctx, ln.Addr().(*net.TCPAddr).Port) })
 		})
 
 		serving, stop := context.WithCancel(ctx)

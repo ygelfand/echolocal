@@ -14,10 +14,10 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 	"github.com/ygelfand/go-esphome-device/api"
 
-	"github.com/ygelfand/echolocal/internal/alog"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/ble"
+	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
 func init() {
@@ -102,8 +102,8 @@ func build() *Proxy {
 		component.Reconnect.Emit(struct{}{})
 	}
 
-	go alog.Safely("ble radio", b.settle)
-	go alog.Safely("ble reports", b.deliver)
+	safe.Go("ble radio", b.settle)
+	safe.Go("ble reports", b.deliver)
 	return b
 }
 

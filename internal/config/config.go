@@ -45,10 +45,12 @@ func Defaults() Config {
 
 // Device is what echod was told at start-up rather than what anyone chose. It is read like
 // everything else, and not written to the file: the next process is told again.
+//
+// Nothing here is readable until boot has called Started, so a component built during init must not
+// reach for it.
 type Device struct {
-	Name    string
-	Version string
-	Addr    string
+	Name string
+	Addr string
 }
 
 // Writer is what Set hands back: one method per part of the device, each with its own settings.

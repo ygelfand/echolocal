@@ -9,12 +9,8 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
 
-var (
-	Version   = "dev"
-	GitCommit = "unknown"
-	BuildDate = "unknown"
+	"github.com/ygelfand/echolocal/internal/layout"
 )
 
 var cfgFile string
@@ -26,7 +22,7 @@ func newRoot() *cobra.Command {
 		Long: "echoctl installs and manages EchoLocal on an Echo Dot, and provides host-side\n" +
 			"tools for working with captures taken from one.",
 		SilenceUsage: true,
-		Version:      fmt.Sprintf("%s (%s, %s)", Version, GitCommit, BuildDate),
+		Version:      layout.VersionString(),
 	}
 
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default $HOME/.echolocal.yaml)")
