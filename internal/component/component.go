@@ -89,12 +89,6 @@ type Restorer interface {
 	Restore(config.Config)
 }
 
-// Sampler publishes whatever drifts on its own. The heartbeat calls these, so they share one
-// timestamp rather than each keeping a timer.
-type Sampler interface {
-	Sample()
-}
-
 // Reconnect asks whatever is serving to drop its clients and serve again, which is the only way a
 // change to what the device says it is reaches Home Assistant: device info is read once per
 // connection and never pushed.

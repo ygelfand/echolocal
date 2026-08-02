@@ -30,6 +30,7 @@ type Config struct {
 	Ring       Ring       `json:"ring"`
 	Update     Update     `json:"update"`
 	Bluetooth  Bluetooth  `json:"bluetooth"`
+	Diag       Diag       `json:"diag"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -40,6 +41,7 @@ func Defaults() Config {
 		Ring:       defaultRing(),
 		Update:     defaultUpdate(),
 		Bluetooth:  defaultBluetooth(),
+		Diag:       defaultDiag(),
 	}
 }
 
@@ -64,6 +66,7 @@ func (w Writer) Microphone() MicrophoneWriter { return MicrophoneWriter(w) }
 func (w Writer) Ring() RingWriter             { return RingWriter(w) }
 func (w Writer) Update() UpdateWriter         { return UpdateWriter(w) }
 func (w Writer) Bluetooth() BluetoothWriter   { return BluetoothWriter(w) }
+func (w Writer) Diag() DiagWriter             { return DiagWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.
 func (w Writer) Wake(slot int) WakeWriter { return WakeWriter{st: w.st, slot: slot} }

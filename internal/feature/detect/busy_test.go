@@ -1,4 +1,4 @@
-package boot
+package detect
 
 import (
 	"testing"

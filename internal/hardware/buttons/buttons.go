@@ -12,9 +12,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/lib/hook"
 	"github.com/ygelfand/echolocal/internal/lib/input"
+	"github.com/ygelfand/echolocal/internal/service"
 )
+
+func init() {
+	// Early: the buttons should work whatever else is wrong, so they must not be downstream of a
+	// network listener or lost to one read error.
+	component.Register(component.Hardware, Get(), component.Order(10),
+		component.Supervise(service.Restart(time.Second, 30*time.Second)))
+}
 
 // Name is which button. The evdev codes are the device's own.
 type Name string

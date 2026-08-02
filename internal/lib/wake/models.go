@@ -19,6 +19,20 @@ import (
 const DefaultModel = "okay_nabu"
 
 // Model is an installed wake word: the file to run and what to call it in Home Assistant.
+// Defaults for a model that arrives without a manifest, which most do.
+const (
+	WindowSize  = 5
+	FeatureStep = 10
+)
+
+// Kind is which engine runs a wake word.
+type Kind string
+
+const (
+	KindOpenWakeWord  Kind = "openwakeword"
+	KindMicroWakeWord Kind = "microwakeword"
+)
+
 type Model struct {
 	// ID is the file's base name. Home Assistant selects by it.
 	ID string

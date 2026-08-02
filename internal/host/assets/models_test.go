@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/ygelfand/echolocal/internal/host/assets"
-	"github.com/ygelfand/echolocal/internal/wake"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // The three the reference satellite ships. A device with none of them cannot offer a wake word until

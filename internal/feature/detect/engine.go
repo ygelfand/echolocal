@@ -1,5 +1,9 @@
-// Package wake runs wake word detection over the microphone frames.
-package wake
+// Package detect listens for wake words in the microphone frames.
+//
+// The engine is the loop; around it sits what the user chose, which the engine does not know: which
+// words go in which slot, how sensitive each one is, and what to tell Home Assistant about the ones
+// that would not load.
+package detect
 
 import (
 	"context"
@@ -12,12 +16,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
-)
-
-// Defaults for a model that arrives without a manifest, which most do.
-const (
-	WindowSize  = 5
-	FeatureStep = 10
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // Hold is how long scoring continues after a detection fires, to record the peak the utterance
@@ -34,7 +33,7 @@ const Refractory = 800 * time.Millisecond
 // through the low scores on its way to a real detection, so reporting as soon as the threshold is
 // crossed reports successes, not failures.
 const (
-	NearMiss       = 0.4
+	NearMiss       = 0.2
 	NearMissSettle = 700 * time.Millisecond
 )
 
@@ -51,7 +50,7 @@ type Engine struct {
 	// backends is one engine per kind of model in use, built when a slot first wants it and dropped
 	// when the last slot using it goes. Both can be up at once, a slot each, and each costs a front
 	// end per frame — so which are running follows what is loaded rather than a setting.
-	backends map[Kind]backend
+	backends map[wake.Kind]backend
 	slots    []slot
 
 	// Threshold is asked for every score, so a change in Home Assistant takes effect at once. It is
@@ -76,7 +75,7 @@ type Engine struct {
 // slot is one wake word and how its scores are being read. The tracking is per slot: two wake words
 // listening to the same audio peak at different moments, and one firing must not silence the other.
 type slot struct {
-	model  Model
+	model  wake.Model
 	loaded bool
 
 	// scored is whether this slot has seen a score yet, which is what makes it able to detect anything.
@@ -97,7 +96,7 @@ type slot struct {
 
 // New describes an engine. Nothing is built until Start.
 func New(slots int, source *mic.Source) *Engine {
-	return &Engine{backends: map[Kind]backend{}, slots: make([]slot, slots), source: source}
+	return &Engine{backends: map[wake.Kind]backend{}, slots: make([]slot, slots), source: source}
 }
 
 func (e *Engine) Name() string { return "wake" }
@@ -139,7 +138,7 @@ func (e *Engine) reset() {
 var build = newBackend
 
 // engineFor is the backend that runs a kind of model, built the first time one is wanted.
-func (e *Engine) engineFor(k Kind) (backend, error) {
+func (e *Engine) engineFor(k wake.Kind) (backend, error) {
 	if b, ok := e.backends[k]; ok {
 		return b, nil
 	}
@@ -152,7 +151,7 @@ func (e *Engine) engineFor(k Kind) (backend, error) {
 }
 
 // Use loads a wake word into a slot, in whichever engine runs that model.
-func (e *Engine) Use(n int, m Model) error {
+func (e *Engine) Use(n int, m wake.Model) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -230,7 +229,7 @@ func (e *Engine) uses(id string) bool {
 }
 
 // runs reports whether a slot needs an engine. Held with mu.
-func (e *Engine) runs(k Kind) bool {
+func (e *Engine) runs(k wake.Kind) bool {
 	for _, s := range e.slots {
 		if s.loaded && s.model.Kind == k {
 			return true
@@ -240,12 +239,12 @@ func (e *Engine) runs(k Kind) bool {
 }
 
 // Loaded reports the wake word in a slot, and whether the slot is on.
-func (e *Engine) Loaded(n int) (Model, bool) {
+func (e *Engine) Loaded(n int) (wake.Model, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if n < 0 || n >= len(e.slots) {
-		return Model{}, false
+		return wake.Model{}, false
 	}
 	return e.slots[n].model, e.slots[n].loaded
 }
@@ -307,7 +306,7 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 	// Only what came back fresh is kept, so a slot whose engine has not scored this frame finds
 	// nothing rather than reading a stale number. openWakeWord scores every 80 ms, so for it most
 	// frames only advance the front end.
-	heard := make(map[Kind]map[string]float64, len(e.backends))
+	heard := make(map[wake.Kind]map[string]float64, len(e.backends))
 	for k, b := range e.backends {
 		if scores, fresh := b.feed(frame); fresh {
 			heard[k] = scores

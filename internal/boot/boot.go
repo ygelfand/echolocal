@@ -12,21 +12,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ygelfand/echolocal/internal/android/dns"
 	"github.com/ygelfand/echolocal/internal/android/prop"
-	"github.com/ygelfand/echolocal/internal/android/setup"
 	"github.com/ygelfand/echolocal/internal/component"
 	_ "github.com/ygelfand/echolocal/internal/component/all"
 	"github.com/ygelfand/echolocal/internal/config"
-	"github.com/ygelfand/echolocal/internal/feature/firmware"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
-	"github.com/ygelfand/echolocal/internal/hardware/buttons"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 	"github.com/ygelfand/echolocal/internal/hardware/metrics"
-	"github.com/ygelfand/echolocal/internal/hardware/mic"
-	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
-	"github.com/ygelfand/echolocal/internal/lib/safe"
 	"github.com/ygelfand/echolocal/internal/service"
 	"github.com/ygelfand/echolocal/internal/update"
 )
@@ -42,11 +35,9 @@ func Run(ctx context.Context) error {
 	_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", metrics.Uptime()))
 	_ = prop.Set(layout.StateProp, "starting")
 
-	procs()
-	dns.Use()
-
 	// What this process was told, put where everything else reads its settings from, so nothing has to
-	// be handed a struct to find out what the device is called or where it listens.
+	// be handed a struct to find out what the device is called or where it listens. Before anything
+	// else: the components were built during init and read this the moment they are asked to restore.
 	config.Started(config.Device{
 		Name: name(),
 		Addr: listenAddr(),
@@ -55,14 +46,10 @@ func Run(ctx context.Context) error {
 		slog.Error("reading the saved config failed, continuing with defaults", "err", err)
 	}
 
-	setup.Apply()
-	safe.Go("late setup", func() { setup.ApplyLate(ctx) })
-
 	// Before any hardware: an update that was installed and never settled either gets its turn here or
 	// sends the device round for another boot, where something outside this binary can put the old one
-	// back. A rollback that already happened is read for the same reason — nobody watches logcat.
-	onTrial, rebooting := update.Start()
-	update.RolledBack()
+	// back.
+	_, rebooting := update.Start()
 	if rebooting {
 		slog.Warn("waiting for the reboot rather than taking the hardware")
 		return nil
@@ -72,75 +59,21 @@ func Run(ctx context.Context) error {
 	// than only by an install. Writes nothing when nothing differs.
 	update.Ensure()
 
-	// restarting is the reason echod is going away, and empty means it is not. It decides what the ring
-	// is left showing: nothing, or a colour saying the device is coming back.
+	// restarting is the reason echod is going away, and empty means it is not.
 	var restarting string
 
-	leds := led.Get()
-	ring := leds.Ring()
-	defer func() {
-		if restarting != "" {
-			// Deliberately left lit. Nothing is running to animate anything once this returns, and a
-			// still frame is held by the hardware, so the device says what it is doing for the whole
-			// gap rather than looking dead.
-			if err := ring.SetSegments(led.Solid(led.UpdateColor)); err != nil {
-				slog.Error("holding the ring failed", "err", err)
-			}
-			return
-		}
-		if err := ring.Off(); err != nil {
-			slog.Error("blanking the ring failed", "err", err)
-		}
-	}()
-
-	group := service.New()
-	group.Add(leds, forever())
-
 	// The boot animation runs until Home Assistant has a pipeline listening, which is the point the
-	// device can actually answer.
-	startSplash(ctx, leds, voice.Get().Ready)
+	// device can actually answer. It only takes a claim, so it can be asked for before the ring is up.
+	startSplash(ctx, led.Get(), voice.Get().Ready)
 
-	// The audio devices are held for the life of the process: whatever is free, Android takes. The
-	// handles are made here and the services take the hardware, so a device lost to Android can be
-	// taken back on a restart without everything holding a handle being rebuilt.
-	//
-	// The speaker also feeds silence while idle, because the amplifier hisses when nothing drives the
-	// DAC and toggling it pops.
-	spk := speaker.Get()
-	group.Add(spk, forever())
-
-	source := mic.Get()
-	group.Add(source, forever())
-
-	// Buttons should work whatever else is wrong, so they must not be downstream of a network listener
-	// or lost to one read error. What each one does is its own feature's listener.
-	group.Add(buttons.Get(), forever())
-
-	// Detection comes up before the API, so Home Assistant cannot read the wake words while they are
-	// still loading and be told about one that then fails.
-	addWake(group, source, leds)
-
-	// Everything the device remembers, put back in the order the components registered and before the
-	// API is listening: how the device behaves is not Home Assistant's business. Silent — restoring is
-	// not an event, so nothing chimes and nothing reaches the logbook.
+	// Everything the device remembers, put back in the order the components registered and before
+	// anything is listening: how the device behaves is not Home Assistant's business. Silent —
+	// restoring is not an event, so nothing chimes and nothing reaches the logbook.
 	component.Default().Restore(config.Get())
 	slog.Info("state restored")
 
-	// Everything that registered itself, now that the hardware it stands on is off Android.
+	group := service.New()
 	component.Default().AddTo(group)
-
-	// The heartbeat samples what drifts. Every component that has something to publish answers here,
-	// so they share one timestamp instead of each keeping its own timer.
-	beat := heartbeat{sample: component.Default().Sample}
-
-	// An update is kept once this process has reached a beat.
-	if onTrial {
-		beat.settled = func() {
-			update.Commit()
-			firmware.Get().Settled(firmware.EventInstalled, "installed "+layout.Version)
-		}
-	}
-	group.Add(beat)
 
 	slog.Info("resident")
 	_ = prop.Set(layout.StateProp, "resident")
@@ -171,6 +104,10 @@ func run(ctx context.Context, group *service.Group, restarting *string) error {
 	case why := <-update.Wanted():
 		*restarting = why
 		slog.Info("restarting", "why", why)
+
+		// Something is coming back, so the ring says so rather than going dark for the gap.
+		led.Get().HoldOnStop(led.UpdateColor)
+
 		stop()
 		return <-done
 	}

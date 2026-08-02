@@ -1,4 +1,4 @@
-package boot
+package setup
 
 import (
 	"log/slog"
@@ -8,14 +8,21 @@ import (
 	"strings"
 )
 
-func procs() {
+// procs tells the Go runtime how many processors there really are. The kernel hotplugs them, so the
+// number online when the runtime started is whatever the governor happened to be running, and
+// GOMAXPROCS is only read once.
+func procs() error {
 	have := present()
 	if have <= runtime.GOMAXPROCS(0) {
-		return
+		return nil
 	}
-	slog.Info("processors", "was", runtime.GOMAXPROCS(have), "now", have, "online", runtime.NumCPU())
+
+	was := runtime.GOMAXPROCS(have)
+	slog.Info("processors", "was", was, "now", have, "online", runtime.NumCPU())
+	return nil
 }
 
+// present counts what /sys says exists, online or not. The format is a list of numbers and ranges.
 func present() int {
 	data, err := os.ReadFile("/sys/devices/system/cpu/present")
 	if err != nil {

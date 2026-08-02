@@ -15,7 +15,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/android/dns"
 	"github.com/ygelfand/echolocal/internal/android/prop"
+	"github.com/ygelfand/echolocal/internal/component"
 )
 
 // pinControl dumps and drives every pin on the SoC. It is how the vendor audio HAL reaches the
@@ -68,6 +70,18 @@ var Actions = []Action{
 		// cannot be set once at install and has to be set again on every boot.
 		Do: func() error { return prop.Set("log.tag.AmazonUsageStatsService", "S") },
 	},
+	{
+		Name:   "size the runtime to the cores that are present",
+		Reason: "the kernel hotplugs them, so Go sees however many were online when it started",
+		// GOMAXPROCS is read once at start-up. Pinning cores against the governor is the answer we
+		// rejected; counting them and telling the runtime is the one that works.
+		Do: procs,
+	},
+	{
+		Name:   "point the resolver at the nameservers the platform knows",
+		Reason: "there is no /etc/resolv.conf, so Go's resolver has nowhere to look",
+		Do:     func() error { dns.Use(); return nil },
+	},
 }
 
 // Late is applied once Android reports the boot finished, for the services init starts from that
@@ -87,6 +101,27 @@ const (
 // Apply runs every action, reporting what failed. A failure is logged and passed over: none of this
 // is worth refusing to start over.
 func Apply() { apply("boot setup", Actions) }
+
+// Setup is the platform prep as a component, so it takes its turn in the same ordered list as
+// everything else. First: what follows expects the resolver to work and the runtime to be the right
+// size, and the vendor services it stops are the ones that fight over the hardware.
+type Setup struct{}
+
+func init() { component.Register(component.Hardware, Setup{}, component.Order(1)) }
+
+func (Setup) Name() string { return "platform setup" }
+
+func (Setup) Start(context.Context) error {
+	Apply()
+	return nil
+}
+
+// Run finishes the job once Android says the boot completed, then returns. The stops that wait for
+// that are undone by the start that would otherwise follow them.
+func (Setup) Run(ctx context.Context) error {
+	ApplyLate(ctx)
+	return nil
+}
 
 // ApplyLate waits for the boot to finish and then applies Late. It is meant to be run in its own
 // goroutine, and returns without applying anything if the boot never completes.

@@ -106,15 +106,6 @@ func (r *Registry) Restore(c config.Config) {
 	}
 }
 
-// Sample publishes what drifts. Called from the heartbeat.
-func (r *Registry) Sample() {
-	for _, e := range r.sorted() {
-		if v, ok := e.c.(Sampler); ok {
-			v.Sample()
-		}
-	}
-}
-
 func (r *Registry) Group() *service.Group {
 	g := service.New()
 	r.AddTo(g)

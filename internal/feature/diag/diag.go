@@ -3,6 +3,7 @@
 package diag
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"sync"
@@ -18,7 +19,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/hardware/metrics"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
-	"github.com/ygelfand/echolocal/internal/wake"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 func init() {
@@ -57,6 +58,13 @@ type Diag struct {
 	txRate *esphome.Sensor
 	ads    *esphome.Sensor
 
+	interval *esphome.Number
+
+	// wake restarts the collector's wait when the interval changes, so a shorter one takes effect now
+	// rather than after the wait already running. Buffered: a change while nothing is waiting is not
+	// worth blocking on.
+	wake chan struct{}
+
 	last struct {
 		at       time.Time
 		rx, tx   float64
@@ -72,12 +80,13 @@ var (
 
 func Get() *Diag {
 	once.Do(func() {
-		shared = &Diag{}
+		shared = &Diag{wake: make(chan struct{}, 1)}
 		shared.storage()
 		shared.hardware()
 		shared.radio()
 		shared.remote()
 		shared.playback()
+		shared.collector()
 	})
 	return shared
 }
@@ -89,7 +98,55 @@ func (d *Diag) Entities() []esphome.Entity {
 		d.cached, d.free, d.purge,
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory,
 		d.adb, d.ip, d.signal, d.rxRate, d.txRate, d.ads,
-		d.testPlayback,
+		d.testPlayback, d.interval,
+	}
+}
+
+// collector builds the one setting these readings have: how often to take them.
+func (d *Diag) collector() {
+	d.interval = &esphome.Number{
+		Base: esphome.Base{
+			ObjectID: "metrics_interval",
+			Name:     "Metrics interval",
+			Icon:     "mdi:timer-sync",
+			Category: esphome.CategoryConfig,
+		},
+		Min: 10, Max: 3600, Step: 10, Unit: "s",
+		Mode: esphome.NumberBox,
+	}
+
+	d.interval.OnCommand = func(v float32) {
+		d.interval.Set(v)
+		if err := config.Set().Diag().Interval(int(v)); err != nil {
+			slog.Error("saving the metrics interval failed", "err", err)
+		}
+
+		// The wait already running was measured against the old interval.
+		select {
+		case d.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// Run collects the readings that drift, once at the start and then on the interval.
+//
+// Immediately, not after the first wait: the readings go into entities that hold their last value
+// until Home Assistant asks, so a device that waited would report nothing at all until then — and a
+// restart is exactly when somebody is looking.
+func (d *Diag) Run(ctx context.Context) error {
+	for {
+		d.Sample()
+
+		t := time.NewTimer(time.Duration(config.Get().Diag.Interval) * time.Second)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil
+		case <-d.wake:
+			t.Stop()
+		case <-t.C:
+		}
 	}
 }
 
@@ -322,10 +379,15 @@ func (d *Diag) Measure() {
 
 // Restore is the disk as it stands at start-up, which the slots decide: a model no slot wants is
 // cache. It runs with the rest so the numbers are there before Home Assistant asks.
-func (d *Diag) Restore(config.Config) { d.Measure() }
+func (d *Diag) Restore(c config.Config) {
+	d.Measure()
 
-// Sample publishes everything that drifts on its own: the disk, and what the board says about itself.
-// Called on the heartbeat, so these all come from the same moment and line up when something is wrong.
+	d.interval.Set(float32(c.Diag.Interval))
+	slog.Info("restored", "what", d.interval.ObjectID, "using", c.Diag.Interval)
+}
+
+// Sample takes every reading at once, so they come from the same moment and line up when something
+// is wrong.
 func (d *Diag) Sample() {
 	d.Measure()
 	d.board()

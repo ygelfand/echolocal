@@ -1,8 +1,10 @@
-package wake
+package detect
 
 import (
 	"testing"
 	"time"
+
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // fake is an engine that scores whatever is loaded into it, so the slot bookkeeping can be tested
@@ -13,7 +15,7 @@ type fake struct {
 	closed bool
 }
 
-func (f *fake) load(m Model) error {
+func (f *fake) load(m wake.Model) error {
 	f.loaded[m.ID] = 0
 	return nil
 }
@@ -28,12 +30,12 @@ func (f *fake) feed([]int16) (map[string]float64, bool) {
 func (f *fake) close() { f.closed = true }
 
 // fakes replaces the engine builder for one test and reports what it handed out.
-func fakes(t *testing.T) map[Kind]*fake {
+func fakes(t *testing.T) map[wake.Kind]*fake {
 	t.Helper()
 
-	made := map[Kind]*fake{}
+	made := map[wake.Kind]*fake{}
 	was := build
-	build = func(k Kind) (backend, error) {
+	build = func(k wake.Kind) (backend, error) {
 		f := &fake{loaded: map[string]float64{}}
 		made[k] = f
 		return f, nil
@@ -42,8 +44,8 @@ func fakes(t *testing.T) map[Kind]*fake {
 	return made
 }
 
-func model(id string, k Kind) Model {
-	return Model{ID: id, Phrase: id, Kind: k, Path: id + ".tflite"}
+func model(id string, k wake.Kind) wake.Model {
+	return wake.Model{ID: id, Phrase: id, Kind: k, Path: id + ".tflite"}
 }
 
 // Two wake words can be models of different kinds, and then both engines run and each slot is judged
@@ -55,10 +57,10 @@ func TestSlotsOfDifferentKindsBothRun(t *testing.T) {
 	fired := make(chan int, 2)
 	e.OnDetect = func(slot int) { fired <- slot }
 
-	if err := e.Use(0, model("glados", KindOpenWakeWord)); err != nil {
+	if err := e.Use(0, model("glados", wake.KindOpenWakeWord)); err != nil {
 		t.Fatalf("Use(0): %v", err)
 	}
-	if err := e.Use(1, model("hey_jarvis", KindMicroWakeWord)); err != nil {
+	if err := e.Use(1, model("hey_jarvis", wake.KindMicroWakeWord)); err != nil {
 		t.Fatalf("Use(1): %v", err)
 	}
 	if len(made) != 2 {
@@ -66,8 +68,8 @@ func TestSlotsOfDifferentKindsBothRun(t *testing.T) {
 	}
 
 	// Only the microWakeWord model is over the threshold, so only its slot fires.
-	made[KindOpenWakeWord].loaded["glados"] = 0.1
-	made[KindMicroWakeWord].loaded["hey_jarvis"] = 0.99
+	made[wake.KindOpenWakeWord].loaded["glados"] = 0.1
+	made[wake.KindMicroWakeWord].loaded["hey_jarvis"] = 0.99
 	e.score([]int16{0}, nil)
 
 	for k, f := range made {
@@ -96,18 +98,18 @@ func TestAnEngineGoesWithItsLastSlot(t *testing.T) {
 	made := fakes(t)
 	e := New(2, nil)
 
-	if err := e.Use(0, model("glados", KindOpenWakeWord)); err != nil {
+	if err := e.Use(0, model("glados", wake.KindOpenWakeWord)); err != nil {
 		t.Fatalf("Use(0): %v", err)
 	}
-	if err := e.Use(1, model("hey_jarvis", KindMicroWakeWord)); err != nil {
+	if err := e.Use(1, model("hey_jarvis", wake.KindMicroWakeWord)); err != nil {
 		t.Fatalf("Use(1): %v", err)
 	}
 
 	e.Clear(1)
-	if !made[KindMicroWakeWord].closed {
+	if !made[wake.KindMicroWakeWord].closed {
 		t.Error("microWakeWord stayed up with no slot using it")
 	}
-	if made[KindOpenWakeWord].closed {
+	if made[wake.KindOpenWakeWord].closed {
 		t.Error("openWakeWord went with the other engine's slot")
 	}
 	if len(e.backends) != 1 {
@@ -115,7 +117,7 @@ func TestAnEngineGoesWithItsLastSlot(t *testing.T) {
 	}
 
 	e.Clear(0)
-	if !made[KindOpenWakeWord].closed {
+	if !made[wake.KindOpenWakeWord].closed {
 		t.Error("openWakeWord stayed up with nothing loaded")
 	}
 	if len(e.backends) != 0 {
@@ -130,13 +132,13 @@ func TestOneModelInTwoSlots(t *testing.T) {
 	e := New(2, nil)
 
 	for slot := range 2 {
-		if err := e.Use(slot, model("glados", KindOpenWakeWord)); err != nil {
+		if err := e.Use(slot, model("glados", wake.KindOpenWakeWord)); err != nil {
 			t.Fatalf("Use(%d): %v", slot, err)
 		}
 	}
 
 	e.Clear(0)
-	f := made[KindOpenWakeWord]
+	f := made[wake.KindOpenWakeWord]
 	if f.closed {
 		t.Error("the engine closed while a slot was still using it")
 	}
@@ -159,14 +161,14 @@ func TestSwappingWithinAKindKeepsTheEngine(t *testing.T) {
 	made := fakes(t)
 	e := New(1, nil)
 
-	if err := e.Use(0, model("glados", KindOpenWakeWord)); err != nil {
+	if err := e.Use(0, model("glados", wake.KindOpenWakeWord)); err != nil {
 		t.Fatalf("Use: %v", err)
 	}
-	if err := e.Use(0, model("wall-e", KindOpenWakeWord)); err != nil {
+	if err := e.Use(0, model("wall-e", wake.KindOpenWakeWord)); err != nil {
 		t.Fatalf("Use again: %v", err)
 	}
 
-	f := made[KindOpenWakeWord]
+	f := made[wake.KindOpenWakeWord]
 	if f.closed {
 		t.Fatal("the engine was closed under the model that replaced it")
 	}

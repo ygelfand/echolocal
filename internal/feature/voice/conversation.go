@@ -21,7 +21,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
-	"github.com/ygelfand/echolocal/internal/wake"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // errDuplicate is what Home Assistant reports to the devices that lost a race to answer: "Duplicate

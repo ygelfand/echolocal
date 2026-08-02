@@ -5,7 +5,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
-	"github.com/ygelfand/echolocal/internal/wake"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // Answer is what the device says when Home Assistant asks what it can hear. The question carries the

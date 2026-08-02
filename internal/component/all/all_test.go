@@ -43,6 +43,7 @@ var registered = []string{
 	"max_think_1",
 	"max_think_2",
 	"memory_available",
+	"metrics_interval",
 	"mic_mute",
 	"microphone_gain",
 	"microphone_leveling",

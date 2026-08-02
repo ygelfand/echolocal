@@ -9,7 +9,7 @@ import (
 	"github.com/zserge/microwakeword"
 
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
-	"github.com/ygelfand/echolocal/internal/wake"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // variant is one way of turning seven microphones into the single channel the model wants.

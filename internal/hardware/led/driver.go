@@ -6,6 +6,9 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/ygelfand/echolocal/internal/component"
+	"github.com/ygelfand/echolocal/internal/service"
 )
 
 // Priority is how the ring resolves being asked for two things at once. Higher wins, and when a
@@ -91,6 +94,10 @@ type Driver struct {
 	claims []*Claim
 	seq    uint64
 
+	// hold is what to leave the ring showing once the driver stops, dark unless something says
+	// otherwise. The hardware keeps the last frame with nothing driving it.
+	hold Color
+
 	// changed wakes the render loop. Buffered, so a change that lands between choosing what to
 	// render and starting to watch for changes is not lost.
 	changed chan struct{}
@@ -110,15 +117,19 @@ var (
 	shared *Driver
 )
 
+func init() {
+	// First of the hardware: the boot animation is the only thing the device can say before anything
+	// else works.
+	component.Register(component.Hardware, Get(), component.Order(5),
+		component.Supervise(service.Restart(time.Second, 30*time.Second)))
+}
+
 // Get is the ring. There is one, and everything that wants to show something takes a claim on it
 // rather than owning it.
 func Get() *Driver {
 	once.Do(func() { shared = NewDriver(New()) })
 	return shared
 }
-
-// Ring is the hardware underneath, for the tools that drive it directly.
-func (d *Driver) Ring() *Ring { return d.ring }
 
 // Start takes the ring off the kernel driver, which otherwise animates it and repaints over
 // everything written to it.
@@ -133,6 +144,26 @@ func (d *Driver) Start(context.Context) error {
 		slog.Error("setting led_current failed", "err", err)
 	}
 	return nil
+}
+
+// HoldOnStop is what the ring should be left showing once the driver stops, for a process that is
+// coming back: the hardware holds a still frame with nothing driving it, so the device can say why it
+// is not answering rather than going dark. Dark is the default, and the right answer for a stop that
+// nothing follows.
+func (d *Driver) HoldOnStop(c Color) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.hold = c
+}
+
+// Close leaves the ring as it should be found. Nothing renders after this: the loop has stopped, so
+// this writes the hardware directly.
+func (d *Driver) Close() error {
+	d.mu.Lock()
+	hold := d.hold
+	d.mu.Unlock()
+
+	return d.ring.SetSegments(Solid(hold))
 }
 
 // Busy is how anything says the device is working on something. Shared, so several things working at

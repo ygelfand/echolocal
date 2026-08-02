@@ -1,4 +1,4 @@
-package wake
+package detect
 
 import (
 	"fmt"
@@ -8,14 +8,7 @@ import (
 	"github.com/zserge/microwakeword"
 
 	"github.com/ygelfand/echolocal/internal/lib/oww"
-)
-
-// Kind is which engine runs a wake word.
-type Kind string
-
-const (
-	KindOpenWakeWord  Kind = "openwakeword"
-	KindMicroWakeWord Kind = "microwakeword"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // backend runs the wake words of one Kind. It is the whole engine rather than one detector because
@@ -27,7 +20,7 @@ const (
 // scored from a cold state.
 type backend interface {
 	// load makes a wake word scoreable, replacing one already loaded under the same id.
-	load(m Model) error
+	load(m wake.Model) error
 
 	// unload drops one.
 	unload(id string)
@@ -41,8 +34,8 @@ type backend interface {
 }
 
 // newBackend builds the engine for one of them.
-func newBackend(k Kind) (backend, error) {
-	if k == KindOpenWakeWord {
+func newBackend(k wake.Kind) (backend, error) {
+	if k == wake.KindOpenWakeWord {
 		front, err := oww.New()
 		if err != nil {
 			return nil, err
@@ -64,7 +57,7 @@ type microBackend struct {
 // detector to apply it would wipe the streaming state a model needs to score well.
 const neverFires = 1.1
 
-func (b *microBackend) load(m Model) error {
+func (b *microBackend) load(m wake.Model) error {
 	cfg := m.Config
 	cfg.ProbabilityCutoff = neverFires
 
@@ -98,7 +91,7 @@ type owwBackend struct {
 	scores map[string]float64
 }
 
-func (b *owwBackend) load(m Model) error {
+func (b *owwBackend) load(m wake.Model) error {
 	model, err := os.ReadFile(m.Path)
 	if err != nil {
 		return fmt.Errorf("wake: reading %s: %w", m.Path, err)

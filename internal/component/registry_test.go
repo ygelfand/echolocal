@@ -21,7 +21,6 @@ type full struct {
 	bare
 	entity   *esphome.Switch
 	restored int
-	sampled  int
 	ran      bool
 }
 
@@ -34,7 +33,6 @@ func newFull(name string) *full {
 
 func (f *full) Entities() []esphome.Entity { return []esphome.Entity{f.entity} }
 func (f *full) Restore(c config.Config)    { f.restored++ }
-func (f *full) Sample()                    { f.sampled++ }
 func (f *full) Run(context.Context) error  { f.ran = true; return nil }
 
 func names(cs []Component) []string {
@@ -134,14 +132,9 @@ func TestOptionalHalves(t *testing.T) {
 	}
 
 	r.Restore(config.Defaults())
-	r.Sample()
-	r.Sample()
 
 	if first.restored != 1 || second.restored != 1 {
 		t.Errorf("restored %d and %d times, want once each", first.restored, second.restored)
-	}
-	if first.sampled != 2 {
-		t.Errorf("sampled %d times, want 2", first.sampled)
 	}
 }
 
@@ -159,5 +152,4 @@ func TestEmptyRegistry(t *testing.T) {
 		t.Errorf("Handlers = %v", got)
 	}
 	r.Restore(config.Defaults())
-	r.Sample()
 }

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
-	"github.com/ygelfand/echolocal/internal/wake"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
 // What a device advertises as active when nothing has been chosen decides whether a fresh install can

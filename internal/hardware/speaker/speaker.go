@@ -11,10 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
 	"github.com/ygelfand/echolocal/internal/lib/hook"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
+	"github.com/ygelfand/echolocal/internal/service"
 )
 
 // The playback codec accepts one format only: 48 kHz, S16_LE, stereo.
@@ -89,6 +91,16 @@ var (
 	once   sync.Once
 	shared *Player
 )
+
+func init() {
+	// The audio devices are held for the life of the process: whatever is free, Android takes. Losing
+	// one to Android is what a restart takes back, which is why the handle outlives the service.
+	//
+	// The speaker also feeds silence while idle, because the amplifier hisses when nothing drives the
+	// DAC and toggling it pops.
+	component.Register(component.Hardware, Get(), component.Order(6),
+		component.Supervise(service.Restart(time.Second, 30*time.Second)))
+}
 
 // Get is the speaker. There is one, and everything audible goes through it.
 func Get() *Player {

@@ -9,10 +9,12 @@
 package all
 
 import (
+	_ "github.com/ygelfand/echolocal/internal/android/setup"
 	_ "github.com/ygelfand/echolocal/internal/feature/activity"
 	_ "github.com/ygelfand/echolocal/internal/feature/api"
 	_ "github.com/ygelfand/echolocal/internal/feature/bluetooth"
 	_ "github.com/ygelfand/echolocal/internal/feature/buttons"
+	_ "github.com/ygelfand/echolocal/internal/feature/detect"
 	_ "github.com/ygelfand/echolocal/internal/feature/diag"
 	_ "github.com/ygelfand/echolocal/internal/feature/feedback"
 	_ "github.com/ygelfand/echolocal/internal/feature/firmware"

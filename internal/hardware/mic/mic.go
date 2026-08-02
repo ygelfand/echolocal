@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/android/prop"
+	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
 	"github.com/ygelfand/echolocal/internal/lib/audio"
+	"github.com/ygelfand/echolocal/internal/service"
 )
 
 // The capture codec accepts one format only: 16 kHz, S24_3LE, 9 channels.
@@ -124,6 +126,13 @@ var (
 	once   sync.Once
 	shared *Source
 )
+
+func init() {
+	// After the speaker: both are held for the life of the process, and the playback path is the one
+	// the vendor's own services fight over.
+	component.Register(component.Hardware, Get(), component.Order(7),
+		component.Supervise(service.Restart(time.Second, 30*time.Second)))
+}
 
 // Get is the array. There is one, and everything that wants frames subscribes to it.
 func Get() *Source {

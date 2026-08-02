@@ -8,10 +8,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/layout"
 )
 
-// listenAddr is the port the installer opened in the firewall.
 func listenAddr() string { return fmt.Sprintf(":%d", layout.Port) }
 
-// name is what echoctl recorded at install, since Home Assistant keys the device on it.
 func name() string {
 	if b, err := os.ReadFile(layout.NamePath); err == nil {
 		if recorded := strings.TrimSpace(string(b)); recorded != "" {
