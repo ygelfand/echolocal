@@ -267,6 +267,10 @@ func (m *Stream) keep() {
 	defer m.write.Unlock()
 
 	kept := m.out.Take()
+	if len(kept) == 0 {
+		// Anything already stashed is still what has not been heard.
+		return
+	}
 
 	m.mu.Lock()
 	m.rewind = kept
