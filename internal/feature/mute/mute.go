@@ -72,6 +72,7 @@ func build() *Mute {
 		ring: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: "ring_muted",
+				DeviceID: component.DeviceRing,
 				Name:     "Ring while muted",
 				Icon:     "mdi:microphone-off",
 				Category: esphome.CategoryConfig,

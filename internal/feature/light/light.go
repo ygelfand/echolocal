@@ -52,7 +52,7 @@ func Get() *Light {
 func build() *Light {
 	l := &Light{
 		light: &esphome.Light{
-			Base:                esphome.Base{ObjectID: "ring", Name: "LED ring"},
+			Base:                esphome.Base{ObjectID: "ring", Name: "LED ring", DeviceID: component.DeviceRing},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
 
 			// None comes first, because an effect list with no way out of it is a light that can be
@@ -77,12 +77,13 @@ func build() *Light {
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("segment_%d", i+1),
 				Name:     fmt.Sprintf("LED ring segment %d", i+1),
+				DeviceID: component.DeviceRing,
 				// Twelve extra entities is a lot for anyone who just wants the ring.
 				DisabledByDefault: true,
 			},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
 		}
-		seg.OnCommand = func(s esphome.LightState) { l.applySegment(i, seg, s) }
+		seg.OnCommand = func(s esphome.LightState) { l.applySegment(seg, s) }
 		l.segs = append(l.segs, seg)
 	}
 	return l
@@ -137,7 +138,7 @@ func (l *Light) Restore(c config.Config) {
 func (l *Light) set(s esphome.LightState, save bool) {
 	s = usable(s)
 	l.light.Set(s)
-	l.show(s)
+	l.show()
 
 	for _, f := range l.followers {
 		f()
@@ -170,8 +171,14 @@ func (l *Light) save() {
 	}
 }
 
-// show puts the light's state on the base layer.
-func (l *Light) show(s esphome.LightState) {
+// show works out the whole appearance and puts it on the base layer. Everything that changes any part of
+// it comes through here, so the entities are the only state: the ring's, and each segment's.
+//
+// An effect owns all twelve segments — it is one animation across the ring, not twelve — so while one is
+// running the overrides are remembered and not shown. They appear when the effect is turned off.
+func (l *Light) show() {
+	s := l.light.Get()
+
 	if s.On && s.Effect != "" && s.Effect != component.EffectNone {
 		l.base.Play(s.Effect, colorOf(s))
 		return
@@ -183,7 +190,13 @@ func (l *Light) show(s esphome.LightState) {
 	}
 
 	l.mu.Lock()
-	for i := range l.frame {
+	for i, seg := range l.segs {
+		// A segment somebody set by hand keeps what it was given: asking for one red means it stays red
+		// when the rest is turned down. Off is how that is given up, which is why it is not black.
+		if o := seg.Get(); o.On {
+			l.frame[i] = colorOf(o)
+			continue
+		}
 		l.frame[i] = c
 	}
 	frame := slices.Clone(l.frame)
@@ -192,21 +205,10 @@ func (l *Light) show(s esphome.LightState) {
 	l.base.Paint(frame)
 }
 
-// applySegment paints one segment, leaving the others as they are.
-func (l *Light) applySegment(i int, seg *esphome.Light, s esphome.LightState) {
-	s = usable(s)
-	seg.Set(s)
-
-	l.mu.Lock()
-	if s.On {
-		l.frame[i] = colorOf(s)
-	} else {
-		l.frame[i] = led.Color{}
-	}
-	frame := slices.Clone(l.frame)
-	l.mu.Unlock()
-
-	l.base.Paint(frame)
+// applySegment takes one segment's override and shows the ring again with it.
+func (l *Light) applySegment(seg *esphome.Light, s esphome.LightState) {
+	seg.Set(usable(s))
+	l.show()
 }
 
 // offered keeps a saved effect name only if this build still has it. One that is gone otherwise

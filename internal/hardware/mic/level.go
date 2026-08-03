@@ -5,6 +5,8 @@ import (
 	"math"
 	"sync/atomic"
 	"time"
+
+	"github.com/ygelfand/echolocal/internal/config"
 )
 
 // Leveling the mix. Nothing upstream applies gain, so speech reaches recognition 20 dB or more
@@ -87,6 +89,14 @@ const (
 type leveler struct {
 	gain float32
 
+	// lit is whether the published level is high enough for something watching it to be drawing, kept so
+	// the crossing can be logged rather than every frame. Diagnostic for #100.
+	lit bool
+
+	// least is how low the floors may go, which follows the analog gain and so is set from outside the
+	// reader that uses it.
+	least atomic.Uint32
+
 	// floor is the quietest the room has been heard to be, which is what speech is judged against.
 	floor float32
 
@@ -127,7 +137,7 @@ func (l *leveler) publish() { l.published.Store(math.Float32bits(l.gain)) }
 func newLeveler() *leveler {
 	frame := float64(FrameSamples) / float64(Rate)
 
-	return &leveler{
+	l := &leveler{
 		gain:      float32(math.Pow(10, startGainDB/20)),
 		floor:     fullScale,
 		fall:      float32(1 - math.Exp(-frame/fallTime.Seconds())),
@@ -146,7 +156,13 @@ func newLeveler() *leveler {
 		lpA:       float32(1 - math.Exp(-2*math.Pi*levelHighHz/Rate)),
 		hpA:       float32(1 - math.Exp(-2*math.Pi*levelLowHz/Rate)),
 	}
+
+	l.atGain(config.Get().Microphone.Gain)
+	return l
 }
+
+// atGain tells the leveler what the analog gain is now, which is what decides how low its floors may go.
+func (l *leveler) atGain(db int) { l.least.Store(math.Float32bits(quietest(db))) }
 
 const fullScale = 32768
 
@@ -184,21 +200,45 @@ func (l *leveler) observe(frame []int16) (rms, peak float32) {
 
 	// Follow the room, quickly down and slowly up, never below one sample of quantisation. Both bands
 	// track their own, since a floor from the wrong band is not a floor.
-	l.floor = follow(l.floor, rms, l.floorDown, l.floorUp)
-	l.bandFloor = follow(l.bandFloor, l.bandRMS, l.floorDown, l.floorUp)
+	least := float32(math.Float32frombits(l.least.Load()))
+	l.floor = follow(l.floor, rms, l.floorDown, l.floorUp, least)
+	l.bandFloor = follow(l.bandFloor, l.bandRMS, l.floorDown, l.floorUp, least)
 
 	l.publishLevel(l.bandRMS)
 	return rms, peak
 }
 
-// follow moves a floor toward what was just heard, quickly down and slowly up, and never below one
-// sample of quantisation.
-func follow(floor, rms, down, up float32) float32 {
+// The floors track how quiet the room gets, and this is as low as that tracking may go. Not because a room
+// cannot be quieter, but because below the converter's own noise the number describes the converter: with
+// the microphones cut this band reads 4 to 8 at the default gain, and a floor of one quantisation step puts
+// that 12 to 15 dB over nothing — so the wobble of noise alone crosses whatever gate sits above it and back,
+// for as long as the floor takes to climb.
+//
+// It moves with the analog gain because that gain is ahead of the converter and lifts its noise along with
+// the room. A fixed number would be right at one setting and wrong across the range: too low near the
+// default and, at low gain, high enough to sit above a quiet room's whole band and silence it.
+//
+// Extrapolated from the one gain it was measured at, so quantisation is treated as the part that does not
+// scale. Measuring the cut-microphone band noise at 0 and 59 dB would replace the extrapolation.
+const (
+	quietestAtGain = 16.0
+	quietestGainDB = config.DefaultMicGain
+	quietestLimit  = 2.0
+)
+
+// quietest is the lowest a floor may go at a given analog gain.
+func quietest(db int) float32 {
+	return float32(max(quietestAtGain*math.Pow(10, float64(db-quietestGainDB)/20), quietestLimit))
+}
+
+// follow moves a floor toward what was just heard, quickly down and slowly up, and never below the least
+// the converter can say anything about.
+func follow(floor, rms, down, up, least float32) float32 {
 	step := up
 	if rms < floor {
 		step = down
 	}
-	return max(floor+(rms-floor)*step, 1)
+	return max(floor+(rms-floor)*step, least)
 }
 
 // levelFrom maps how far a frame stands over the room onto 0 to 1: nothing until it clears quiet,
@@ -229,7 +269,22 @@ func (l *leveler) publishLevel(rms float32) {
 	if want < was {
 		step = l.levelDown
 	}
-	l.level.Store(math.Float32bits(was + (want-was)*step))
+	now := was + (want-was)*step
+	l.level.Store(math.Float32bits(now))
+
+	// Diagnostic for #100: the ring showing through or not is this crossing, so logging it says which
+	// side moved — the room getting louder, or the floor it is measured against getting lower.
+	const on, off = 0.05, 0.02
+	switch {
+	case !l.lit && now > on:
+		l.lit = true
+	case l.lit && now < off:
+		l.lit = false
+	default:
+		return
+	}
+	slog.Info("room level", "lit", l.lit, "level", now,
+		"band_rms", rms, "band_floor", l.bandFloor, "over_db", over)
 }
 
 // apply scales a frame in place, following the level it has been carrying rather than this frame

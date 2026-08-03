@@ -319,6 +319,33 @@ func TestARoomReactionShowsTheLightThroughItsSilence(t *testing.T) {
 	}
 }
 
+// Repainting the layer showing through has to reach the ring. The frame beneath is read once and handed
+// to the effect above as a still, so without noticing the change the ring goes on compositing a frame
+// that is no longer there — which is a segment turned on by hand doing nothing at all, silently, for as
+// long as anything reacting to the room sits on top of it.
+func TestRepaintingWhatShowsThroughReachesTheRing(t *testing.T) {
+	d := running(t)
+
+	base := d.Claim(PriorityBase)
+	base.Paint(solid(green))
+
+	// Silent throughout, so the reaction never draws anything of its own and what is underneath is the
+	// whole of what the ring shows.
+	room := d.Claim(PriorityRoom)
+	room.React(EffectRoomGlow, blue, Room{Level: func() float64 { return 0 }})
+	settle()
+
+	if got := shown(t, d.ring); got != green {
+		t.Fatalf("a silent room shows %+v, want the light underneath", got)
+	}
+
+	// Nothing is claimed or released, and the claim on top does not move.
+	base.Paint(solid(red))
+	if got := waitFor(t, d.ring, red); got != red {
+		t.Errorf("after repainting underneath the ring shows %+v, want the new colour", got)
+	}
+}
+
 // Only something reading the room may be seen through. An animation that goes dark on purpose — a
 // heartbeat between thumps, an alert between pulses — owns the ring while it does, or the layer beneath
 // would strobe through every gap.

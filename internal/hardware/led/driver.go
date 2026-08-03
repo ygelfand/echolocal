@@ -219,12 +219,20 @@ func (d *Driver) render(ctx context.Context, top *Claim, rev uint64) {
 		}
 	}
 
+	// under is read once and handed to the effect as a still frame, so a change to it has to restart the
+	// render or the ring goes on compositing a frame that is no longer there. Turning on one segment
+	// while something reacting to the room is on top is exactly that: the segment reaches the claim and
+	// is never looked at again.
+	under := d.composited(top)
+	underRev := under.revision()
+
 	// Watch for a change alongside the render, so a new claim interrupts an animation part way
 	// through rather than after it finishes.
 	//
 	// Only a change to what should be showing counts. A claim underneath being repainted — Home
 	// Assistant setting the light, the saved volume arriving — must not restart the animation on top
-	// of it, or the boot walk begins again every time anything else so much as reports its state.
+	// of it, or the boot walk begins again every time anything else so much as reports its state. The
+	// exception is the claim being composited with, which is part of what is showing.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
@@ -232,6 +240,10 @@ func (d *Driver) render(ctx context.Context, top *Claim, rev uint64) {
 			select {
 			case <-d.changed:
 				if now, nowRev := d.top(); now != top || nowRev != rev {
+					cancel()
+					return
+				}
+				if under.revision() != underRev {
 					cancel()
 					return
 				}
@@ -250,7 +262,7 @@ func (d *Driver) render(ctx context.Context, top *Claim, rev uint64) {
 		<-rctx.Done()
 		return
 	}
-	d.show(rctx, top.get(), d.beneath(top))
+	d.show(rctx, top.get(), d.beneath(under))
 }
 
 func (d *Driver) show(ctx context.Context, c Content, under Frame) {
@@ -320,18 +332,17 @@ func (d *Driver) top() (*Claim, uint64) {
 	return best, best.rev
 }
 
-// beneath is what the claim under top would draw, for something reacting to the room to show through
-// wherever it draws nothing.
+// composited is the claim top draws over, or nil when top does not read what is under it.
 //
-// Only for that: a room effect is dark until something happens, so a dark ring should mean nothing is
-// happening rather than that the ring is claimed and being held empty. Everything else that draws black
-// draws it deliberately — heartbeat rests between its thumps, alert between its pulses — and would
-// strobe whatever is underneath if it fell through.
+// Only something reacting to the room does: a room effect is dark until something happens, so a dark
+// ring should mean nothing is happening rather than that the ring is claimed and being held empty.
+// Everything else that draws black draws it deliberately — heartbeat rests between its thumps, alert
+// between its pulses — and would strobe whatever is underneath if it fell through.
 //
 // Keyed on the claim having been given a room to read rather than on which effect it names, because that
 // is the question being asked: not what this animation is capable of, but what it is being used for.
-func (d *Driver) beneath(top *Claim) Frame {
-	if top.get().Room.Level == nil {
+func (d *Driver) composited(top *Claim) *Claim {
+	if top == nil || top.get().Room.Level == nil {
 		return nil
 	}
 
@@ -339,8 +350,16 @@ func (d *Driver) beneath(top *Claim) Frame {
 	if len(live) < 2 || live[0] != top {
 		return nil
 	}
+	return live[1]
+}
 
-	under := live[1].get()
+// beneath is what a claim would draw, for the one above it to show through wherever it draws nothing.
+func (d *Driver) beneath(c *Claim) Frame {
+	if c == nil {
+		return nil
+	}
+
+	under := c.get()
 	switch {
 	case under.Animate != nil:
 		// It owns the hardware and runs to its own timeline, so it cannot be asked for one frame.
@@ -469,6 +488,17 @@ func (c *Claim) get() Content {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.content
+}
+
+// revision counts how many times this claim has been given content, so a render compositing with it can
+// tell that what it snapshotted has moved on. Zero for no claim, which is a revision nothing reaches.
+func (c *Claim) revision() uint64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rev
 }
 
 func (c *Claim) deadline() (time.Time, bool) {

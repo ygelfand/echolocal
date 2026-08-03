@@ -50,6 +50,7 @@ func build() *Reaction {
 		sel: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: "room_reaction",
+				DeviceID: component.DeviceRing,
 				Name:     "Ring follows the room",
 				Icon:     "mdi:waveform",
 				Category: esphome.CategoryConfig,

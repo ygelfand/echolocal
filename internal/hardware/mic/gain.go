@@ -51,5 +51,8 @@ func SetGain(db int) error {
 		return err
 	}
 	applyGain(db)
+
+	// The converter's own noise moves with this, and that is what the room is measured against.
+	Get().leveler.atGain(db)
 	return nil
 }

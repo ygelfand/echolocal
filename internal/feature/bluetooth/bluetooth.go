@@ -123,6 +123,12 @@ func (b *Proxy) Enabled() bool { return config.Get().Bluetooth.Proxy }
 func (b *Proxy) Reports() uint64 { return b.radio.Reports() }
 
 // Features is what to advertise, which is nothing at all while the proxy is off.
+//
+// Not advertising is the only way to say the device is not a proxy, and it costs a reconnect: device
+// info is read once per connection. Reporting a stopped scanner instead does not work — Home Assistant
+// clears the scanner's current mode for any state that is not RUNNING while its requested mode stands,
+// reads the two disagreeing as a fault, and asks the user to power cycle the device. There is no state
+// in that model for a proxy its owner switched off.
 func (b *Proxy) Features() esphome.BluetoothFeature {
 	if b.Enabled() {
 		return bluetoothFeatures

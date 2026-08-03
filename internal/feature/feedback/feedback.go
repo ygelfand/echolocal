@@ -49,6 +49,7 @@ func Get() *Feedback {
 			failure: &esphome.Select{
 				Base: esphome.Base{
 					ObjectID: "failure_effect",
+					DeviceID: component.DeviceRing,
 					Name:     "Ring on failure",
 					Icon:     "mdi:alert-circle",
 					Category: esphome.CategoryConfig,

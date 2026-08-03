@@ -124,7 +124,7 @@ const (
 
 	// Reacting to the room. Named for what they follow, not for the motion, because that is the part
 	// worth knowing: the ring is showing the room.
-	EffectFollower    = "Follower"
+	EffectFollower    = "Room Compass"
 	EffectRoomGlow    = "Room Glow"
 	EffectRoomMeter   = "Room Meter"
 	EffectRoomOcean   = "Room Ocean"

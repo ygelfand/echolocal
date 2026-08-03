@@ -82,6 +82,10 @@ func (a *API) Start(context.Context) error {
 			Version:           layout.Version,
 			VoiceFeatures:     voice.Features,
 			BluetoothFeatures: bluetooth.Get().Features(),
+
+			Devices: []esphome.Device{
+				{ID: component.DeviceRing, Name: device.Name + " ring"},
+			},
 		},
 		PSK:    psk,
 		Logger: slog.Default(),
