@@ -7,6 +7,7 @@ package media
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/lib/noise"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
@@ -45,6 +47,11 @@ type Player struct {
 	resampling *esphome.Select
 	onTurn     *esphome.Select
 	duck       *esphome.Number
+
+	// layers are sounds the device makes on its own, for as long as they are left set. More than one,
+	// because a bed with a texture over it — crickets under wind — is worth having and the native API
+	// has no entity that holds more than one value.
+	layers []*esphome.Select
 
 	// speaking is set while a reply or an announcement is sounding, which Home Assistant is told is
 	// playing: its mapper has no case for announcing and raises on it.
@@ -115,6 +122,17 @@ func build() *Player {
 			Mode: esphome.NumberBox,
 		},
 	}
+	p.layers = noiseLayers()
+
+	// The player itself stays on the device: it is what people reach for. These are how it behaves.
+	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base}
+	for _, sel := range p.layers {
+		bases = append(bases, &sel.Base)
+	}
+	for _, b := range bases {
+		b.DeviceID = component.DevicePlayback
+	}
+
 	p.mp.OnCommand = p.command
 	component.Bind(p.resampling, speaker.Resamplings(), speaker.Get().SetResampling,
 		config.Set().Speaker().Resampling)
@@ -123,6 +141,20 @@ func build() *Player {
 	// the next one rather than in the middle of this one.
 	component.Bind(p.onTurn, onTurns(), func(v config.OnTurn) config.OnTurn { return v },
 		config.Set().Media().OnTurn)
+
+	// Not saved and not restored: it is a sound somebody asked for, and a device that came back from an
+	// update hissing in a dark room would be a fault as far as anyone in it is concerned.
+	for _, sel := range p.layers {
+		sel.OnCommand = func(chosen string) {
+			if chosen != noiseOff && !noise.Has(chosen) {
+				slog.Warn("unknown option", "setting", sel.ObjectID, "value", chosen)
+				return
+			}
+
+			sel.Set(chosen)
+			p.sound()
+		}
+	}
 
 	p.duck.OnCommand = func(v float32) {
 		p.duck.Set(v)
@@ -150,13 +182,20 @@ func build() *Player {
 	p.jack.Set(spk.Output() == speaker.OutputHeadphone)
 
 	p.mp.SetState(esphome.MediaPlayerIdle)
+	for _, sel := range p.layers {
+		sel.Set(noiseOff)
+	}
 	return p
 }
 
 func (p *Player) Name() string { return "media player" }
 
 func (p *Player) Entities() []esphome.Entity {
-	return []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck}
+	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck}
+	for _, sel := range p.layers {
+		out = append(out, sel)
+	}
+	return out
 }
 
 // Restore puts the volume back where it was, without flashing the arc: nothing happened, the device
@@ -175,6 +214,45 @@ func (p *Player) Restore(c config.Config) {
 
 // onTurns is what music may do about a turn.
 func onTurns() []config.OnTurn { return []config.OnTurn{config.OnTurnDuck, config.OnTurnPause} }
+
+// noiseOff is the way out of the list, and what the entities read whenever the speaker is doing
+// anything else.
+const noiseOff = "None"
+
+// noiseLayers are the slots a sound can be put in. They are peers: any sound in any slot, one on its
+// own or both mixed.
+func noiseLayers() []*esphome.Select {
+	const slots = 2
+
+	out := make([]*esphome.Select, 0, slots)
+	for i := 1; i <= slots; i++ {
+		out = append(out, &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("noise_layer_%d", i),
+				Name:     fmt.Sprintf("White noise layer %d", i),
+				Icon:     "mdi:blur",
+			},
+			Options: append([]string{noiseOff}, noise.Names()...),
+		})
+	}
+	return out
+}
+
+// sound starts whatever the slots add up to, and stops when they add up to nothing.
+func (p *Player) sound() {
+	var sounds []string
+	for _, sel := range p.layers {
+		if chosen := sel.Get(); chosen != noiseOff && chosen != "" {
+			sounds = append(sounds, chosen)
+		}
+	}
+
+	if len(sounds) == 0 {
+		p.stream.Stop()
+		return
+	}
+	p.stream.PlayNoise(sounds...)
+}
 
 // command handles what Home Assistant sends. Volume arrives as a fraction; the buttons and the
 // vendor's curves work in steps, so it is rounded to one.
@@ -273,8 +351,18 @@ func (p *Player) Playing() (playing, paused bool) { return p.stream.Playing() }
 // Pause leaves the track where it is, so it can be picked up again.
 func (p *Player) Pause() { p.stream.Pause() }
 
-// refresh tells Home Assistant what the player is doing.
-func (p *Player) refresh() { p.mp.SetState(p.state()) }
+// refresh tells Home Assistant what the player is doing. Anything that displaces the noise — a track,
+// a stop, the action button — clears both entities, rather than leaving them naming a sound nobody can
+// hear.
+func (p *Player) refresh() {
+	p.mp.SetState(p.state())
+
+	if len(p.stream.Noise()) == 0 {
+		for _, sel := range p.layers {
+			sel.Set(noiseOff)
+		}
+	}
+}
 
 func (p *Player) state() esphome.MediaPlayerState {
 	playing, paused := p.stream.Playing()

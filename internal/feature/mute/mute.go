@@ -64,6 +64,7 @@ func build() *Mute {
 		sw: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "mic_mute",
+				DeviceID: component.DeviceMicrophone,
 				Name:     "Microphone mute",
 				Icon:     "mdi:microphone-off",
 			},
@@ -87,6 +88,7 @@ func build() *Mute {
 	m.brightness = &esphome.Select{
 		Base: esphome.Base{
 			ObjectID: "mute_led_brightness",
+			DeviceID: component.DeviceMicrophone,
 			Name:     "Mute LED brightness",
 			Icon:     "mdi:brightness-6",
 			Category: esphome.CategoryConfig,

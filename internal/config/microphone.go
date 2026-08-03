@@ -17,6 +17,10 @@ type Microphone struct {
 	// Cancel subtracts what the speaker is playing from what the microphones hear, so a wake word
 	// during a reply competes with the room rather than with the reply.
 	Cancel bool `json:"cancel"`
+
+	// Sensitivity is how far over the room's own floor, in dB, counts as something happening. Lower
+	// notices a chair being moved; higher waits for someone to speak.
+	Sensitivity int `json:"sensitivity"`
 }
 
 const (
@@ -34,16 +38,21 @@ const (
 	DefaultLeveling = true
 
 	DefaultCancel = true
+
+	// Measured on a quiet room: 0.8 dB at the 99th percentile of frames, so this is well clear of the
+	// room itself and is really about brief small sounds — a chair, a keyboard.
+	DefaultSensitivity = 8
 )
 
 func defaultMicrophone() Microphone {
 	return Microphone{
-		Muted:     DefaultMuted,
-		LEDBright: DefaultLEDBright,
-		Gain:      DefaultMicGain,
-		Leveling:  DefaultLeveling,
-		Mixing:    DefaultMixing,
-		Cancel:    DefaultCancel,
+		Muted:       DefaultMuted,
+		LEDBright:   DefaultLEDBright,
+		Gain:        DefaultMicGain,
+		Leveling:    DefaultLeveling,
+		Mixing:      DefaultMixing,
+		Cancel:      DefaultCancel,
+		Sensitivity: DefaultSensitivity,
 	}
 }
 
@@ -71,6 +80,10 @@ func (w MicrophoneWriter) Mixing(v Mixing) error {
 
 func (w MicrophoneWriter) Cancel(v bool) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Cancel = v })
+}
+
+func (w MicrophoneWriter) Sensitivity(db int) error {
+	return w.st.Update(func(c *Config) { c.Microphone.Sensitivity = db })
 }
 
 // Mixing is how a microphone array is reduced to the single channel recognition reads.

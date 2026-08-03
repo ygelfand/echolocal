@@ -20,6 +20,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
+	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
@@ -83,9 +84,7 @@ func (a *API) Start(context.Context) error {
 			VoiceFeatures:     voice.Features,
 			BluetoothFeatures: bluetooth.Get().Features(),
 
-			Devices: []esphome.Device{
-				{ID: component.DeviceRing, Name: device.Name + " ring"},
-			},
+			Devices: subDevices(device.Name),
 		},
 		PSK:    psk,
 		Logger: slog.Default(),
@@ -99,6 +98,27 @@ func (a *API) Start(context.Context) error {
 		Handler: esphome.Chain(append([]esphome.Handler{ents}, component.Default().Handlers()...)...),
 	}
 	return nil
+}
+
+// subDevices groups entities onto pages of their own, since Home Assistant puts every entity a device has
+// on one page and there are more here than anyone wants to read.
+//
+// Each name carries the device's own, because Home Assistant shows what it is given verbatim: a bare "Ring"
+// or "Assistant 1" is unreadable in a house with several satellites.
+func subDevices(name string) []esphome.Device {
+	out := []esphome.Device{
+		{ID: component.DeviceRing, Name: name + " ring"},
+		{ID: component.DeviceMicrophone, Name: name + " microphone"},
+		{ID: component.DevicePlayback, Name: name + " playback"},
+	}
+
+	for slot := range wakeword.Slots {
+		out = append(out, esphome.Device{
+			ID:   component.AssistantDevice(slot),
+			Name: fmt.Sprintf("%s assistant %d", name, slot+1),
+		})
+	}
+	return out
 }
 
 // Run listens until ctx is cancelled, advertising over mDNS so Home Assistant finds the device

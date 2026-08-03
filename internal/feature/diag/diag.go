@@ -17,6 +17,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/hardware/metrics"
+	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/lib/wake"
@@ -49,6 +50,8 @@ type Diag struct {
 	coresOnline *esphome.Sensor
 	load        *esphome.Sensor
 	memory      *esphome.Sensor
+	roomLevel   *esphome.Sensor
+	roomFloor   *esphome.Sensor
 
 	adb *esphome.Switch
 	ip  *esphome.TextSensor
@@ -96,7 +99,7 @@ func (d *Diag) Name() string { return "diagnostics" }
 func (d *Diag) Entities() []esphome.Entity {
 	return []esphome.Entity{
 		d.cached, d.free, d.purge,
-		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory,
+		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.roomLevel, d.roomFloor,
 		d.adb, d.ip, d.signal, d.rxRate, d.txRate, d.ads,
 		d.testPlayback, d.interval,
 	}
@@ -344,6 +347,23 @@ func (d *Diag) hardware() {
 	d.cores = count("cpu_cores", "CPU cores")
 	d.coresOnline = count("cpu_cores_online", "CPU cores online")
 
+	// Sampled with everything else, so at the default interval this shows the room's resting level rather
+	// than tracking speech. That is the number worth having: the sensitivity is set as a distance above
+	// the floor, and both sides of it are here.
+	room := func(id, name, icon string) *esphome.Sensor {
+		return &esphome.Sensor{
+			Base: esphome.Base{
+				ObjectID: id, Name: name, Icon: icon,
+				DeviceID: component.DeviceMicrophone,
+				Category: esphome.CategoryDiagnostic,
+			},
+			StateClass: esphome.StateClassMeasurement,
+			Decimals:   2,
+		}
+	}
+	d.roomLevel = room("room_level", "Room level", "mdi:waveform")
+	d.roomFloor = room("room_floor", "Room floor", "mdi:arrow-collapse-down")
+
 	d.load = &esphome.Sensor{
 		Base: esphome.Base{
 			ObjectID: "load_average", Name: "Load average", Icon: "mdi:gauge",
@@ -393,6 +413,14 @@ func (d *Diag) Sample() {
 	d.board()
 	d.address()
 	d.wireless()
+	d.room()
+}
+
+// room is what the level the ring can react to is reading, and the floor it is measured against.
+func (d *Diag) room() {
+	source := mic.Get()
+	d.roomLevel.Set(float32(source.Peak()))
+	d.roomFloor.Set(float32(source.Floor()))
 }
 
 // wireless publishes the link and the two things competing for it. Rates come from what changed since

@@ -21,10 +21,11 @@ func init() {
 // sub-device as a device of its own, which would put a bare "Microphone" device in the list for
 // every satellite in the house.
 type Microphone struct {
-	mixing   *esphome.Select
-	gain     *esphome.Number
-	leveling *esphome.Switch
-	cancel   *esphome.Switch
+	mixing      *esphome.Select
+	gain        *esphome.Number
+	leveling    *esphome.Switch
+	cancel      *esphome.Switch
+	sensitivity *esphome.Number
 }
 
 var (
@@ -63,6 +64,16 @@ func build() *Microphone {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		sensitivity: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: "microphone_sensitivity",
+				Name:     "Room sensitivity",
+				Icon:     "mdi:motion-sensor",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 4, Max: 20, Step: 1, Unit: "dB",
+			Mode: esphome.NumberBox,
+		},
 		gain: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: "microphone_gain",
@@ -73,6 +84,12 @@ func build() *Microphone {
 			Min: 0, Max: 59, Step: 1, Unit: "dB",
 			Mode: esphome.NumberBox,
 		},
+	}
+
+	for _, b := range []*esphome.Base{
+		&m.mixing.Base, &m.gain.Base, &m.leveling.Base, &m.cancel.Base, &m.sensitivity.Base,
+	} {
+		b.DeviceID = component.DeviceMicrophone
 	}
 
 	source := mic.Get()
@@ -94,6 +111,14 @@ func build() *Microphone {
 		}
 	}
 
+	m.sensitivity.OnCommand = func(v float32) {
+		m.sensitivity.Set(v)
+		source.SetSensitivity(int(v))
+		if err := config.Set().Microphone().Sensitivity(int(v)); err != nil {
+			slog.Error("saving the room sensitivity failed", "err", err)
+		}
+	}
+
 	m.gain.OnCommand = func(v float32) {
 		m.gain.Set(v)
 		if err := mic.SetGain(int(v)); err != nil {
@@ -106,7 +131,7 @@ func build() *Microphone {
 func (m *Microphone) Name() string { return "microphone settings" }
 
 func (m *Microphone) Entities() []esphome.Entity {
-	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel}
+	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel, m.sensitivity}
 }
 
 // Restore puts the knobs back. The analog gain is only published here: the capture service applies
@@ -123,6 +148,10 @@ func (m *Microphone) Restore(c config.Config) {
 	m.cancel.Set(c.Microphone.Cancel)
 	source.SetCancelling(c.Microphone.Cancel)
 	slog.Info("restored", "what", m.cancel.ObjectID, "using", c.Microphone.Cancel)
+
+	m.sensitivity.Set(float32(c.Microphone.Sensitivity))
+	source.SetSensitivity(c.Microphone.Sensitivity)
+	slog.Info("restored", "what", m.sensitivity.ObjectID, "using", c.Microphone.Sensitivity)
 
 	m.gain.Set(float32(c.Microphone.Gain))
 	slog.Info("restored", "what", m.gain.ObjectID, "using", c.Microphone.Gain)

@@ -5,6 +5,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/detect/assets"
 	"github.com/ygelfand/echolocal/internal/layout"
@@ -71,6 +72,7 @@ func newStopEntity(d *Detect) *esphome.Number {
 	n := &esphome.Number{
 		Base: esphome.Base{
 			ObjectID: "stop_word_sensitivity",
+			DeviceID: component.DeviceMicrophone,
 			Name:     "Stop word sensitivity",
 			Icon:     "mdi:hand-back-left",
 			Category: esphome.CategoryConfig,

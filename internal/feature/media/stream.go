@@ -10,11 +10,13 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
+	"github.com/ygelfand/echolocal/internal/lib/noise"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
@@ -82,7 +84,9 @@ type Stream struct {
 // track is one thing being played. Identity is the point: a track that has been replaced knows not
 // to report itself finished.
 type track struct {
-	url    string
+	// item names it in the log, and sounds is what is being generated when it is not a url.
+	item   string
+	sounds []string
 	cancel context.CancelFunc
 }
 
@@ -155,8 +159,64 @@ func (m *Stream) Play(url string) {
 		return
 	}
 
+	t, ctx := m.start(&track{item: url})
+	slog.Info("playing media", "url", url)
+
+	safe.Go("media", func() {
+		err := m.run(ctx, t, url)
+		if err != nil && ctx.Err() == nil {
+			slog.Error("playing media failed", "err", err)
+		}
+		m.finished(t)
+	})
+}
+
+// PlayNoise runs generated sound instead of a url, and does not stop until it is stopped: that is the
+// point of it. Everything else about it is a track, so a turn ducks it, the buttons set its level and
+// the media player reports it.
+func (m *Stream) PlayNoise(sounds ...string) {
+	if m == nil {
+		slog.Warn("asked to play noise with no speaker", "sounds", sounds)
+		return
+	}
+
+	fill := noise.Mix(speaker.Rate, sounds...)
+	if fill == nil {
+		slog.Warn("no such sound", "sounds", sounds)
+		return
+	}
+
+	t, ctx := m.start(&track{item: strings.Join(sounds, " and "), sounds: sounds})
+	slog.Info("playing noise", "sounds", sounds)
+
+	safe.Go("noise", func() {
+		err := m.generate(ctx, t, fill)
+		if err != nil && ctx.Err() == nil {
+			slog.Error("playing noise failed", "err", err)
+		}
+		m.finished(t)
+	})
+}
+
+// Noise is what is being generated, empty when what is playing came from somewhere else. It is what
+// keeps the entities honest when a track or a stop displaces the noise.
+func (m *Stream) Noise() []string {
+	if m == nil {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.track == nil {
+		return nil
+	}
+	return m.track.sounds
+}
+
+// start makes a track the one being played, dropping whatever was.
+func (m *Stream) start(t *track) (*track, context.Context) {
 	ctx, cancel := context.WithCancel(context.Background())
-	t := &track{url: url, cancel: cancel}
+	t.cancel = cancel
 
 	m.mu.Lock()
 	previous := m.track
@@ -171,15 +231,7 @@ func (m *Stream) Play(url string) {
 	previous.stop()
 	m.flush()
 	m.changed()
-	slog.Info("playing media", "url", url)
-
-	safe.Go("media", func() {
-		err := m.run(ctx, t, url)
-		if err != nil && ctx.Err() == nil {
-			slog.Error("playing media failed", "err", err)
-		}
-		m.finished(t)
-	})
+	return t, ctx
 }
 
 // Pause stops the track where it is. What was queued but not heard is kept, so resuming does not
@@ -367,7 +419,7 @@ func (m *Stream) finished(t *track) {
 	m.unblock()
 	m.mu.Unlock()
 
-	slog.Info("media finished", "url", t.url)
+	slog.Info("media finished", "item", t.item)
 	m.changed()
 }
 
@@ -477,6 +529,29 @@ func (m *Stream) settle(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+}
+
+// generate feeds the speaker from a generator instead of a socket, for as long as the track lasts.
+// Both channels get the same samples: one enclosure, one driver.
+//
+// The buffer is filled again each time round, so queue is free to scale it in place on its way out.
+func (m *Stream) generate(ctx context.Context, t *track, fill noise.Fill) error {
+	mono := make([]float32, chunk/frame)
+	samples := make([]int16, len(mono)*speaker.Channels)
+
+	for {
+		if err := m.wait(ctx); err != nil {
+			return err
+		}
+
+		fill(mono)
+		for i, v := range mono {
+			s := int16(v * math.MaxInt16)
+			samples[i*speaker.Channels] = s
+			samples[i*speaker.Channels+1] = s
+		}
+		m.queue(t, samples)
 	}
 }
 

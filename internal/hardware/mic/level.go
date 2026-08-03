@@ -68,16 +68,14 @@ const (
 	levelHighHz = 900
 	levelPoles  = 3
 
-	// How far over the floor still reads as nothing happening. Steady noise wanders by a few dB and
-	// its own quietest moments are what the floor tracks, so without this a fridge reads as a room
-	// with someone in it. Measured on a quiet room: 0.8 dB at the 99th percentile of frames, so this
-	// is well clear of the room itself and is really about brief small sounds — a chair, a keyboard.
-	levelQuietDB = 8.0
-
-	// And how much further counts as fully loud. Measured on someone talking in the room: 23 dB over
-	// the floor at the 90th percentile of frames and 30 dB at the loudest, in this band. Sized so
-	// ordinary speech sits high without pinning, and only the loudest of it reaches the top.
-	levelRange = 22.0
+	// Where the top of the scale sits, over the floor. Measured on someone talking in the room: 23 dB
+	// over the floor at the 90th percentile of frames and 30 dB at the loudest, in this band. So
+	// ordinary speech sits high without pinning, and only the loudest of it fills the ring.
+	//
+	// The gate under it is Microphone.Sensitivity, and the span between them is what is left. Raising
+	// the gate without this fixed would push the top past anything a room produces, and nothing would
+	// ever fill the ring.
+	levelTopDB = 30.0
 
 	// The level rises almost as fast as the audio does and falls slowly, because it is watched at 25
 	// frames a second by something with twelve lights: following the decay of every syllable turns a
@@ -89,13 +87,14 @@ const (
 type leveler struct {
 	gain float32
 
-	// lit is whether the published level is high enough for something watching it to be drawing, kept so
-	// the crossing can be logged rather than every frame. Diagnostic for #100.
-	lit bool
-
 	// least is how low the floors may go, which follows the analog gain and so is set from outside the
-	// reader that uses it.
+	// reader that uses it. quiet is the same for the gate over the floor, in dB.
 	least atomic.Uint32
+	quiet atomic.Int32
+
+	// peak is the most the level has reached since somebody asked, for something sampling far more slowly
+	// than the level moves. Only the reader writes it; asking clears it.
+	peak atomic.Uint32
 
 	// floor is the quietest the room has been heard to be, which is what speech is judged against.
 	floor float32
@@ -158,11 +157,15 @@ func newLeveler() *leveler {
 	}
 
 	l.atGain(config.Get().Microphone.Gain)
+	l.atSensitivity(config.Get().Microphone.Sensitivity)
 	return l
 }
 
 // atGain tells the leveler what the analog gain is now, which is what decides how low its floors may go.
 func (l *leveler) atGain(db int) { l.least.Store(math.Float32bits(quietest(db))) }
+
+// atSensitivity sets how far over the floor counts as something happening.
+func (l *leveler) atSensitivity(db int) { l.quiet.Store(int32(db)) }
 
 const fullScale = 32768
 
@@ -262,7 +265,8 @@ func (l *leveler) publishLevel(rms float32) {
 	if rms > l.bandFloor {
 		over = 20 * math.Log10(float64(rms/l.bandFloor))
 	}
-	want := float32(levelFrom(over, levelQuietDB, levelRange))
+	quiet := float64(l.quiet.Load())
+	want := float32(levelFrom(over, quiet, levelTopDB-quiet))
 
 	was := math.Float32frombits(l.level.Load())
 	step := l.levelUp
@@ -272,19 +276,9 @@ func (l *leveler) publishLevel(rms float32) {
 	now := was + (want-was)*step
 	l.level.Store(math.Float32bits(now))
 
-	// Diagnostic for #100: the ring showing through or not is this crossing, so logging it says which
-	// side moved — the room getting louder, or the floor it is measured against getting lower.
-	const on, off = 0.05, 0.02
-	switch {
-	case !l.lit && now > on:
-		l.lit = true
-	case l.lit && now < off:
-		l.lit = false
-	default:
-		return
+	if now > math.Float32frombits(l.peak.Load()) {
+		l.peak.Store(math.Float32bits(now))
 	}
-	slog.Info("room level", "lit", l.lit, "level", now,
-		"band_rms", rms, "band_floor", l.bandFloor, "over_db", over)
 }
 
 // apply scales a frame in place, following the level it has been carrying rather than this frame
@@ -332,6 +326,33 @@ func (l *leveler) apply(frame []int16) {
 func (s *Source) SetLeveling(on bool) {
 	s.leveling.Store(on)
 	slog.Info("microphone leveling", "on", on)
+}
+
+// SetSensitivity sets how far over the room's own floor counts as something happening, in dB.
+func (s *Source) SetSensitivity(db int) {
+	s.leveler.atSensitivity(db)
+	slog.Info("room sensitivity", "over_floor_db", db)
+}
+
+// Floor is the quietest the room has been heard to be, in dBFS, in the band the level measures. It is what
+// the level is measured against, and on its own it is the room's own noise: it follows a fan starting, a
+// window opening, a house waking up.
+//
+// It moves with the analog gain as well, so changing that is a step in the history rather than the room
+// having changed.
+// Against this package's own full scale, not audio.DBFS: the leveler works in the int16 the frames are
+// narrowed to, and that helper is against 24 bit.
+func (s *Source) Floor() float64 {
+	return 20 * math.Log10(float64(s.leveler.bandFloor)/fullScale)
+}
+
+// Peak is the most the level reached since the last time it was asked, and asking resets it.
+//
+// The level itself is worth reading at 25 frames a second and nothing else; sampled every few minutes it
+// reads zero almost always and catches a syllable now and then. The peak over the interval is the useful
+// shape of the same thing: whether anything happened in this room while nobody was looking.
+func (s *Source) Peak() float64 {
+	return float64(math.Float32frombits(s.leveler.peak.Swap(0)))
 }
 
 // Gain is what the leveler is currently applying, in dB.

@@ -72,6 +72,7 @@ func Get() *WakeWord {
 // same slot.
 func newSlot(n int) slot {
 	prefix := fmt.Sprintf("Assistant %d wake word", n+1)
+	on := component.AssistantDevice(n)
 
 	s := slot{
 		// Not diagnostic: waking the device by hand is something to do, not something to inspect.
@@ -160,6 +161,14 @@ func newSlot(n int) slot {
 			Min: 5, Max: 300, Step: 5, Unit: "s",
 			Mode: esphome.NumberBox,
 		},
+	}
+
+	// All nine on a page of their own.
+	for _, b := range []*esphome.Base{
+		&s.wake.Base, &s.threshold.Base, &s.tone.Base, &s.effect.Base, &s.delivery.Base,
+		&s.buffer.Base, &s.followUp.Base, &s.maxListen.Base, &s.maxThink.Base,
+	} {
+		b.DeviceID = on
 	}
 
 	s.threshold.OnCommand = func(v float32) {
