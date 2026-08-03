@@ -8,7 +8,7 @@ import "math"
 // the other way from there. Half a turn is the error an array this small is most prone to — at 36 mm the
 // front and back of a beam differ by very little — and six beams can only report to the nearest 60
 // degrees, so up to 30 of any apparent error is the quantising rather than this number.
-const ringOffset = 300.0
+const ringOffset = 320.0
 
 // Facing is where the loudest sound is, as a fraction clockwise round the ring from segment 0, and
 // whether that is known yet.

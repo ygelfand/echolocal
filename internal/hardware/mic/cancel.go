@@ -164,3 +164,15 @@ func (s *Source) SetCancelling(on bool) {
 	defer s.mu.Unlock()
 	s.cancelling = on
 }
+
+// SetAdapting stops or resumes the canceller learning, while it goes on cancelling with what it has.
+//
+// Turn it off while somebody is being listened to. The filter cannot tell a voice it was never given a
+// reference for from an echo it predicted badly, so it treats the voice as its own error and fits itself
+// to it — at exactly the moment cancelling matters. What it already learned stays correct: the room did
+// not change because somebody spoke.
+func (s *Source) SetAdapting(on bool) {
+	if s.cancel != nil {
+		s.cancel.filter.SetAdapting(on)
+	}
+}

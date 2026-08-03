@@ -19,6 +19,12 @@ type Driver struct {
 	mu  sync.Mutex
 	now *Claim
 	bg  Background
+
+	// yielded is whether the background has been told to stand down, kept equal to "something holds the
+	// speaker". It is a flag rather than a count because claims displace one another: pairing a suspend
+	// with every claim and a resume with every release leaks a hold each time one sound takes over from
+	// another, and the background then never plays again.
+	yielded bool
 }
 
 func NewDriver(p *Player) *Driver { return &Driver{p: p} }
@@ -62,13 +68,12 @@ func (d *Driver) Claim(name string, play func(ctx context.Context, p *Player) er
 	c := &Claim{name: name, cancel: cancel, done: make(chan struct{})}
 
 	d.mu.Lock()
-	previous, bg := d.now, d.bg
+	previous := d.now
 	d.now = c
 	d.mu.Unlock()
 
-	if bg != nil {
-		bg.Suspend()
-	}
+	// Before the errand queues anything, so the two never fight over the same audio.
+	d.settle()
 	previous.preempt(d.p)
 
 	go func() {
@@ -88,7 +93,6 @@ func (d *Driver) Claim(name string, play func(ctx context.Context, p *Player) er
 // displaced releases nothing: the one that took it from it is still playing.
 func (d *Driver) release(c *Claim) {
 	d.mu.Lock()
-	bg := d.bg
 	if d.now != c {
 		d.mu.Unlock()
 		return
@@ -96,9 +100,30 @@ func (d *Driver) release(c *Claim) {
 	d.now = nil
 	d.mu.Unlock()
 
-	if bg != nil {
-		bg.Resume()
+	d.settle()
+}
+
+// settle tells the background whether it may play, which is whenever nothing holds the speaker. Every
+// change to now goes through here, so the two cannot drift apart.
+func (d *Driver) settle() {
+	d.mu.Lock()
+	want := d.now != nil
+	if want == d.yielded {
+		d.mu.Unlock()
+		return
 	}
+	d.yielded = want
+	bg := d.bg
+	d.mu.Unlock()
+
+	if bg == nil {
+		return
+	}
+	if want {
+		bg.Suspend()
+		return
+	}
+	bg.Resume()
 }
 
 // Interject makes a sound without taking the speaker from what has it. Short feedback — a volume
@@ -116,6 +141,7 @@ func (d *Driver) Silence() {
 
 	c.stop(d.p)
 	d.p.Drain()
+	d.settle()
 }
 
 // Busy reports whether anything holds the speaker.

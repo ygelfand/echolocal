@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
@@ -56,6 +58,10 @@ type Stream struct {
 	holds  int
 	paused bool
 
+	// duckHeld is whether the duck was the thing that suspended, which only happens when the setting
+	// says pause. Ending the duck must not release a hold that a reply put there.
+	duckHeld bool
+
 	// gate is closed to let the stream carry on, and non-nil for as long as it may not.
 	gate chan struct{}
 
@@ -66,6 +72,11 @@ type Stream struct {
 	// write is held while samples go into the queue, so taking the queue away cannot be followed by
 	// the stream refilling it behind the sound that displaced it.
 	write sync.Mutex
+
+	// gain is what queue is multiplying by and target is what it is heading for, both under write
+	// alongside the samples they scale. Moving rather than jumping: a step change of 15 dB is a click,
+	// and a ramp over a few tens of milliseconds is what makes it sound deliberate.
+	gain, target float32
 }
 
 // track is one thing being played. Identity is the point: a track that has been replaced knows not
@@ -78,9 +89,60 @@ type track struct {
 // NewStream builds the stream and registers it with the speaker driver. changed is called whenever
 // what it is doing changes, which is what tells Home Assistant.
 func NewStream(sound *speaker.Driver, out *speaker.Player, changed func()) *Stream {
-	m := &Stream{out: out, changed: changed}
+	m := &Stream{out: out, changed: changed, gain: 1, target: 1}
 	sound.Yields(m)
 	return m
+}
+
+// rampSamples is how many interleaved samples a full move between silence and full level takes, so
+// 60 ms at the rate the codec runs. Long enough not to click, short enough that the reply is not
+// already talking over the track at full volume.
+const rampSamples = speaker.Rate * speaker.Channels * 60 / 1000
+
+// Duck implements speaker.Background: a turn has started or ended.
+//
+// What it does about it is this end's decision, because only this end knows the difference between a
+// song and a doorbell. A track lowers itself and keeps playing; anyone who would rather have silence
+// under a reply sets it to pause, and then this is the same suspend a claim would have done.
+func (m *Stream) Duck(on bool) {
+	if m == nil {
+		return
+	}
+
+	if on {
+		if config.Get().Media.OnTurn == config.OnTurnPause {
+			m.mu.Lock()
+			m.duckHeld = true
+			m.mu.Unlock()
+
+			m.Suspend()
+			return
+		}
+
+		level := float32(math.Pow(10, float64(config.Get().Media.DuckDB)/20))
+		m.write.Lock()
+		m.target = level
+		m.write.Unlock()
+
+		m.reduce()
+		return
+	}
+
+	// Both are undone whatever the setting was when the turn began, since it can be changed in the
+	// middle of one. Resuming is conditional on this having been what suspended: holds is shared with
+	// the claims, and releasing one of theirs would put music back underneath a reply.
+	m.write.Lock()
+	m.target = 1
+	m.write.Unlock()
+
+	m.mu.Lock()
+	held := m.duckHeld
+	m.duckHeld = false
+	m.mu.Unlock()
+
+	if held {
+		m.Resume()
+	}
 }
 
 // Play starts a url, replacing whatever was playing.
@@ -444,7 +506,50 @@ func (m *Stream) queue(t *track, samples []int16) {
 		return
 	}
 
+	m.attenuate(samples)
 	m.out.Play(samples)
+}
+
+// reduce applies the duck to audio that is already queued.
+//
+// ahead is a whole second of music sitting in the speaker's queue, and the room hears that before
+// anything scaled on its way in — so the ramp has to be applied to what is already there to be heard
+// when it matters.
+//
+// Only the track is in the queue at this point: a chime is mixed in after ducking, and so keeps its own
+// level rather than fading with what is underneath it.
+func (m *Stream) reduce() {
+	m.write.Lock()
+	defer m.write.Unlock()
+
+	queued := m.out.Take()
+	if len(queued) == 0 {
+		return
+	}
+	m.attenuate(queued)
+	m.out.Play(queued)
+}
+
+// attenuate applies the duck, moving towards the target rather than jumping to it. Wants write, which
+// queue already holds.
+//
+// It rewrites the caller's slice, which is only ever a buffer feed just decoded. What replay puts back
+// has been through here already and must not be scaled twice.
+func (m *Stream) attenuate(samples []int16) {
+	if m.gain == 1 && m.target == 1 {
+		return
+	}
+
+	const step = 1.0 / rampSamples
+	for i, s := range samples {
+		switch {
+		case m.gain < m.target:
+			m.gain = min(m.gain+step, m.target)
+		case m.gain > m.target:
+			m.gain = max(m.gain-step, m.target)
+		}
+		samples[i] = int16(float32(s) * m.gain)
+	}
 }
 
 // header reads past the WAV header and leaves the reader on the first sample.

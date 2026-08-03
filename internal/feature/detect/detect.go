@@ -6,7 +6,10 @@ import (
 	"sync"
 	"time"
 
+	esphome "github.com/ygelfand/go-esphome-device"
+
 	"github.com/ygelfand/echolocal/internal/component"
+	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/diag"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
@@ -28,6 +31,7 @@ func init() {
 type Detect struct {
 	engine *Engine
 	busy   *wakeBusy
+	stop   *esphome.Number
 }
 
 var (
@@ -41,11 +45,27 @@ func Get() *Detect {
 }
 
 func newDetect() *Detect {
-	e := New(wakeword.Slots, mic.Get())
-	e.Threshold = wakeword.Threshold
-	e.OnDetect = voice.Get().Start
+	// Sized to reach the stop word's reserved index. The slots between it and Home Assistant's are never
+	// loaded, and an unloaded slot is one comparison a frame.
+	e := New(StopSlot+1, mic.Get())
+
+	e.Threshold = func(slot int) float64 {
+		if slot == StopSlot {
+			return config.Get().Wake.Stop.Threshold
+		}
+		return wakeword.Threshold(slot)
+	}
+
+	e.OnDetect = func(slot int) {
+		if slot == StopSlot {
+			voice.Get().Interrupt()
+			return
+		}
+		voice.Get().Start(slot)
+	}
 
 	d := &Detect{engine: e, busy: newWakeBusy(led.Get().Busy(), e.Ready)}
+	d.stop = newStopEntity(d)
 	e.OnReady = d.busy.scored
 
 	// The engine loads on every start, including a restart. Home Assistant only pushes a selection when
@@ -54,6 +74,7 @@ func newDetect() *Detect {
 	e.Load = func() error {
 		turn := voice.Get()
 		turn.SetActiveWakeWords(d.load(turn.ActiveWakeWords()))
+		d.loadStop()
 		return nil
 	}
 

@@ -43,6 +43,8 @@ type Player struct {
 	// rate and the speaker runs at the codec's, so something has to bridge them and which filter does
 	// it is audible.
 	resampling *esphome.Select
+	onTurn     *esphome.Select
+	duck       *esphome.Number
 
 	// speaking is set while a reply or an announcement is sounding, which Home Assistant is told is
 	// playing: its mapper has no case for announcing and raises on it.
@@ -94,10 +96,40 @@ func build() *Player {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		onTurn: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: "media_on_turn",
+				Name:     "Music during a turn",
+				Icon:     "mdi:music-note-eighth",
+				Category: esphome.CategoryConfig,
+			},
+		},
+		duck: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: "media_duck_level",
+				Name:     "Music ducking",
+				Icon:     "mdi:volume-medium",
+				Category: esphome.CategoryConfig,
+			},
+			Min: -40, Max: -3, Step: 1, Unit: "dB",
+			Mode: esphome.NumberBox,
+		},
 	}
 	p.mp.OnCommand = p.command
 	component.Bind(p.resampling, speaker.Resamplings(), speaker.Get().SetResampling,
 		config.Set().Speaker().Resampling)
+
+	// Nothing to apply: the stream reads the setting when a turn begins, so changing it takes effect on
+	// the next one rather than in the middle of this one.
+	component.Bind(p.onTurn, onTurns(), func(v config.OnTurn) config.OnTurn { return v },
+		config.Set().Media().OnTurn)
+
+	p.duck.OnCommand = func(v float32) {
+		p.duck.Set(v)
+		if err := config.Set().Media().DuckDB(int(v)); err != nil {
+			slog.Error("saving the ducking level failed", "err", err)
+		}
+	}
 	p.stream = NewStream(speaker.Sound(), speaker.Get(), p.refresh)
 
 	// Volume acts on every tap and on every repeat, so a held button ramps.
@@ -124,7 +156,7 @@ func build() *Player {
 func (p *Player) Name() string { return "media player" }
 
 func (p *Player) Entities() []esphome.Entity {
-	return []esphome.Entity{p.mp, p.jack, p.resampling}
+	return []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck}
 }
 
 // Restore puts the volume back where it was, without flashing the arc: nothing happened, the device
@@ -134,7 +166,15 @@ func (p *Player) Restore(c config.Config) {
 	slog.Info("restored", "what", "volume", "step", c.Speaker.Volume, "of", VolumeSteps)
 
 	component.Restore(p.resampling, c.Speaker.Resampling, speaker.Get().SetResampling)
+
+	component.Restore(p.onTurn, c.Media.OnTurn, func(v config.OnTurn) config.OnTurn { return v })
+
+	p.duck.Set(float32(c.Media.DuckDB))
+	slog.Info("restored", "what", p.duck.ObjectID, "using", c.Media.DuckDB)
 }
+
+// onTurns is what music may do about a turn.
+func onTurns() []config.OnTurn { return []config.OnTurn{config.OnTurnDuck, config.OnTurnPause} }
 
 // command handles what Home Assistant sends. Volume arrives as a fraction; the buttons and the
 // vendor's curves work in steps, so it is rounded to one.
@@ -219,16 +259,19 @@ func (p *Player) Sounding(on bool) {
 // Duck and Unduck are a turn taking the speaker for as long as it runs, rather than for one sound. A
 // conversation is several sounds with listening in between, and music through the middle of it would
 // be heard by the microphones as well as by the room.
-func (p *Player) Duck() { p.stream.Suspend() }
+//
+// Whether that means lowering the track or stopping it is the stream's decision, from configuration:
+// stopping it leaves a hole in the middle of a song for the sake of one question.
+func (p *Player) Duck() { p.stream.Duck(true) }
 
-func (p *Player) Unduck() { p.stream.Resume() }
+func (p *Player) Unduck() { p.stream.Duck(false) }
 
 // Playing reports what the track is doing, which is what decides whether a turn has anything to take
 // the speaker from.
 func (p *Player) Playing() (playing, paused bool) { return p.stream.Playing() }
 
-// Stop drops the track. A turn that ends with a reply leaves nothing to come back to.
-func (p *Player) Stop() { p.stream.Stop() }
+// Pause leaves the track where it is, so it can be picked up again.
+func (p *Player) Pause() { p.stream.Pause() }
 
 // refresh tells Home Assistant what the player is doing.
 func (p *Player) refresh() { p.mp.SetState(p.state()) }

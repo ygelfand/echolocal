@@ -17,8 +17,10 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
+	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/lib/wake"
 )
 
@@ -113,13 +115,55 @@ func (v *Voice) Start(slot int) { v.turn.Start(slot) }
 // is. Cancelling is the more useful half — it is the way out of a turn that is waiting on a pipeline
 // that is not going to answer.
 func (v *Voice) Action() {
-	if v.turn.Busy() {
-		v.turn.Cancel()
+	// Anything audible is what the press meant. Asking a question is what the button is for when the
+	// device is doing nothing; while it is talking or playing, reaching for it means make it stop.
+	if v.Stop() {
 		return
 	}
+
 	// No wake word, so no slot to pair with: the first pipeline is the one Home Assistant falls back
 	// to for anything that reports no phrase.
 	v.turn.Start(0)
+}
+
+// Interrupt is the stop word.
+//
+// It only acts while the device is making a sound. "Stop" is an ordinary word: somebody halfway through
+// "stop the timer" is talking to Home Assistant, not to the device, and cutting their turn off there
+// would be worse than not listening for it at all. Nothing is playing then, so there is nothing the word
+// could sensibly mean.
+func (v *Voice) Interrupt() {
+	if !speaker.Sound().Busy() {
+		if playing, _ := media.Get().Playing(); !playing {
+			slog.Debug("stop word ignored, nothing to stop")
+			return
+		}
+	}
+	v.Stop()
+}
+
+// Stop ends whatever the device is doing audibly, and reports whether there was anything to end.
+//
+// One ladder, because there is one meaning: a turn is cancelled, a sound is silenced, a track is
+// stopped. The action button falls through to starting a turn when it returns false; a stop word has
+// nothing to fall through to and simply does nothing.
+func (v *Voice) Stop() bool {
+	if v.turn.Busy() {
+		v.turn.Cancel()
+		return true
+	}
+
+	// An announcement outside a turn: nothing is listening, but something is playing.
+	if sound := speaker.Sound(); sound.Busy() {
+		sound.Silence()
+		return true
+	}
+
+	if playing, _ := media.Get().Playing(); playing {
+		media.Get().Pause()
+		return true
+	}
+	return false
 }
 
 // ActionHold is holding the action button, which reaches the second assistant. Holding does not

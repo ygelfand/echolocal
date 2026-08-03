@@ -3,7 +3,34 @@ package config
 // Wake is the wake word configuration, indexed by Home Assistant's wake word slot.
 type Wake struct {
 	Words []WakeWord `json:"words"`
+
+	// Stop is the device's own word for interrupting what it is saying. It is not one of the slots
+	// above: Home Assistant does not choose it, and it opens no pipeline.
+	Stop Stop `json:"stop"`
 }
+
+// Stop is the interrupting word.
+type Stop struct {
+	// Threshold is the score it has to reach, on its own scale. At StopOff the word is not listened for
+	// at all: the model is left unloaded, so switching it off costs nothing rather than costing a
+	// comparison. There is no separate switch because this is one.
+	Threshold float64 `json:"threshold"`
+}
+
+const (
+	// StopOff is a threshold no score can reach, which is how the word is turned off.
+	StopOff = 1.0
+
+	// Above the 0.5 the model is calibrated for, below where spoken attempts land.
+	DefaultStopThreshold = 0.7
+)
+
+func defaultStop() Stop {
+	return Stop{Threshold: DefaultStopThreshold}
+}
+
+// Listening reports whether the stop word is being listened for.
+func (s Stop) Listening() bool { return s.Threshold < StopOff }
 
 // WakeWord is one slot: which wake word listens there and how it behaves when it fires. An empty ID
 // is the slot switched off, which is also how detection is turned off altogether.
@@ -77,6 +104,13 @@ func (w Wake) Slots(n int) []WakeWord {
 		out[i] = w.Slot(i)
 	}
 	return out
+}
+
+// StopWriter is the stop word, which belongs to no slot.
+type StopWriter struct{ st *Store }
+
+func (w StopWriter) Threshold(v float64) error {
+	return w.st.Update(func(c *Config) { c.Wake.Stop.Threshold = v })
 }
 
 type WakeWriter struct {

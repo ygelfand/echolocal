@@ -372,12 +372,9 @@ func (c *conversation) handle(e event) {
 		sounding := c.sound.Busy()
 		c.sound.Silence()
 
-		// A track is not one sound and outlives any claim, so stopping it is its own call. Cancel ends
-		// it rather than pausing it: nothing is coming back to carry on from.
-		playing, paused := c.player.Playing()
-		c.player.Stop()
-
-		if c.phase == phaseIdle && !sounding && !playing && !paused {
+		// The track is left alone. Cancelling means the turn is over, and a turn ending is what puts
+		// music back up to where it was — whoever wanted the music itself gone said so somewhere else.
+		if c.phase == phaseIdle && !sounding {
 			return
 		}
 		slog.Info("cancelled", "phase", c.phase, "slot", c.slot+1, "sounding", sounding)
@@ -466,6 +463,14 @@ func (c *conversation) start(n nextTurn) {
 	c.slot = slot
 	c.followUp = n.followUp
 
+	// Before the chime, and before Home Assistant is told anything. Ducking is what the room hears
+	// first, and it has a second of queued music to get through, so every step it waits behind is a
+	// step of full-volume music over somebody who has already started talking.
+	//
+	// It also keeps the chime out of the duck: the chime is mixed into the queue after this, so it
+	// sounds at its own level rather than being faded along with the track underneath it.
+	c.hold(true)
+
 	// A follow-up chimes like any other turn: the microphone is open with nothing said to say so.
 	// It is not a wake, though, so it does not report a phrase nobody spoke.
 	wakeword.Chime(slot)
@@ -480,8 +485,6 @@ func (c *conversation) start(n nextTurn) {
 
 	c.enter(phaseListening)
 	c.reply = reply{}
-
-	c.hold(true)
 
 	if effect := wakeword.Effect(slot); effect != "" {
 		c.claim.Play(effect, c.ring.Base())
@@ -616,6 +619,11 @@ func (c *conversation) hold(on bool) {
 		return
 	}
 	c.holding = on
+
+	// Ducked music keeps playing under the whole turn, so the echo canceller has a live reference while
+	// somebody is talking — which is the one thing an adaptive filter must not learn from. Stop it
+	// learning for the duration; it goes on cancelling with what it already knows.
+	mic.Get().SetAdapting(!on)
 
 	if on {
 		c.player.Duck()
