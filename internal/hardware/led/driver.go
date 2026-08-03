@@ -137,6 +137,8 @@ func Get() *Driver {
 // led_current is an attenuation index, not a level: 0 is full current and 3 a quarter, which is
 // where the driver leaves it at probe. It does not survive a reboot.
 func (d *Driver) Start(context.Context) error {
+	d.ring.Forget()
+
 	if err := d.ring.SetBootAnimation(false); err != nil {
 		slog.Error("disabling driver boot animation failed", "err", err)
 	}

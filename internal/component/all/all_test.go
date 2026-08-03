@@ -45,6 +45,7 @@ var registered = []string{
 	"memory_available",
 	"metrics_interval",
 	"mic_mute",
+	"microphone_cancel_echo",
 	"microphone_gain",
 	"microphone_leveling",
 	"microphone_mixing",

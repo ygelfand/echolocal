@@ -6,11 +6,13 @@
 package led
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // DefaultPath is the is31fl3236 i2c device directory.
@@ -68,6 +70,15 @@ func (r *Ring) SetAll(c Color) error {
 // Ring writes whole frames to the LED driver.
 type Ring struct {
 	Path string
+
+	// last is what was written, so a frame identical to it can be skipped. An animation is a ticker
+	// that redraws whether or not anything moved, and the ring holds what it was given with nothing
+	// driving it — the same property that lets a frame outlive the process.
+	//
+	// Nil until the first write. Start takes the ring off the kernel driver mid boot animation, so
+	// what is on it before that is not ours to assume.
+	mu   sync.Mutex
+	last []byte
 }
 
 func New() *Ring { return &Ring{Path: DefaultPath} }
@@ -81,12 +92,34 @@ func (r *Ring) path() string {
 
 func (r *Ring) attr(name string) string { return r.path() + "/" + name }
 
-// SetFrame writes all 36 channel brightnesses: twelve segments, three channels each.
+// SetFrame writes all 36 channel brightnesses: twelve segments, three channels each. A frame the
+// ring is already showing is not written again — see last.
 func (r *Ring) SetFrame(vals []byte) error {
 	if len(vals) != Channels {
 		return fmt.Errorf("led: need %d channels, got %d", Channels, len(vals))
 	}
-	return os.WriteFile(r.attr("frame"), []byte(hex.EncodeToString(vals)+"\n"), 0o644)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if bytes.Equal(vals, r.last) {
+		return nil
+	}
+	if err := os.WriteFile(r.attr("frame"), []byte(hex.EncodeToString(vals)+"\n"), 0o644); err != nil {
+		return err
+	}
+
+	r.last = append(r.last[:0], vals...)
+	return nil
+}
+
+// Forget drops what SetFrame believes is showing, so the next write happens whatever it is. Taking
+// the ring back off the kernel driver goes through here: it was animating until a moment ago and may
+// have left anything in the registers.
+func (r *Ring) Forget() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.last = nil
 }
 
 // Frame reads back the current frame.

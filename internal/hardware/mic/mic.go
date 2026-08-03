@@ -35,6 +35,9 @@ const (
 // Mics is how many of the nine channels are microphones. ch7 and ch8 are the playback loopback.
 const Mics = 7
 
+// Refs is the loopback pair that follows them, left then right.
+const Refs = Channels - Mics
+
 // CenterMic is the middle microphone: no arrival delay relative to the array, and usable with no
 // beamformer at all.
 const CenterMic = 6
@@ -73,6 +76,11 @@ type Source struct {
 	mixer  Mixer
 	mixing config.Mixing
 
+	// cancel belongs to the reader alone. cancelling is the switch, which anything may set, and is read
+	// under mu with the mixer.
+	cancel     *canceller
+	cancelling bool
+
 	// leveler and wasLeveling belong to the reader alone; leveling is the switch, which anything may
 	// set.
 	leveler     *leveler
@@ -109,12 +117,14 @@ func (s *Source) Mixing() config.Mixing {
 func New() *Source {
 	mixer, mixing := NewMixer(config.Get().Microphone.Mixing)
 	s := &Source{
-		listeners: map[int]chan []int16{},
-		raw:       map[int]chan []byte{},
-		mixer:     mixer,
-		mixing:    mixing,
-		leveler:   newLeveler(),
-		finder:    NewBeamformer(),
+		listeners:  map[int]chan []int16{},
+		raw:        map[int]chan []byte{},
+		mixer:      mixer,
+		mixing:     mixing,
+		leveler:    newLeveler(),
+		finder:     NewBeamformer(),
+		cancel:     newCanceller(),
+		cancelling: config.Get().Microphone.Cancel,
 	}
 	s.finder.hold = 1
 	s.facing.Store(-1)
@@ -253,18 +263,26 @@ func (s *Source) ListenRaw() (<-chan []byte, func()) {
 }
 
 // Decode splits an interleaved frame into one slice per microphone, narrowed to 16 bits.
-func Decode(raw []byte) [][]int16 {
+func Decode(raw []byte) [][]int16 { return decode(raw, 0, Mics) }
+
+// Reference is the playback loopback, left and right. It is what was sent to the DAC rather than
+// anything the microphones heard: bit exact, and decimated by the same hardware that decimates them,
+// so it arrives already aligned with the microphones at their rate.
+func Reference(raw []byte) [][]int16 { return decode(raw, Mics, Refs) }
+
+func decode(raw []byte, first, n int) [][]int16 {
 	const frameBytes = Channels * Bits / 8
 
 	frames := len(raw) / frameBytes
-	out := make([][]int16, Mics)
+	out := make([][]int16, n)
 	for c := range out {
 		out[c] = make([]int16, frames)
 	}
 	for f := range frames {
 		off := f * frameBytes
-		for c := range Mics {
-			out[c][f] = int16(audio.DecodeS24LE3(raw[off+c*3:off+c*3+3]) >> 8)
+		for c := range out {
+			at := off + (first+c)*3
+			out[c][f] = int16(audio.DecodeS24LE3(raw[at:at+3]) >> 8)
 		}
 	}
 	return out
@@ -309,6 +327,16 @@ func (s *Source) broadcast(raw []byte) {
 	// once it has been said, so by the time a turn starts, the words after it are already past.
 	mics := Decode(raw)
 	frame := s.mixer.Mix(mics)
+
+	// While something is playing, the echo cancelled center microphone replaces the mix. It has to be
+	// one fixed microphone: the filter learns a single acoustic path, and the beamformer would steer at
+	// the loudest thing in the room, which during playback is the speaker being cancelled.
+	if s.cancelling && s.cancel != nil {
+		if cancelled := s.cancel.apply(raw, mics); cancelled != nil {
+			frame = cancelled
+		}
+	}
+
 	s.findFacing(mics)
 	// Turning leveling off throws away what it learned, so a room it has adapted badly to is
 	// recovered by switching it off and on rather than by restarting anything.

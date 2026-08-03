@@ -33,7 +33,7 @@ const Refractory = 800 * time.Millisecond
 // through the low scores on its way to a real detection, so reporting as soon as the threshold is
 // crossed reports successes, not failures.
 const (
-	NearMiss       = 0.2
+	NearMiss       = 0.5
 	NearMissSettle = 700 * time.Millisecond
 )
 

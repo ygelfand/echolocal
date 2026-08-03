@@ -13,6 +13,10 @@ type Microphone struct {
 
 	// Mixing is how the seven microphones are combined. Which one wins depends on the room.
 	Mixing Mixing `json:"mixing"`
+
+	// Cancel subtracts what the speaker is playing from what the microphones hear, so a wake word
+	// during a reply competes with the room rather than with the reply.
+	Cancel bool `json:"cancel"`
 }
 
 const (
@@ -28,6 +32,8 @@ const (
 
 	// Home Assistant no longer levels what a satellite sends, so the device does.
 	DefaultLeveling = true
+
+	DefaultCancel = true
 )
 
 func defaultMicrophone() Microphone {
@@ -37,6 +43,7 @@ func defaultMicrophone() Microphone {
 		Gain:      DefaultMicGain,
 		Leveling:  DefaultLeveling,
 		Mixing:    DefaultMixing,
+		Cancel:    DefaultCancel,
 	}
 }
 
@@ -60,6 +67,10 @@ func (w MicrophoneWriter) Leveling(v bool) error {
 
 func (w MicrophoneWriter) Mixing(v Mixing) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Mixing = v })
+}
+
+func (w MicrophoneWriter) Cancel(v bool) error {
+	return w.st.Update(func(c *Config) { c.Microphone.Cancel = v })
 }
 
 // Mixing is how a microphone array is reduced to the single channel recognition reads.

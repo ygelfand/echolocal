@@ -24,6 +24,7 @@ type Microphone struct {
 	mixing   *esphome.Select
 	gain     *esphome.Number
 	leveling *esphome.Switch
+	cancel   *esphome.Switch
 }
 
 var (
@@ -54,6 +55,14 @@ func build() *Microphone {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		cancel: &esphome.Switch{
+			Base: esphome.Base{
+				ObjectID: "microphone_cancel_echo",
+				Name:     "Microphone echo cancellation",
+				Icon:     "mdi:waveform",
+				Category: esphome.CategoryConfig,
+			},
+		},
 		gain: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: "microphone_gain",
@@ -77,6 +86,14 @@ func build() *Microphone {
 		}
 	}
 
+	m.cancel.OnCommand = func(on bool) {
+		m.cancel.Set(on)
+		source.SetCancelling(on)
+		if err := config.Set().Microphone().Cancel(on); err != nil {
+			slog.Error("saving the echo cancellation setting failed", "err", err)
+		}
+	}
+
 	m.gain.OnCommand = func(v float32) {
 		m.gain.Set(v)
 		if err := mic.SetGain(int(v)); err != nil {
@@ -89,7 +106,7 @@ func build() *Microphone {
 func (m *Microphone) Name() string { return "microphone settings" }
 
 func (m *Microphone) Entities() []esphome.Entity {
-	return []esphome.Entity{m.mixing, m.gain, m.leveling}
+	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel}
 }
 
 // Restore puts the knobs back. The analog gain is only published here: the capture service applies
@@ -102,6 +119,10 @@ func (m *Microphone) Restore(c config.Config) {
 	m.leveling.Set(c.Microphone.Leveling)
 	source.SetLeveling(c.Microphone.Leveling)
 	slog.Info("restored", "what", m.leveling.ObjectID, "using", c.Microphone.Leveling)
+
+	m.cancel.Set(c.Microphone.Cancel)
+	source.SetCancelling(c.Microphone.Cancel)
+	slog.Info("restored", "what", m.cancel.ObjectID, "using", c.Microphone.Cancel)
 
 	m.gain.Set(float32(c.Microphone.Gain))
 	slog.Info("restored", "what", m.gain.ObjectID, "using", c.Microphone.Gain)

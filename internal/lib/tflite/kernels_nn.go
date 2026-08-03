@@ -3,10 +3,10 @@ package tflite
 import (
 	"fmt"
 	"math"
+
+	"github.com/ygelfand/echolocal/internal/lib/vec"
 )
 
-// dot is the inner product every convolution and matrix multiply bottoms out in. Four
-// accumulators keep the pipeline busy rather than serialising on one dependency chain.
 func conv2D(o *OpDesc, in, out []*Tensor) error {
 	p := o.conv
 	x, w, y := in[0], in[1], out[0]
@@ -60,7 +60,7 @@ func conv2D(o *OpDesc, in, out []*Tensor) error {
 							if hi > lo {
 								xo := (b*ih+iy)*iw + x0 + lo
 								wo := (f*kh+ky)*kw + lo
-								acc += dot(wd[wo:wo+hi-lo], xd[xo:xo+hi-lo])
+								acc += vec.Dot(wd[wo:wo+hi-lo], xd[xo:xo+hi-lo])
 							}
 							continue
 						}
@@ -72,7 +72,7 @@ func conv2D(o *OpDesc, in, out []*Tensor) error {
 							}
 							xo := ((b*ih+iy)*iw + ix) * ic
 							wo := ((f*kh+ky)*kw + kx) * ic
-							acc += dot(xd[xo:xo+ic], wd[wo:wo+ic])
+							acc += vec.Dot(xd[xo:xo+ic], wd[wo:wo+ic])
 						}
 					}
 					yd[yi] = activate(acc, p.act)
@@ -159,7 +159,7 @@ func fullyConnected(o *OpDesc, in, out []*Tensor) error {
 	for b := 0; b < batch; b++ {
 		row := x.F32[b*inC : (b+1)*inC]
 		for f := 0; f < oc; f++ {
-			acc := dot(row, w.F32[f*inC:(f+1)*inC])
+			acc := vec.Dot(row, w.F32[f*inC:(f+1)*inC])
 			if bias != nil {
 				acc += bias[f]
 			}
