@@ -10,6 +10,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -31,7 +32,6 @@ require (
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 require (
