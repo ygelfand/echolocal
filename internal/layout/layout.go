@@ -3,6 +3,8 @@
 package layout
 
 import (
+	"os"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -157,6 +159,57 @@ func NameFromMAC(mac string) string {
 		return DefaultName
 	}
 	return DefaultName + " " + s[len(s)-6:]
+}
+
+// Idme reads a factory identity field from /proc/idme, empty on any error. These are written at
+// manufacture and never change, so a caller reads once and holds it.
+func Idme(name string) string {
+	raw, err := os.ReadFile("/proc/idme/" + name)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+// Color is the device's shell, worked out from two idme fields: productid2 is 0 on a black unit and a
+// nonzero code on a white one, and the serial runs G090LF… on black against G090L9… on white. They
+// confirm each other; a disagreement, or nothing to read, is left unknown rather than guessed.
+func Color(productID2, serial string) string {
+	const (
+		black   = "black"
+		white   = "white"
+		unknown = "unknown"
+	)
+
+	prod := unknown
+	if n, err := strconv.Atoi(strings.TrimSpace(productID2)); err == nil {
+		if n == 0 {
+			prod = black
+		} else {
+			prod = white
+		}
+	}
+
+	ser := unknown
+	if s := strings.TrimSpace(serial); len(s) > 5 {
+		switch s[5] {
+		case 'F', 'f':
+			ser = black
+		case '9':
+			ser = white
+		}
+	}
+
+	switch {
+	case prod == unknown:
+		return ser
+	case ser == unknown:
+		return prod
+	case prod == ser:
+		return prod
+	default:
+		return unknown
+	}
 }
 
 // Slug turns a display name into a node name: an mDNS hostname, and the prefix Home Assistant

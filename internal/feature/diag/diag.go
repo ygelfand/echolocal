@@ -53,8 +53,9 @@ type Diag struct {
 	roomLevel   *esphome.Sensor
 	roomFloor   *esphome.Sensor
 
-	adb *esphome.Switch
-	ip  *esphome.TextSensor
+	adb   *esphome.Switch
+	ip    *esphome.TextSensor
+	color *esphome.TextSensor
 
 	signal *esphome.Sensor
 	rxRate *esphome.Sensor
@@ -89,6 +90,7 @@ func Get() *Diag {
 		shared.radio()
 		shared.remote()
 		shared.playback()
+		shared.identity()
 		shared.collector()
 	})
 	return shared
@@ -100,7 +102,7 @@ func (d *Diag) Entities() []esphome.Entity {
 	return []esphome.Entity{
 		d.cached, d.free, d.purge,
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.roomLevel, d.roomFloor,
-		d.adb, d.ip, d.signal, d.rxRate, d.txRate, d.ads,
+		d.adb, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
 		d.testPlayback, d.interval,
 	}
 }
@@ -229,6 +231,20 @@ func (d *Diag) address() {
 		ips = append(ips, ip.String())
 	}
 	d.ip.Set(strings.Join(ips, ", "))
+}
+
+// identity is what the device is rather than what it is doing. The shell colour comes off the factory
+// idme partition, which never changes, so it is read once here rather than sampled.
+func (d *Diag) identity() {
+	d.color = &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "hardware_color",
+			Name:     "Hardware color",
+			Icon:     "mdi:palette",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+	d.color.Set(layout.Color(layout.Idme("productid2"), layout.Idme("serial")))
 }
 
 // storage builds what the device says about its own disk. Cached is what could be deleted without
