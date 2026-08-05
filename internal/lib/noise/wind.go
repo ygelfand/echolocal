@@ -26,15 +26,15 @@ var windSound = Sound{
 	RMS:  1.5228,
 	New: func(g *Gen) Fill {
 		var (
-			bed             pink
-			air             lowpass
-			cut             = onePole(windAir, g.Rate)
-			band            = newReson((windLow+windHigh)/2, (windLoose+windTight)/2, g.Rate)
-			centre          = newWalk(windLow, windHigh, windWander, g.Rate)
-			ring            = newWalk(windLoose, windTight, windShape, g.Rate)
-			gust            = newWalk(windLull, windGust, windBreath, g.Rate)
-			level   float32 = 1
-			n       int
+			bed    pink
+			air    lowpass
+			cut            = onePole(windAir, g.Rate)
+			band           = newReson((windLow+windHigh)/2, (windLoose+windTight)/2, g.Rate)
+			centre         = newWalk(windLow, windHigh, windWander, g.Rate)
+			ring           = newWalk(windLoose, windTight, windShape, g.Rate)
+			gust           = newWalk(windLull, windGust, windBreath, g.Rate)
+			level  float32 = 1
+			n      int
 		)
 
 		return func(dst []float32) {
