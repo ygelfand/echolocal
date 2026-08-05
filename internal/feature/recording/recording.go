@@ -1,20 +1,31 @@
-// Package recording keeps the last few turns as audio, and serves them to Home Assistant.
+// Package recording keeps the last few turns as audio on disk, and serves them to Home Assistant.
 //
 // What is kept is exactly what was sent to be transcribed, so listening back answers the question a
 // transcript raises: whether the device mis-heard, or heard correctly and the pipeline did the rest.
+//
+// Each kept turn is two files named by its id: the WAV, and a metadata sidecar. A turn is complete
+// only once both are written, which is what lets pruning tell a finished recording from one a crash
+// left half-written.
 package recording
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
+	"github.com/ygelfand/echolocal/internal/layout"
 )
 
 // Slots is how many assistants there are to keep recordings for. Named here rather than taken from the
@@ -30,30 +41,37 @@ func init() {
 const Page = 32 * 1024
 
 // Longest is how much of one turn is kept. A request is seconds long; a microphone left open by a
-// pipeline that never closed the run is not, and the memory is not there to hold it.
+// pipeline that never closed the run is not, and the memory holding a turn until it closes is not
+// there for that.
 const Longest = 30 * mic.Rate * 2
 
-// Keep is how many recordings an assistant holds, and the most it can be set to. One is the useful
-// default: the reason to listen back is almost always the turn that just went wrong.
+// KeepMost is the most an assistant can be set to hold. A fresh device keeps none: recording what
+// someone said is off until they turn it on.
+const KeepMost = 10
+
 const (
-	KeepDefault = 1
-	KeepMost    = 10
+	wavExt  = ".wav"
+	metaExt = ".json"
 )
 
-type held struct {
-	id    string
-	slot  int
-	audio []byte
+// meta is what is stored beside a recording: enough to prune it and to report its length after a
+// restart, without re-reading the audio.
+type meta struct {
+	Slot  int   `json:"slot"`
+	Bytes int   `json:"bytes"`
+	At    int64 `json:"at"`
 }
 
 type Store struct {
+	// mu guards the turn being recorded. open is its id, empty between turns; buf gathers its audio.
 	mu   sync.Mutex
-	kept []held
-
-	// open is the turn being recorded, by id, so a frame knows where to go without the caller holding
-	// anything. Empty between turns.
 	open string
 	slot int
+	buf  []byte
+
+	// disk serialises writing a recording against pruning, so a sweep cannot delete a turn in the
+	// instant between its two files being written.
+	disk sync.Mutex
 
 	// One per assistant, because how much of an assistant is worth keeping is about what it is for.
 	keep []*esphome.Number
@@ -87,7 +105,7 @@ func Get() *Store {
 				if err := config.Set().Wake(slot).Recordings(int(v)); err != nil {
 					slog.Error("saving how many recordings to keep failed", "slot", slot+1, "err", err)
 				}
-				shared.prune()
+				shared.Prune()
 			}
 			shared.keep = append(shared.keep, number)
 		}
@@ -113,7 +131,7 @@ func (s *Store) Restore(c config.Config) {
 		}
 		number.Set(float32(count))
 	}
-	s.prune()
+	s.Prune()
 }
 
 // Actions is how Home Assistant fetches one. Paged because a recording is far larger than a message.
@@ -137,13 +155,10 @@ func (s *Store) Opens(id string, slot int) {
 	defer s.mu.Unlock()
 
 	if keeps(slot) <= 0 {
-		s.open = ""
+		s.open, s.buf = "", nil
 		return
 	}
-
-	s.open, s.slot = id, slot
-	s.kept = append(s.kept, held{id: id, slot: slot})
-	s.trim()
+	s.open, s.slot, s.buf = id, slot, nil
 }
 
 // Frame takes audio for whichever turn is open. Called from the streamer, which does not know or care
@@ -152,74 +167,64 @@ func (s *Store) Frame(pcm []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.open == "" || len(s.kept) == 0 {
+	if s.open == "" || len(s.buf) >= Longest {
 		return
 	}
-
-	at := &s.kept[len(s.kept)-1]
-	if at.id != s.open || len(at.audio) >= Longest {
-		return
-	}
-	at.audio = append(at.audio, pcm...)
+	s.buf = append(s.buf, pcm...)
 }
 
-// Closes stops recording. A turn that gathered nothing is dropped rather than kept as an empty entry
-// somebody could press play on.
+// Closes stops recording and writes what was gathered. A turn that gathered nothing is dropped rather
+// than saved as an empty file somebody could press play on.
 func (s *Store) Closes() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	id, slot, buf := s.open, s.slot, s.buf
+	s.open, s.buf = "", nil
+	s.mu.Unlock()
 
-	if s.open == "" {
+	if id == "" || len(buf) == 0 {
 		return
 	}
-	s.open = ""
 
-	if n := len(s.kept); n > 0 && len(s.kept[n-1].audio) == 0 {
-		s.kept = s.kept[:n-1]
+	s.disk.Lock()
+	defer s.disk.Unlock()
+
+	if err := write(id, slot, buf); err != nil {
+		slog.Error("saving a recording failed", "id", id, "err", err)
+		return
 	}
+	s.prune()
 }
 
 // Seconds is how long a turn's recording runs, and zero when there is none, which is what a turn
-// reports so nothing offers to play what was never kept.
+// reports so nothing offers to play what was never kept. Read from the sidecar so it is still right
+// for a recording that outlived the process that made it.
 func (s *Store) Seconds(id string) float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, one := range s.kept {
-		if one.id == id {
-			return float64(len(one.audio)) / float64(mic.Rate*2)
-		}
+	m, err := readMeta(id)
+	if err != nil {
+		return 0
 	}
-	return 0
+	return float64(m.Bytes) / float64(mic.Rate*2)
 }
 
-// Answer is one page of a recording, as the frontend expects it.
+// Answer is one page of a recording, as the frontend expects it. Version is the contract the reader
+// checks: an answer without it is rejected, so it is not optional.
 type Answer struct {
-	ID    string `json:"id"`
-	Page  int    `json:"page"`
-	Pages int    `json:"pages"`
-	MIME  string `json:"mime"`
-	Data  string `json:"data"`
+	Version int    `json:"version"`
+	ID      string `json:"id"`
+	Page    int    `json:"page"`
+	Pages   int    `json:"pages"`
+	MIME    string `json:"mime"`
+	Data    string `json:"data"`
 }
 
-// page wraps the audio as a WAV and hands back one slice of it. The header goes on the whole thing
-// before paging, so the first page opens as audio on its own and the rest append to it.
+// page reads the WAV and hands back one slice of it. The whole file is already a WAV, so the first
+// page opens as audio on its own and the rest append to it.
 func (s *Store) page(id string, page int) (*Answer, error) {
-	s.mu.Lock()
-	audio := []byte(nil)
-	for _, one := range s.kept {
-		if one.id == id {
-			audio = one.audio
-			break
-		}
-	}
-	s.mu.Unlock()
-
-	if audio == nil {
+	whole, err := os.ReadFile(wavPath(id))
+	if err != nil {
 		return nil, fmt.Errorf("no recording for turn %s", id)
 	}
 
-	whole := wav(audio)
 	pages := (len(whole) + Page - 1) / Page
 	if page < 0 || page >= pages {
 		return nil, fmt.Errorf("page %d of %d", page, pages)
@@ -227,12 +232,73 @@ func (s *Store) page(id string, page int) (*Answer, error) {
 
 	end := min((page+1)*Page, len(whole))
 	return &Answer{
-		ID:    id,
-		Page:  page,
-		Pages: pages,
-		MIME:  "audio/wav",
-		Data:  base64.StdEncoding.EncodeToString(whole[page*Page : end]),
+		Version: 1,
+		ID:      id,
+		Page:    page,
+		Pages:   pages,
+		MIME:    "audio/wav",
+		Data:    base64.StdEncoding.EncodeToString(whole[page*Page : end]),
 	}, nil
+}
+
+// Prune keeps the newest few for each assistant and clears away the rest, so a slot set lower, a
+// recording left by a restart, or a half-written file a crash left behind does not linger.
+func (s *Store) Prune() {
+	s.disk.Lock()
+	defer s.disk.Unlock()
+	s.prune()
+}
+
+// prune assumes the disk lock is held.
+func (s *Store) prune() {
+	entries, err := os.ReadDir(layout.RecordingDir)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		slog.Error("reading the recordings failed", "dir", layout.RecordingDir, "err", err)
+		return
+	}
+
+	type rec struct {
+		id string
+		at int64
+	}
+	bySlot := map[int][]rec{}
+	complete := map[string]bool{}
+	wavs := []string{}
+
+	for _, e := range entries {
+		switch name := e.Name(); {
+		case strings.HasSuffix(name, metaExt):
+			id := strings.TrimSuffix(name, metaExt)
+			m, err := readMeta(id)
+			if err != nil {
+				continue
+			}
+			complete[id] = true
+			bySlot[m.Slot] = append(bySlot[m.Slot], rec{id, m.At})
+		case strings.HasSuffix(name, wavExt):
+			wavs = append(wavs, strings.TrimSuffix(name, wavExt))
+		}
+	}
+
+	for slot, recs := range bySlot {
+		sort.Slice(recs, func(i, j int) bool { return recs[i].at > recs[j].at })
+		for i, r := range recs {
+			if i >= keeps(slot) {
+				remove(r.id)
+			}
+		}
+	}
+
+	// A WAV without its sidecar is a turn a crash cut short. Pruning runs minutes apart while a close
+	// writes both back to back, so this only ever catches a genuine leftover.
+	for _, id := range wavs {
+		if !complete[id] {
+			remove(id)
+		}
+	}
 }
 
 // keeps is how many recordings an assistant is set to hold.
@@ -244,33 +310,40 @@ func keeps(slot int) int {
 	return max(words[slot].Recordings, 0)
 }
 
-// trim keeps the newest few for each assistant, counted per assistant so a busy one cannot push out
-// what the other just recorded.
-func (s *Store) trim() {
-	seen := map[int]int{}
-	out := make([]held, 0, len(s.kept))
+func write(id string, slot int, pcm []byte) error {
+	if err := os.MkdirAll(layout.RecordingDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(wavPath(id), wav(pcm), 0o644); err != nil {
+		return err
+	}
 
-	for i := len(s.kept) - 1; i >= 0; i-- {
-		one := s.kept[i]
-		if seen[one.slot] >= keeps(one.slot) {
-			continue
+	blob, err := json.Marshal(meta{Slot: slot, Bytes: len(pcm), At: time.Now().Unix()})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath(id), blob, 0o644)
+}
+
+func remove(id string) {
+	for _, path := range []string{wavPath(id), metaPath(id)} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			slog.Error("removing a recording failed", "path", path, "err", err)
 		}
-		seen[one.slot]++
-		out = append(out, one)
 	}
-
-	// Reversed back, so the newest stays last and Frame can find the open turn at the end.
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	s.kept = out
 }
 
-func (s *Store) prune() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.trim()
+func readMeta(id string) (meta, error) {
+	blob, err := os.ReadFile(metaPath(id))
+	if err != nil {
+		return meta{}, err
+	}
+	var m meta
+	return m, json.Unmarshal(blob, &m)
 }
+
+func wavPath(id string) string  { return filepath.Join(layout.RecordingDir, id+wavExt) }
+func metaPath(id string) string { return filepath.Join(layout.RecordingDir, id+metaExt) }
 
 // wav is a 16-bit mono header for what the microphone gives, which is the only format kept.
 func wav(pcm []byte) []byte {

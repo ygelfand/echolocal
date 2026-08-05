@@ -107,6 +107,9 @@ const StatePath = StateDir + "/state.json"
 // /system is mounted read-only.
 const ModelDir = StateDir + "/models"
 
+// RecordingDir holds the kept turn audio, one WAV and one metadata file per turn, named by turn id.
+const RecordingDir = StateDir + "/recordings"
+
 // Free is the space left on the filesystem holding path, in bytes.
 func Free(path string) (int64, error) {
 	var fs syscall.Statfs_t

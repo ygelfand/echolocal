@@ -19,6 +19,7 @@ import (
 	_ "github.com/ygelfand/echolocal/internal/feature/feedback"
 	_ "github.com/ygelfand/echolocal/internal/feature/firmware"
 	_ "github.com/ygelfand/echolocal/internal/feature/light"
+	_ "github.com/ygelfand/echolocal/internal/feature/maintenance"
 	_ "github.com/ygelfand/echolocal/internal/feature/media"
 	_ "github.com/ygelfand/echolocal/internal/feature/microphone"
 	_ "github.com/ygelfand/echolocal/internal/feature/mute"

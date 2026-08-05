@@ -57,7 +57,7 @@ type WakeWord struct {
 	MaxListen int `json:"max_listen"`
 	MaxThink  int `json:"max_think"`
 
-	// Recordings is how many of this slot's turns to keep the audio of, held in memory. Zero keeps none.
+	// Recordings is how many of this slot's turns to keep the audio of on disk. Zero keeps none.
 	Recordings int `json:"recordings"`
 }
 
