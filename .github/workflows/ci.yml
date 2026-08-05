@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: vet
+        run: make vet
+
+      - name: test
+        run: make test
+
+      # The race detector needs cgo, which the rest of the build deliberately does without.
+      - name: test -race
+        run: make test-race
+        env:
+          CGO_ENABLED: 1
+
+      # Most of this code only ever runs on the device, and a build tagged or arch-gated wrongly
+      # passes on the host while failing there.
+      - name: cross-compile for the device
+        run: make build-echod
+
+      - name: build without the assembly
+        run: make build-echod TAGS=noasm
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
