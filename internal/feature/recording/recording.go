@@ -134,9 +134,17 @@ func (s *Store) Restore(c config.Config) {
 	s.Prune()
 }
 
-// Actions is how Home Assistant fetches one. Paged because a recording is far larger than a message.
+// Actions is how Home Assistant reaches a recording: recordings lists what is held, turn_audio fetches
+// one, paged because a recording is far larger than a message.
 func (s *Store) Actions() []*esphome.Action {
 	return []*esphome.Action{
+		{
+			Name:    "recordings",
+			Answers: true,
+			Run: func(esphome.Call) (any, error) {
+				return s.available()
+			},
+		},
 		{
 			Name:    "turn_audio",
 			Args:    []esphome.Arg{{Name: "id", Type: esphome.ArgString}, {Name: "page", Type: esphome.ArgInt}},
@@ -146,6 +154,34 @@ func (s *Store) Actions() []*esphome.Action {
 			},
 		},
 	}
+}
+
+// Available is the ids the device still holds audio for, so the card offers to play only those rather
+// than every turn that once had a recording. A turn's event says it had audio for as long as the event
+// lives; the file behind it does not.
+type Available struct {
+	Version int      `json:"version"`
+	IDs     []string `json:"ids"`
+}
+
+func (s *Store) available() (*Available, error) {
+	out := &Available{Version: 1, IDs: []string{}}
+
+	entries, err := os.ReadDir(layout.RecordingDir)
+	if os.IsNotExist(err) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Keyed off the metadata, so a WAV still being written or left by a crash is not offered as ready.
+	for _, e := range entries {
+		if name := e.Name(); strings.HasSuffix(name, metaExt) {
+			out.IDs = append(out.IDs, strings.TrimSuffix(name, metaExt))
+		}
+	}
+	return out, nil
 }
 
 // Opens starts recording a turn. An assistant set to keep none records nothing, which is how somebody
