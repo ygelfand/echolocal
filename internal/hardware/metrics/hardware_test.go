@@ -23,6 +23,9 @@ func board(t *testing.T) Reader {
 		"sys/devices/system/cpu/online":        "0-1\n",
 		"proc/loadavg":                         "7.40 7.30 7.25 5/623 6841\n",
 		"proc/meminfo":                         "MemTotal:         482956 kB\nMemFree:           25708 kB\nMemAvailable:     247308 kB\n",
+		// The board declares two light sensors and binds whichever is fitted, so this is not always
+		// iio:device0. Put it elsewhere to prove it is searched for.
+		"sys/bus/iio/devices/iio:device2/illuminance0_input": "556\n",
 	} {
 		full := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -121,9 +124,24 @@ func TestMissingFilesAreUnknownNotZero(t *testing.T) {
 
 	for name, got := range map[string]Reading{
 		"present": present, "online": online, "load": one, "available": available,
+		"lux": r.Lux(r.LuxPath()),
 	} {
 		if got.Known {
 			t.Errorf("%s reported %v, want unknown", name, got.Value)
 		}
+	}
+}
+
+func TestLux(t *testing.T) {
+	r := board(t)
+
+	// Found where it actually is, not assumed to be the first iio device.
+	path := r.LuxPath()
+	if path == "" {
+		t.Fatal("LuxPath() found no sensor")
+	}
+
+	if got := r.Lux(path); !got.Known || got.Value != 556 {
+		t.Errorf("Lux() = %v, want 556", got)
 	}
 }

@@ -50,8 +50,11 @@ type Diag struct {
 	coresOnline *esphome.Sensor
 	load        *esphome.Sensor
 	memory      *esphome.Sensor
+	lux         *esphome.Sensor
 	roomLevel   *esphome.Sensor
 	roomFloor   *esphome.Sensor
+
+	luxPath string
 
 	adb   *esphome.Switch
 	ip    *esphome.TextSensor
@@ -101,7 +104,8 @@ func (d *Diag) Name() string { return "diagnostics" }
 func (d *Diag) Entities() []esphome.Entity {
 	return []esphome.Entity{
 		d.cached, d.free, d.purge,
-		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.roomLevel, d.roomFloor,
+		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.lux,
+		d.roomLevel, d.roomFloor,
 		d.adb, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
 		d.testPlayback, d.interval,
 	}
@@ -397,6 +401,17 @@ func (d *Diag) hardware() {
 		DeviceClass: "data_size",
 		StateClass:  esphome.StateClassMeasurement,
 	}
+
+	d.luxPath = metrics.Reader{}.LuxPath()
+	d.lux = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "lux", Name: "Lux", Icon: "mdi:brightness-6",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:        "lx",
+		DeviceClass: "illuminance",
+		StateClass:  esphome.StateClassMeasurement,
+	}
 }
 
 // Measure republishes what the disk holds. Called at start-up and after anything that adds to the cache
@@ -486,6 +501,8 @@ func (d *Diag) board() {
 
 	available, _ := r.Memory()
 	set(d.memory, available)
+
+	set(d.lux, r.Lux(d.luxPath))
 }
 
 // reading picks one thermal zone out of what was found.
