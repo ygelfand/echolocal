@@ -34,6 +34,8 @@ var registered = []string{
 	"free_space",
 	"headphones",
 	"ip_address",
+	"keep_recordings_1",
+	"keep_recordings_2",
 	"last_heard",
 	"last_reply",
 	"last_wake_word",

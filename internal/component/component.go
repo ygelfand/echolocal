@@ -78,6 +78,12 @@ type Entities interface {
 	Entities() []esphome.Entity
 }
 
+// Actions is what Home Assistant may call on the component. An action serves what an entity cannot: it
+// takes arguments and can answer with anything that encodes as JSON.
+type Actions interface {
+	Actions() []*esphome.Action
+}
+
 // Handler is a component that answers protocol messages itself rather than through an entity, which
 // is the voice satellite and the Bluetooth proxy.
 type Handler interface {
@@ -96,6 +102,15 @@ type Restorer interface {
 // A hook rather than a call, so a component can ask for one without knowing what is listening — the
 // server is a component like any other and may not exist.
 var Reconnect hook.Hook[struct{}]
+
+// Event is something to put on Home Assistant's bus. A hook for the same reason as Reconnect: the server
+// imports the features whose handlers it serves, so they cannot import it back.
+type Event struct {
+	Name string
+	Data map[string]string
+}
+
+var Fire hook.Hook[Event]
 
 // Subscribed fires when Home Assistant asks for state, which is the first moment anything sent to it
 // will arrive. Something that happened while the device was alone waits for this.

@@ -71,7 +71,8 @@ func Get() *WakeWord {
 // to one of them reads together, beside Home Assistant's own Assistant and Wake word selects for the
 // same slot.
 func newSlot(n int) slot {
-	prefix := fmt.Sprintf("Assistant %d wake word", n+1)
+	// Names carry no assistant number: these sit on the assistant's own sub-device, and Home Assistant
+	// puts its name in front of every one of them.
 	on := component.AssistantDevice(n)
 
 	s := slot{
@@ -79,7 +80,7 @@ func newSlot(n int) slot {
 		wake: &esphome.Button{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("wake_assistant_%d", n+1),
-				Name:     fmt.Sprintf("Wake assistant %d", n+1),
+				Name:     "Wake",
 				Icon:     "mdi:account-voice",
 			},
 			OnPress: func() { Requested.Emit(n) },
@@ -87,7 +88,7 @@ func newSlot(n int) slot {
 		threshold: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("wake_threshold_%d", n+1),
-				Name:     prefix + " sensitivity",
+				Name:     "Wake word sensitivity",
 				Icon:     "mdi:tune",
 				Category: esphome.CategoryConfig,
 			},
@@ -97,7 +98,7 @@ func newSlot(n int) slot {
 		tone: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("wake_tone_%d", n+1),
-				Name:     prefix + " tone",
+				Name:     "Wake word tone",
 				Icon:     "mdi:music-note",
 				Category: esphome.CategoryConfig,
 			},
@@ -106,7 +107,7 @@ func newSlot(n int) slot {
 		effect: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("wake_effect_%d", n+1),
-				Name:     prefix + " effect",
+				Name:     "Wake word effect",
 				Icon:     "mdi:animation",
 				Category: esphome.CategoryConfig,
 			},
@@ -115,7 +116,7 @@ func newSlot(n int) slot {
 		delivery: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("reply_delivery_%d", n+1),
-				Name:     fmt.Sprintf("Assistant %d reply delivery", n+1),
+				Name:     "Reply delivery",
 				Icon:     "mdi:download-network",
 				Category: esphome.CategoryConfig,
 			},
@@ -124,7 +125,7 @@ func newSlot(n int) slot {
 		buffer: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("reply_buffer_%d", n+1),
-				Name:     fmt.Sprintf("Assistant %d reply buffer", n+1),
+				Name:     "Reply buffer",
 				Icon:     "mdi:buffer",
 				Category: esphome.CategoryConfig,
 			},
@@ -134,7 +135,7 @@ func newSlot(n int) slot {
 		followUp: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("follow_up_%d", n+1),
-				Name:     fmt.Sprintf("Assistant %d follow-up time", n+1),
+				Name:     "Follow-up time",
 				Icon:     "mdi:comment-question-outline",
 				Category: esphome.CategoryConfig,
 			},
@@ -144,7 +145,7 @@ func newSlot(n int) slot {
 		maxListen: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("max_listen_%d", n+1),
-				Name:     fmt.Sprintf("Assistant %d max listening time", n+1),
+				Name:     "Max listening time",
 				Icon:     "mdi:timer-outline",
 				Category: esphome.CategoryConfig,
 			},
@@ -154,7 +155,7 @@ func newSlot(n int) slot {
 		maxThink: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("max_think_%d", n+1),
-				Name:     fmt.Sprintf("Assistant %d max thinking time", n+1),
+				Name:     "Max thinking time",
 				Icon:     "mdi:timer-sand",
 				Category: esphome.CategoryConfig,
 			},

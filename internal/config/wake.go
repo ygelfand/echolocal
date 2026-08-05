@@ -56,6 +56,9 @@ type WakeWord struct {
 	// it, so that one is a backstop; thinking holds only the ring, and a model can take a minute.
 	MaxListen int `json:"max_listen"`
 	MaxThink  int `json:"max_think"`
+
+	// Recordings is how many of this slot's turns to keep the audio of, held in memory. Zero keeps none.
+	Recordings int `json:"recordings"`
 }
 
 const (
@@ -152,6 +155,10 @@ func (w WakeWriter) MaxListen(seconds int) error {
 
 func (w WakeWriter) MaxThink(seconds int) error {
 	return w.word(func(word *WakeWord) { word.MaxThink = seconds })
+}
+
+func (w WakeWriter) Recordings(count int) error {
+	return w.word(func(word *WakeWord) { word.Recordings = count })
 }
 
 // word grows the list to reach the slot, so slot 1 can be set on a device where slot 0 never was.

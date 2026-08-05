@@ -16,6 +16,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/light"
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/mute"
+	"github.com/ygelfand/echolocal/internal/feature/recording"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
@@ -142,6 +143,10 @@ type conversation struct {
 	// rather than Home Assistant having gone away.
 	followUp bool
 
+	// turn measures the one that is open and reports it when it closes. Nil while idle, and every
+	// method on it tolerates that, so the phases do not each have to check.
+	turn *activity.Turn
+
 	// pending is a turn owed once the current one has finished closing, nil when none.
 	//
 	// Home Assistant's events carry no run identifier, so a turn started while the last one is still
@@ -261,6 +266,7 @@ func (c *conversation) handle(e event) {
 			slog.Info("heard", "slot", c.slot+1, "text", e.text)
 			c.log.Heard(e.text)
 		}
+		c.turn.Heard(e.text)
 		if c.phase == phaseListening {
 			c.think()
 		}
@@ -268,6 +274,7 @@ func (c *conversation) handle(e event) {
 	case evReplyText:
 		slog.Info("replying", "slot", c.slot+1, "text", e.text)
 		c.log.Replied(e.text)
+		c.turn.Replying(e.text)
 		if c.phase == phaseListening {
 			c.think()
 		}
@@ -318,7 +325,7 @@ func (c *conversation) handle(e event) {
 		c.reported(e.at)
 		if c.phase == phaseReplying {
 			slot := c.slot
-			c.idle("spoken")
+			c.idle("spoken", activity.Completed)
 
 			// Continual conversation: the slot keeps listening after every reply, not only the ones
 			// Home Assistant asked to continue.
@@ -337,7 +344,7 @@ func (c *conversation) handle(e event) {
 		}
 		// A reply is on its way or playing and owns the ring and the player until it has been heard.
 		if c.phase != phaseReplying {
-			c.idle("ended")
+			c.idle("ended", activity.Completed)
 		}
 
 	case evPending:
@@ -354,14 +361,14 @@ func (c *conversation) handle(e event) {
 		if e.code == errDuplicate {
 			slog.Info("another device answered first", "slot", c.slot+1, "message", e.msg)
 			c.clearPending()
-			c.idle("answered elsewhere")
+			c.idle("answered elsewhere", activity.Cancelled)
 			c.leds.Busy().Flash(led.WorkElsewhere, yieldFlash)
 			return
 		}
 
 		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
 		c.clearPending()
-		c.idle("failed")
+		c.idle("failed", activity.Failed)
 		c.trouble()
 
 	case evCancel:
@@ -378,7 +385,7 @@ func (c *conversation) handle(e event) {
 			return
 		}
 		slog.Info("cancelled", "phase", c.phase, "slot", c.slot+1, "sounding", sounding)
-		c.idle("cancelled")
+		c.idle("cancelled", activity.Cancelled)
 		feedback.Cancelled()
 
 	case evTimeout:
@@ -389,7 +396,7 @@ func (c *conversation) handle(e event) {
 		// thinking means its pipeline is slower than the slot allows for.
 		if c.followUp && c.phase == phaseListening {
 			slog.Info("nothing followed", "slot", c.slot+1)
-			c.idle("nothing said")
+			c.idle("nothing said", activity.Cancelled)
 			return
 		}
 
@@ -399,7 +406,7 @@ func (c *conversation) handle(e event) {
 		case phaseThinking:
 			slog.Warn("gave up waiting for an answer", "slot", c.slot+1, "after", wakeword.MaxThink(c.slot))
 		}
-		c.idle("timed out")
+		c.idle("timed out", activity.Timeout)
 		c.trouble()
 	}
 }
@@ -434,7 +441,7 @@ func (c *conversation) start(n nextTurn) {
 		// Held back before the turn ends, so that ending it does not hand the speaker back to a track
 		// for the moment it takes the next turn to open.
 		c.pending = &nextTurn{slot: slot}
-		c.idle("interrupted")
+		c.idle("interrupted", activity.Cancelled)
 
 		// The stopped run has yet to close, and its last events are still on their way.
 		c.grace = time.NewTimer(graceStart)
@@ -477,6 +484,8 @@ func (c *conversation) start(n nextTurn) {
 	if !n.followUp {
 		c.log.Woke(phrase)
 	}
+	c.turn = c.log.Begin(slot+1, phrase)
+	recording.Get().Opens(c.turn.ID(), slot)
 	if err := c.vs.StartTurn(phrase, audioSettings()); err != nil {
 		slog.Error("starting the turn failed", "slot", slot+1, "err", err)
 		c.trouble()
@@ -484,6 +493,7 @@ func (c *conversation) start(n nextTurn) {
 	}
 
 	c.enter(phaseListening)
+	c.turn.Listening()
 	c.reply = reply{}
 
 	if effect := wakeword.Effect(slot); effect != "" {
@@ -563,7 +573,9 @@ func (c *conversation) speak(url string) {
 }
 
 // idle puts everything back. why is only for the log.
-func (c *conversation) idle(why string) {
+// idle closes whatever is open. The outcome is passed rather than read back out of why, so a new way
+// for a turn to end cannot quietly report itself as one of the old ones.
+func (c *conversation) idle(why string, how activity.Outcome) {
 	was := c.phase
 	c.stopStreaming()
 	c.disarm()
@@ -571,6 +583,12 @@ func (c *conversation) idle(why string) {
 	if was != phaseIdle {
 		_ = c.vs.StopTurn()
 	}
+
+	kept := recording.Get()
+	kept.Closes()
+	c.turn.Records(kept.Seconds(c.turn.ID()))
+	c.turn.Ends(how)
+	c.turn = nil
 
 	c.enter(phaseIdle)
 	c.claim.Clear()
@@ -784,6 +802,8 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 		for _, s := range pre {
 			buf = append(buf, byte(s), byte(s>>8))
 		}
+		recording.Get().Frame(buf)
+
 		if err := c.vs.SendAudio(buf); err != nil {
 			slog.Error("sending audio history failed", "err", err)
 			return
@@ -850,6 +870,8 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 				energy += float64(s) * float64(s)
 				samples++
 			}
+			recording.Get().Frame(buf)
+
 			if err := c.vs.SendAudio(buf); err != nil {
 				slog.Error("sending audio failed", "err", err)
 				return

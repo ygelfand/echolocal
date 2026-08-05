@@ -85,6 +85,17 @@ func (r *Registry) Entities() []esphome.Entity {
 	return out
 }
 
+// Actions is everything the components let Home Assistant call.
+func (r *Registry) Actions() []*esphome.Action {
+	var out []*esphome.Action
+	for _, e := range r.sorted() {
+		if acts, ok := e.c.(Actions); ok {
+			out = append(out, acts.Actions()...)
+		}
+	}
+	return out
+}
+
 // Handlers is the components that answer protocol messages themselves.
 func (r *Registry) Handlers() []esphome.Handler {
 	var out []esphome.Handler

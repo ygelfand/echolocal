@@ -47,6 +47,7 @@ func Get() *API {
 	once.Do(func() {
 		shared = &API{reconnect: make(chan struct{}, 1)}
 		component.Reconnect.Listen(func(struct{}) { shared.Reconnect() })
+		component.Fire.Listen(func(e component.Event) { shared.fire(e) })
 	})
 	return shared
 }
@@ -68,6 +69,9 @@ func (a *API) Start(context.Context) error {
 	device := config.Get().Device
 	ents := esphome.NewEntities()
 	if err := ents.Add(component.Default().Entities()...); err != nil {
+		return err
+	}
+	if err := ents.AddActions(component.Default().Actions()...); err != nil {
 		return err
 	}
 
@@ -156,6 +160,18 @@ func (a *API) Run(ctx context.Context) error {
 		// changed: a client is told what the device is once, when it connects.
 		a.srv.Info.BluetoothFeatures = bluetooth.Get().Features()
 		slog.Info("serving again", "bluetooth", a.srv.Info.BluetoothFeatures)
+	}
+}
+
+// fire puts an event on Home Assistant's bus. Nothing happens before the server is up or while no
+// client is subscribed: an event nobody is listening for is not a failure, and the component that
+// asked for it has nothing useful to do about one.
+func (a *API) fire(e component.Event) {
+	if a.srv == nil {
+		return
+	}
+	if err := a.srv.FireEvent(e.Name, e.Data); err != nil {
+		slog.Debug("firing an event failed", "event", e.Name, "err", err)
 	}
 }
 
