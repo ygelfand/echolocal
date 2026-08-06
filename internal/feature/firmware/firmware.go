@@ -208,16 +208,24 @@ func (u *Firmware) command(cmd esphome.UpdateCommand) {
 	}
 }
 
-// Install replaces this binary with what the last check found, and asks for the restart that puts it in
-// service. Progress goes to Home Assistant as it downloads, since sixteen megabytes over a satellite's
-// wifi is long enough to look stuck.
+// Install replaces this binary with what the channel is serving, and asks for the restart that puts it
+// in service. Progress goes to Home Assistant as it downloads, since sixteen megabytes over a
+// satellite's wifi is long enough to look stuck.
 //
 // Nothing is installed that was not offered: the version comes from the manifest this device fetched,
 // not from Home Assistant, which has no way to name one.
 func (u *Firmware) Install(ctx context.Context) {
-	u.mu.Lock()
-	found := u.found
-	u.mu.Unlock()
+	found, err := update.Fetch(ctx, u.Channel())
+	if err != nil {
+		slog.Warn("re-reading the channel failed, using the last check", "err", err)
+		u.mu.Lock()
+		found = u.found
+		u.mu.Unlock()
+	} else {
+		u.mu.Lock()
+		u.found = found
+		u.mu.Unlock()
+	}
 
 	if found.Version == "" || found.Version == layout.Version {
 		slog.Warn("an install was asked for with nothing to install", "running", layout.Version)
@@ -231,7 +239,7 @@ func (u *Firmware) Install(ctx context.Context) {
 	defer working.Done()
 
 	u.progress(found, 0)
-	err := update.Install(ctx, found, func(at float32) { u.progress(found, at) })
+	err = update.Install(ctx, found, func(at float32) { u.progress(found, at) })
 
 	// Home Assistant learns nothing from the command it sent — the update entity has no way to say an
 	// install failed, and the card just goes back to offering it. So the failure has to arrive as state,
