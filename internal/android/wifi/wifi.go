@@ -85,7 +85,9 @@ func (n Network) String() string {
 // Scan lists what the device can see, strongest first, one entry per name. Several access points share
 // a name in any real building, and a name is what a person picks.
 func Scan(ctx context.Context, d *device.Device) ([]Network, error) {
-	if _, err := run(d, "scan"); err != nil {
+	// FAIL-BUSY is the supplicant saying it is already scanning, which the framework has it doing on
+	// its own schedule. The results this waits for are the ones that scan produces.
+	if out, err := run(d, "scan"); err != nil && !strings.Contains(out, "FAIL-BUSY") {
 		return nil, err
 	}
 

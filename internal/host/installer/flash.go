@@ -172,6 +172,46 @@ func (r *run) done() (string, bool) {
 	return "", false
 }
 
+// settle waits for recovery to be answering again. Wait returns as soon as it is, so this costs
+// nothing when adbd never went away.
+func (r *run) settle() error {
+	ctx, cancel := context.WithTimeout(r.ctx, recoveryTimeout)
+	defer cancel()
+
+	return r.d.Wait(ctx, device.StateRecovery)
+}
+
+// stageTries is how many times the image is sent before giving up. One restart of recovery's adbd is
+// what this is for, and it only happens once per boot.
+const stageTries = 3
+
+// stage puts the image on the device and does not return until what is there is the image.
+func (r *run) stage() error {
+	var last string
+
+	for try := range stageTries {
+		if err := r.settle(); err != nil {
+			return err
+		}
+		if err := r.d.Stream(remoteImage, r.cfg.BootImage); err != nil && try == stageTries-1 {
+			return err
+		}
+		if err := r.settle(); err != nil {
+			return err
+		}
+
+		staged, err := sha256Of(r.d, "cat "+remoteImage)
+		if err != nil && try == stageTries-1 {
+			return err
+		}
+		if staged == bootimg.Ours.SHA256 {
+			return nil
+		}
+		last = staged
+	}
+	return fmt.Errorf("the staged image hashes to %s, want %s", last, bootimg.Ours.SHA256)
+}
+
 func bootRecovery(r *run) (string, bool, error) {
 	if detail, skip := r.done(); skip {
 		return detail, true, nil
@@ -238,17 +278,12 @@ func writeImage(r *run) (string, bool, error) {
 		return detail, true, nil
 	}
 
-	if err := r.d.Stream(remoteImage, r.cfg.BootImage); err != nil {
+	// Recovery restarts its adbd shortly after it comes up, which cuts off whatever is running: the
+	// stream ends early and dd, reading a pipe, writes what arrived and exits happily. So the transfer
+	// is staged, proved, and tried again if it was cut. Nothing is at risk while this repeats — the
+	// image is on a ramdisk and the partition is untouched until the hash matches.
+	if err := r.stage(); err != nil {
 		return "", false, err
-	}
-
-	// Prove the transfer before the partition is touched, not after.
-	staged, err := sha256Of(r.d, "cat "+remoteImage)
-	if err != nil {
-		return "", false, err
-	}
-	if staged != bootimg.Ours.SHA256 {
-		return "", false, fmt.Errorf("the staged image hashes to %s, want %s", staged, bootimg.Ours.SHA256)
 	}
 
 	// sync rather than conv=fsync: busybox builds differ on whether they accept it, and a dd that
@@ -264,6 +299,10 @@ func writeImage(r *run) (string, bool, error) {
 func verifyImage(r *run) (string, bool, error) {
 	if detail, skip := r.done(); skip {
 		return detail, true, nil
+	}
+
+	if err := r.settle(); err != nil {
+		return "", false, err
 	}
 
 	// Small blocks and a count, not one read of the whole image: a short read from a single huge

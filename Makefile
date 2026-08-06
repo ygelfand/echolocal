@@ -18,7 +18,7 @@ LDFLAGS := -X '$(BUILDVARS).Version=$(VERSION)' \
 	-X '$(BUILDVARS).BuildDate=$(BUILD_DATE)'
 
 BUILD_DIR := bin
-ASSET_DIR := internal/assets/payload
+ASSET_DIR := internal/host/assets/payload
 BOOT_IMAGE := images/echolocal-boot.img
 
 # echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). Amazon ships a 32-bit userspace but
