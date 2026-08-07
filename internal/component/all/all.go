@@ -25,6 +25,7 @@ import (
 	_ "github.com/ygelfand/echolocal/internal/feature/mute"
 	_ "github.com/ygelfand/echolocal/internal/feature/recording"
 	_ "github.com/ygelfand/echolocal/internal/feature/room"
+	_ "github.com/ygelfand/echolocal/internal/feature/sendspin"
 	_ "github.com/ygelfand/echolocal/internal/feature/voice"
 	_ "github.com/ygelfand/echolocal/internal/feature/wakeword"
 )

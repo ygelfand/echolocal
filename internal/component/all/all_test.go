@@ -83,6 +83,8 @@ var registered = []string{
 	"segment_7",
 	"segment_8",
 	"segment_9",
+	"sendspin",
+	"sendspin_state",
 	"speaker",
 	"stop_word_sensitivity",
 	"test_playback",

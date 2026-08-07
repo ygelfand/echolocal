@@ -52,6 +52,10 @@ type Stream struct {
 	out     *speaker.Player
 	changed func()
 
+	// bg is the queue of things that play for minutes. A track joins it while it has something to
+	// play and leaves when it stops, so whatever it interrupted carries on afterwards.
+	bg *speaker.Arbiter
+
 	mu    sync.Mutex
 	track *track
 
@@ -90,12 +94,13 @@ type track struct {
 	cancel context.CancelFunc
 }
 
-// NewStream builds the stream and registers it with the speaker driver. changed is called whenever
-// what it is doing changes, which is what tells Home Assistant.
+// NewStream builds the stream and joins the speaker's backgrounds. changed is called whenever what it
+// is doing changes, which is what tells Home Assistant.
+//
+// It joins rather than registers: a track is one of several things that play for minutes, and it only
+// takes the speaker while it has something to play.
 func NewStream(sound *speaker.Driver, out *speaker.Player, changed func()) *Stream {
-	m := &Stream{out: out, changed: changed, gain: 1, target: 1}
-	sound.Yields(m)
-	return m
+	return &Stream{out: out, changed: changed, gain: 1, target: 1, bg: sound.Backgrounds()}
 }
 
 // rampSamples is how many interleaved samples a full move between silence and full level takes, so
@@ -128,7 +133,6 @@ func (m *Stream) Duck(on bool) {
 		m.target = level
 		m.write.Unlock()
 
-		m.reduce()
 		return
 	}
 
@@ -230,6 +234,11 @@ func (m *Stream) start(t *track) (*track, context.Context) {
 
 	previous.stop()
 	m.flush()
+
+	// After the previous track is stopped, so taking over from ourselves is not mistaken for a second
+	// background wanting the speaker.
+	m.bg.Took(m)
+
 	m.changed()
 	return t, ctx
 }
@@ -288,6 +297,8 @@ func (m *Stream) Stop() {
 	m.track, m.paused, m.rewind = nil, false, nil
 	m.unblock()
 	m.mu.Unlock()
+
+	m.bg.Gave(m)
 
 	if t == nil {
 		return
@@ -418,6 +429,8 @@ func (m *Stream) finished(t *track) {
 	m.track, m.paused, m.rewind = nil, false, nil
 	m.unblock()
 	m.mu.Unlock()
+
+	m.bg.Gave(m)
 
 	slog.Info("media finished", "item", t.item)
 	m.changed()
@@ -585,24 +598,14 @@ func (m *Stream) queue(t *track, samples []int16) {
 	m.out.Play(samples)
 }
 
-// reduce applies the duck to audio that is already queued.
-//
-// ahead is a whole second of music sitting in the speaker's queue, and the room hears that before
-// anything scaled on its way in — so the ramp has to be applied to what is already there to be heard
-// when it matters.
-//
-// Only the track is in the queue at this point: a chime is mixed in after ducking, and so keeps its own
-// level rather than fading with what is underneath it.
-func (m *Stream) reduce() {
+// Requeue ducks what is already queued, which is up to a second of music the room would otherwise hear
+// at full volume before anything scaled on its way in. Only the track is in there: a chime is mixed in
+// after ducking, and so keeps its own level rather than fading with what is underneath it.
+func (m *Stream) Requeue() {
 	m.write.Lock()
 	defer m.write.Unlock()
 
-	queued := m.out.Take()
-	if len(queued) == 0 {
-		return
-	}
-	m.attenuate(queued)
-	m.out.Play(queued)
+	m.out.Adjust(m.attenuate)
 }
 
 // attenuate applies the duck, moving towards the target rather than jumping to it. Wants write, which

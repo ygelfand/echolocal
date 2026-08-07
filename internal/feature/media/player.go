@@ -57,6 +57,8 @@ type Player struct {
 	// playing: its mapper has no case for announcing and raises on it.
 	speaking atomic.Bool
 
+	external atomic.Bool
+
 	step int
 }
 
@@ -334,15 +336,11 @@ func (p *Player) Sounding(on bool) {
 	p.refresh()
 }
 
-// Duck and Unduck are a turn taking the speaker for as long as it runs, rather than for one sound. A
-// conversation is several sounds with listening in between, and music through the middle of it would
-// be heard by the microphones as well as by the room.
-//
-// Whether that means lowering the track or stopping it is the stream's decision, from configuration:
-// stopping it leaves a hole in the middle of a song for the sake of one question.
-func (p *Player) Duck() { p.stream.Duck(true) }
-
-func (p *Player) Unduck() { p.stream.Duck(false) }
+// External marks the speaker as busy with something this player did not start.
+func (p *Player) External(on bool) {
+	p.external.Store(on)
+	p.refresh()
+}
 
 // Playing reports what the track is doing, which is what decides whether a turn has anything to take
 // the speaker from.
@@ -368,7 +366,7 @@ func (p *Player) state() esphome.MediaPlayerState {
 	playing, paused := p.stream.Playing()
 
 	switch {
-	case playing || p.speaking.Load():
+	case playing || p.speaking.Load() || p.external.Load():
 		return esphome.MediaPlayerPlaying
 	case paused:
 		return esphome.MediaPlayerPaused

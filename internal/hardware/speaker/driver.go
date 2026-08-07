@@ -19,6 +19,7 @@ type Driver struct {
 	mu  sync.Mutex
 	now *Claim
 	bg  Background
+	arb *Arbiter
 
 	// yielded is whether the background has been told to stand down, kept equal to "something holds the
 	// speaker". It is a flag rather than a count because claims displace one another: pairing a suspend

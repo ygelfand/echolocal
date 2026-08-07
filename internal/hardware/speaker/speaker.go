@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"sync"
@@ -71,12 +72,42 @@ type Player struct {
 	resampling config.Resampling
 	splices    atomic.Uint64
 
+	// underruns is the card running out while we were away. Write blocks against the whole ring, so
+	// each one means the loop was starved for as long as the ring is deep.
+	underruns atomic.Uint64
+
 	// deaf counts what was thrown away for want of a device.
 	deaf atomic.Uint64
 
 	mu      sync.Mutex
 	pending []int16 // interleaved stereo waiting to go out
+
+	// written counts frames handed to the card, which is what a Source places audio against.
+	written atomic.Uint64
+
+	srcMu  sync.Mutex
+	src    Source
+	srcBuf []int16
 }
+
+// Source is asked for the frames the card is about to play, addressed by absolute output frame index.
+// A room playing along with the house needs that: where audio lands has to follow from when the server
+// said to play it, not from when it happened to arrive.
+type Source interface {
+	// Render fills out with the frames starting at output frame index at, silence where it has none.
+	Render(at uint64, out []int16)
+}
+
+// Attach sets the Source, or clears it with nil. Only one at a time: two things placing audio by
+// absolute frame would be two things deciding what the room plays.
+func (p *Player) Attach(s Source) {
+	p.srcMu.Lock()
+	defer p.srcMu.Unlock()
+	p.src = s
+}
+
+// Written is the output frame index of the next frame to be handed to the card.
+func (p *Player) Written() uint64 { return p.written.Load() }
 
 // New makes the speaker without taking the hardware, so callers can hold it before there is anything
 // to play through. Audio queued before Start waits; Volume and the rest work throughout.
@@ -266,11 +297,32 @@ func (p *Player) Run(ctx context.Context) error {
 		}
 
 		p.fill(buf)
-		if _, err := pb.Write(buf); err != nil {
-			if err == alsa.ErrUnderrun {
-				slog.Warn("playback underrun")
-				continue
+		if err := p.send(ctx, pb, buf); err != nil {
+			if ctx.Err() != nil {
+				return nil
 			}
+			return err
+		}
+		p.written.Add(period)
+	}
+}
+
+// send writes one period, putting the same buffer back after an underrun rather than refilling. fill
+// has already taken these frames off the queue, so starting over would play the period after them and
+// lose these.
+func (p *Player) send(ctx context.Context, to io.Writer, buf []byte) error {
+	for {
+		_, err := to.Write(buf)
+		if err == nil {
+			return nil
+		}
+		if err != alsa.ErrUnderrun {
+			return err
+		}
+		if n := p.underruns.Add(1); n == 1 || n%100 == 0 {
+			slog.Warn("playback underrun", "times", n)
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 	}
@@ -294,14 +346,40 @@ func (p *Player) fill(buf []byte) {
 		p.splices.Add(1)
 	}
 
+	// The queue and a Source place audio differently — one in order, one by frame index — so they are
+	// summed rather than one replacing the other, and a reply still sounds over a room stream.
+	rendered := p.render()
+
 	gain := p.Volume()
 	for i := range period * Channels {
-		var s int16
+		var s int32
 		if i < len(chunk) {
-			s = int16(float32(chunk[i]) * gain)
+			s = int32(chunk[i])
 		}
-		binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
+		if i < len(rendered) {
+			s += int32(rendered[i])
+		}
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(clamp(s))*gain)))
 	}
+}
+
+// render asks the Source for this period. Called only from the write loop, so the buffer is reused.
+func (p *Player) render() []int16 {
+	p.srcMu.Lock()
+	src := p.src
+	p.srcMu.Unlock()
+
+	if src == nil {
+		return nil
+	}
+	if cap(p.srcBuf) < period*Channels {
+		p.srcBuf = make([]int16, period*Channels)
+	}
+	p.srcBuf = p.srcBuf[:period*Channels]
+	clear(p.srcBuf)
+
+	src.Render(p.written.Load(), p.srcBuf)
+	return p.srcBuf
 }
 
 // Play queues interleaved stereo samples.
@@ -331,6 +409,14 @@ func (p *Player) Take() []int16 {
 	pending := p.pending
 	p.pending = nil
 	return pending
+}
+
+// Adjust rewrites the queue in place. Taking it out and putting it back would leave it empty in
+// between, and fill pads an empty queue with silence.
+func (p *Player) Adjust(rewrite func([]int16)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	rewrite(p.pending)
 }
 
 // PlayVoice queues 16 kHz mono audio, which is what Home Assistant's pipeline sends. The codec
@@ -375,6 +461,8 @@ func (p *Player) Resampling() config.Resampling {
 
 // Splices counts how many times the queue has run dry part way through a buffer.
 func (p *Player) Splices() uint64 { return p.splices.Load() }
+
+func (p *Player) Underruns() uint64 { return p.underruns.Load() }
 
 // Clipped counts voice samples that came out of the resampler past full scale.
 func (p *Player) Clipped() uint64 {

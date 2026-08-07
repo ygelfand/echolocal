@@ -31,20 +31,22 @@ type stream struct {
 	held    []int16
 	flowing bool
 
-	bytes     int
-	peak      int
-	splicesAt uint64
+	bytes       int
+	peak        int
+	splicesAt   uint64
+	underrunsAt uint64
 
 	// playingAt is when playback began, once the cushion had filled. Wall clock from here to the queue
 	// running dry is what measures gapping; a starved buffer is silence the seam count never sees.
 	playingAt time.Time
 }
 
-func newStream(splices uint64, buffer time.Duration) *stream {
+func newStream(splices, underruns uint64, buffer time.Duration) *stream {
 	return &stream{
-		chunks:    make(chan []byte, chunkQueue),
-		buffer:    buffer,
-		splicesAt: splices,
+		chunks:      make(chan []byte, chunkQueue),
+		buffer:      buffer,
+		splicesAt:   splices,
+		underrunsAt: underruns,
 	}
 }
 

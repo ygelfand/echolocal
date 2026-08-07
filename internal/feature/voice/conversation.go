@@ -551,7 +551,7 @@ func (c *conversation) speak(url string) {
 	// of that audio turns up.
 	errand := func(ctx context.Context, p *speaker.Player) error { return c.play(ctx, url) }
 	if url == "" {
-		s := newStream(c.speaker.Splices(), wakeword.Buffer(c.slot))
+		s := newStream(c.speaker.Splices(), c.speaker.Underruns(), wakeword.Buffer(c.slot))
 		c.reply.stream = s
 		errand = func(ctx context.Context, p *speaker.Player) error {
 			return s.play(ctx, p, func() { c.post(event{kind: evPlaying}) })
@@ -643,11 +643,9 @@ func (c *conversation) hold(on bool) {
 	// learning for the duration; it goes on cancelling with what it already knows.
 	mic.Get().SetAdapting(!on)
 
-	if on {
-		c.player.Duck()
-		return
-	}
-	c.player.Unduck()
+	// Every background, not just the track: a room playing along with the rest of the house is also
+	// something a reply has to be heard over, and it is not the media player's to quieten.
+	speaker.Sound().Backgrounds().Duck(on)
 }
 
 // arm gives the current phase a limit; disarm removes it. Each phase sets its own, so a slow model
@@ -899,6 +897,7 @@ func (c *conversation) reported(dry time.Time) {
 		"gap", math.Round(max(took-seconds, 0)*100)/100,
 		"peak", s.peak,
 		"seams", c.speaker.Splices()-s.splicesAt,
+		"underruns", c.speaker.Underruns()-s.underrunsAt,
 		"clipped", c.speaker.Clipped(),
 		"dropped", c.source.Dropped())
 }
