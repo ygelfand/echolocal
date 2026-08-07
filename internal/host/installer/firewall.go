@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ygelfand/echolocal/internal/android/firewall"
 	"github.com/ygelfand/echolocal/internal/host/device"
 	"github.com/ygelfand/echolocal/internal/layout"
 )
@@ -12,24 +11,13 @@ import (
 // firewallHook opens the API port. Amazon's firewall.sh sets INPUT policy DROP and allows only
 // its own ports, so Home Assistant cannot reach us without this.
 //
-// It runs on every firewall.sh invocation, after the flush, so this is what puts our rules back
-// whenever something rebuilds the chain.
-//
-// Everything of ours goes in a chain of our own, which is what makes uninstalling honest: one jump to
-// remove and one chain to delete, rather than hunting for rules by port. The chain is emptied first so
-// the result is the same however many times this runs — and so a port opened by hand, like remote adb,
-// closes again when the firewall is rebuilt, which was already true when the rule went into INPUT.
-//
-// The jump is inserted, not appended: INPUT ends in the vendor's DROP, and a rule after it never runs.
+// It runs on every firewall.sh invocation, after the flush, so the rule survives anything that
+// rebuilds the chain.
 var firewallHook = fmt.Sprintf(`#!/system/bin/sh
 # Installed by EchoLocal. Amazon's firewall.sh runs this hook if it exists.
 IPTABLES=/system/bin/iptables
-CHAIN=%s
-$IPTABLES -N $CHAIN 2>/dev/null
-$IPTABLES -F $CHAIN
-$IPTABLES -A $CHAIN -i wlan0 -p tcp --dport %d -j ACCEPT
-$IPTABLES -C INPUT -i wlan0 -j $CHAIN 2>/dev/null || $IPTABLES -I INPUT -i wlan0 -j $CHAIN
-`, firewall.Chain, layout.Port)
+$IPTABLES -A INPUT -i wlan0 -p tcp --dport %d -j ACCEPT
+`, layout.Port)
 
 // installFirewallHook writes the hook, and applies the rule now so the port opens without
 // waiting for a reboot.
@@ -68,10 +56,15 @@ func installFirewallHook(r *run) (string, bool, error) {
 	return fmt.Sprintf("tcp/%d open via %s", layout.Port, layout.FirewallHook), false, nil
 }
 
-// applyFirewallRule runs the hook's own work now, so the port opens without waiting for a reboot.
-// Running the installed script is the only way to be sure the two cannot disagree.
+// applyFirewallRule adds the rule to the running chain if it is not already there.
 func applyFirewallRule(d *device.Device) error {
-	_, err := d.Shell("sh " + layout.FirewallHook)
+	rule := fmt.Sprintf("INPUT -i wlan0 -p tcp --dport %d -j ACCEPT", layout.Port)
+	if _, code, err := d.ShellCode("iptables -C " + rule); err != nil {
+		return err
+	} else if code == 0 {
+		return nil
+	}
+	_, err := d.Shell("iptables -A " + rule)
 	return err
 }
 
@@ -88,14 +81,9 @@ func removeFirewallHook(r *run) (string, bool, error) {
 		return "", false, err
 	}
 
-	// The whole point of the chain: whatever was opened, and whoever opened it, goes in one go. Each
-	// step is allowed to fail, because any of them not being there is the state we are heading for.
-	for _, step := range []string{
-		fmt.Sprintf("iptables -D INPUT -i wlan0 -j %s", firewall.Chain),
-		fmt.Sprintf("iptables -F %s", firewall.Chain),
-		fmt.Sprintf("iptables -X %s", firewall.Chain),
-	} {
-		if _, _, err := r.d.ShellCode(step); err != nil {
+	rule := fmt.Sprintf("INPUT -i wlan0 -p tcp --dport %d -j ACCEPT", layout.Port)
+	if _, code, err := r.d.ShellCode("iptables -C " + rule); err == nil && code == 0 {
+		if _, err := r.d.Shell("iptables -D " + rule); err != nil {
 			return "", false, err
 		}
 	}

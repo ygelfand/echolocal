@@ -140,7 +140,7 @@ func (p *Player) settle(parent context.Context) {
 	p.mu.Unlock()
 
 	// The vendor's chain drops what it was not told about.
-	if err := firewall.Open(Port); err != nil {
+	if err := firewall.Open(firewall.Sendspin, Port); err != nil {
 		slog.Error("opening the sendspin port failed", "port", Port, "err", err)
 	}
 
@@ -169,7 +169,7 @@ func (p *Player) stop() {
 	}
 	cancel()
 
-	if err := firewall.Close(Port); err != nil {
+	if err := firewall.Close(firewall.Sendspin); err != nil {
 		slog.Warn("closing the sendspin port failed", "port", Port, "err", err)
 	}
 }

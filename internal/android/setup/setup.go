@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/android/dns"
+	"github.com/ygelfand/echolocal/internal/android/firewall"
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/component"
 )
@@ -88,6 +89,12 @@ var Actions = []Action{
 // and no earlier. A stop sent before then is undone by the start that follows it.
 var Late = []Action{
 	stop("shblemeshd", "BLE mesh daemon left with nothing to talk to once its service package is hidden"),
+	{
+		Name: "put the firewall jumps back",
+		Reason: "the boot completing is what starts firewall.sh, which flushes INPUT: our chains keep " +
+			"their rules but nothing reaches them again until INPUT jumps to them",
+		Do: firewall.Ensure,
+	},
 }
 
 // How long ApplyLate waits for the boot to finish, and how often it looks. Nothing is waiting on

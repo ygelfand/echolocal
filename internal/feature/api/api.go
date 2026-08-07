@@ -16,6 +16,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/ygelfand/echolocal/internal/android/firewall"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
@@ -129,6 +130,12 @@ func subDevices(name string) []esphome.Device {
 // without being told an address.
 func (a *API) Run(ctx context.Context) error {
 	safe.Go("logs", func() { a.pipeLogs(ctx) })
+
+	// A second way in to the port the install's hook already opens. It costs nothing, and it means a
+	// hook that is missing, or older than the device, is not a lockout.
+	if err := firewall.Open(firewall.API, layout.Port); err != nil {
+		slog.Error("opening the api port failed", "port", layout.Port, "err", err)
+	}
 
 	for {
 		ln, err := net.Listen("tcp", a.srv.Addr)

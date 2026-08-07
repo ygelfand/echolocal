@@ -1,131 +1,142 @@
-// Package firewall opens ports in a chain of our own.
+// Package firewall opens ports in chains of our own.
 //
 // Amazon's firewall.sh sets the INPUT policy to DROP and allows only its own ports, so a listening
 // service is unreachable until something adds a rule. Rules went straight into INPUT once, which
 // worked but left nothing to take away: undoing them meant knowing every port anything had ever
 // opened, and a rule nobody remembered adding stayed until the next reboot.
 //
-// So everything goes in one chain that INPUT jumps to. Opening a port is a rule in it, and giving the
-// device back exactly as it was found is Teardown — one call, whatever was opened and by whom.
+// So each thing that opens a port gets a chain named after itself, jumped to from INPUT. That is what
+// lets the installer's hook and echod share the tables: each rebuilds only its own chain, where one
+// shared chain meant whoever ran last flushed away the other's work.
 //
-// Nothing here writes a file. These rules last until the chain is rebuilt or the device reboots, and
-// the hook the installer leaves behind is what puts them back.
+// Closing empties the chain and leaves it, jump and all. An empty chain returns to INPUT and the
+// vendor's DROP has the last word, so open and closed are the contents of one chain rather than rules
+// coming and going from INPUT.
 package firewall
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 const iptables = "/system/bin/iptables"
 
-// Chain is ours. Uppercase because that is what every other tool's chain looks like in a listing, and
-// somebody reading `iptables -L` should be able to tell at a glance which rules are not the vendor's.
-const Chain = "ECHOLOCAL"
+// The chains, one per thing that opens a port. Uppercase because that is what every other tool's chain
+// looks like in a listing, and somebody reading `iptables -L` should be able to tell at a glance both
+// which rules are not the vendor's and what put them there.
+const (
+	API      = "ECHOLOCAL_API"
+	ADB      = "ECHOLOCAL_ADB"
+	Sendspin = "ECHOLOCAL_SENDSPIN"
+)
+
+var All = []string{API, ADB, Sendspin}
 
 // The interface is wlan0 throughout: this device has no other way in.
 const iface = "wlan0"
 
-// ready guards the one-time chain creation. Opening two ports at once must not race to create it.
+// ready serialises the read-then-write pairs below.
 var ready sync.Mutex
 
-func portRule(chain string, port int) []string {
+func acceptRule(chain string, port int) []string {
 	return []string{chain, "-i", iface, "-p", "tcp", "--dport", fmt.Sprint(port), "-j", "ACCEPT"}
 }
 
-func jumpRule() []string {
-	return []string{"INPUT", "-i", iface, "-j", Chain}
+func jumpRule(chain string) []string {
+	return []string{"INPUT", "-i", iface, "-j", chain}
 }
 
-// Ensure creates the chain and the jump into it, if they are not there already.
-//
-// The jump is inserted rather than appended: INPUT ends in the vendor's own DROP, and a rule after it
-// is a rule that never runs.
-func Ensure() error {
+// Open allows a port. The chain is rebuilt rather than added to, so calling this twice leaves the same
+// single rule.
+func Open(chain string, port int) error {
 	ready.Lock()
 	defer ready.Unlock()
-	return ensure()
+	return open(chain, port)
 }
 
-func ensure() error {
-	// -N fails when the chain is already there, which is the ordinary case and not an error.
-	if err := iptablesRun("-N", Chain); err != nil && !errors.Is(err, errExists) {
+// open wants ready.
+func open(chain string, port int) error {
+	if err := ensure(chain); err != nil {
 		return err
 	}
-
-	there, err := has(jumpRule())
-	if err != nil || there {
+	if err := iptablesRun("-F", chain); err != nil {
 		return err
 	}
-	return iptablesRun(append([]string{"-I"}, jumpRule()...)...)
+	return iptablesRun(append([]string{"-A"}, acceptRule(chain, port)...)...)
 }
 
-// Open allows a port, creating the chain first if this is the first one.
-func Open(port int) error {
+// Close shuts the port by emptying the chain. The chain and its jump stay, so nothing has to be put
+// back into INPUT ahead of the vendor's DROP the next time this opens.
+func Close(chain string) error {
 	ready.Lock()
 	defer ready.Unlock()
 
-	if err := ensure(); err != nil {
-		return err
-	}
-
-	open, err := has(portRule(Chain, port))
-	if err != nil || open {
-		return err
-	}
-	return iptablesRun(append([]string{"-A"}, portRule(Chain, port)...)...)
-}
-
-// Close removes a port, leaving the chain in place for whatever else is using it.
-func Close(port int) error {
-	ready.Lock()
-	defer ready.Unlock()
-
-	open, err := has(portRule(Chain, port))
-	if err != nil || !open {
-		return err
-	}
-	return iptablesRun(append([]string{"-D"}, portRule(Chain, port)...)...)
-}
-
-// Opened reports whether the port is allowed right now, which is the only honest answer after a
-// restart: the process does not outlive its own rules, but they do outlive it.
-func Opened(port int) (bool, error) {
-	return has(portRule(Chain, port))
-}
-
-// Teardown removes the jump, empties the chain and deletes it, so nothing of ours is left in the
-// tables. Safe to call when none of it is there.
-func Teardown() error {
-	ready.Lock()
-	defer ready.Unlock()
-
-	if there, err := has(jumpRule()); err != nil {
-		return err
-	} else if there {
-		if err := iptablesRun(append([]string{"-D"}, jumpRule()...)...); err != nil {
-			return err
-		}
-	}
-
-	// Flushing before deleting because iptables will not delete a chain that still has rules in it.
-	if err := iptablesRun("-F", Chain); err != nil && !errors.Is(err, errNoChain) {
-		return err
-	}
-	if err := iptablesRun("-X", Chain); err != nil && !errors.Is(err, errNoChain) {
+	if err := iptablesRun("-F", chain); err != nil && !errors.Is(err, errNoChain) {
 		return err
 	}
 	return nil
 }
 
+// Opened reports whether the port is allowed right now, which is the only honest answer after a
+// restart: the process does not outlive its own rules, but they do outlive it.
+func Opened(chain string, port int) (bool, error) {
+	return has(acceptRule(chain, port))
+}
+
+// Ensure puts the jumps back, and only the jumps. firewall.sh flushes INPUT once the boot completes
+// and takes them with it; the chains and their contents survive, so making them reachable again is the
+// whole job. What is in a chain is its owner's business.
+func Ensure() error {
+	ready.Lock()
+	defer ready.Unlock()
+
+	for _, chain := range All {
+		if err := ensure(chain); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensure creates the chain and the jump into it. Wants ready.
+//
+// The jump is inserted rather than appended: INPUT ends in the vendor's own DROP, and a rule after it
+// is a rule that never runs.
+func ensure(chain string) error {
+	// -N fails when the chain is already there, which is the ordinary case and not an error.
+	if err := iptablesRun("-N", chain); err != nil && !errors.Is(err, errExists) {
+		return err
+	}
+
+	there, err := has(jumpRule(chain))
+	if err != nil || there {
+		return err
+	}
+	return iptablesRun(append([]string{"-I"}, jumpRule(chain)...)...)
+}
+
+// lockWait bounds how long to wait for whoever else is holding the tables. netd and firewall.sh both
+// write them, and at boot we are in the middle of both. iptables 1.4.20 takes -w without a timeout and
+// then waits forever, so the bound has to be ours.
+const lockWait = 5 * time.Second
+
 // has answers -C, where a non-zero exit is the answer rather than a failure.
 func has(rule []string) (bool, error) {
-	err := exec.Command(iptables, append([]string{"-C"}, rule...)...).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
+	defer cancel()
+
+	err := exec.CommandContext(ctx, iptables, append([]string{"-w", "-C"}, rule...)...).Run()
 	if err == nil {
 		return true, nil
+	}
+	// A kill for taking too long also exits non-zero, and that is not an answer about the rule.
+	if ctx.Err() != nil {
+		return false, fmt.Errorf("firewall: -C %s: %w", strings.Join(rule, " "), ctx.Err())
 	}
 
 	var exit *exec.ExitError
@@ -143,7 +154,10 @@ var (
 )
 
 func iptablesRun(args ...string) error {
-	out, err := exec.Command(iptables, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, iptables, append([]string{"-w"}, args...)...).CombinedOutput()
 	if err == nil {
 		return nil
 	}

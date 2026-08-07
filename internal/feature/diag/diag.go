@@ -180,10 +180,6 @@ func (d *Diag) playback() {
 }
 
 // remote opens the port adbd listens on, for getting at a device that is not on a cable.
-//
-// Deliberately not saved: the rule does not survive a reboot, so a switch that came back on would be
-// claiming something that is not true. It is read from the chain instead, which also gets it right when
-// echod restarts under a rule it left behind.
 func (d *Diag) remote() {
 	d.adb = &esphome.Switch{
 		Base: esphome.Base{
@@ -194,30 +190,18 @@ func (d *Diag) remote() {
 		},
 	}
 
-	open, err := firewall.Opened(adbPort)
-	if err != nil {
-		slog.Error("reading the firewall failed", "port", adbPort, "err", err)
-	}
-	d.adb.Set(open)
-
 	d.adb.OnCommand = func(on bool) {
-		change, what := firewall.Close, "closing"
-		if on {
-			change, what = firewall.Open, "opening"
-		}
-
-		if err := change(adbPort); err != nil {
-			slog.Error(what+" the adb port failed", "port", adbPort, "err", err)
+		if err := d.reachable(on); err != nil {
 			d.adb.Set(!on)
 			return
 		}
-
-		slog.Warn("remote adb", "open", on, "port", adbPort)
-		d.adb.Set(on)
+		if err := config.Set().Diag().RemoteADB(on); err != nil {
+			slog.Error("saving a setting failed", "setting", d.adb.ObjectID, "err", err)
+		}
 	}
 
-	// The protocol's device info carries the mac and no address, so this is the only place Home Assistant
-	// can learn where the device actually is.
+	// The protocol's device info carries the mac and no address, so this is the only place Home
+	// Assistant can learn where the device actually is.
 	d.ip = &esphome.TextSensor{
 		Base: esphome.Base{
 			ObjectID: "ip_address",
@@ -227,6 +211,23 @@ func (d *Diag) remote() {
 		},
 	}
 	d.address()
+}
+
+// reachable opens or closes the adb port and moves the switch to match what the chain now says.
+func (d *Diag) reachable(on bool) error {
+	change, what := func() error { return firewall.Close(firewall.ADB) }, "closing"
+	if on {
+		change, what = func() error { return firewall.Open(firewall.ADB, adbPort) }, "opening"
+	}
+
+	if err := change(); err != nil {
+		slog.Error(what+" the adb port failed", "port", adbPort, "err", err)
+		return err
+	}
+
+	slog.Warn("remote adb", "open", on, "port", adbPort)
+	d.adb.Set(on)
+	return nil
 }
 
 func (d *Diag) address() {
@@ -435,6 +436,12 @@ func (d *Diag) Restore(c config.Config) {
 
 	d.interval.Set(float32(c.Diag.Interval))
 	slog.Info("restored", "what", d.interval.ObjectID, "using", c.Diag.Interval)
+
+	// The chain is empty after a reboot but not after an echod restart, so the rule is put back or
+	// taken away rather than either being assumed.
+	if err := d.reachable(c.Diag.RemoteADB); err == nil {
+		slog.Info("restored", "what", d.adb.ObjectID, "using", c.Diag.RemoteADB)
+	}
 }
 
 // Sample takes every reading at once, so they come from the same moment and line up when something

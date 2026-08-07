@@ -4,6 +4,8 @@ package config
 type Diag struct {
 	// Interval is how often the readings that drift are collected, in seconds.
 	Interval int `json:"interval"`
+
+	RemoteADB bool `json:"remote_adb"`
 }
 
 // DefaultInterval is five minutes. The readings move slowly and every one of them costs a read of
@@ -19,4 +21,8 @@ type DiagWriter struct{ st *Store }
 
 func (w DiagWriter) Interval(v int) error {
 	return w.st.Update(func(c *Config) { c.Diag.Interval = v })
+}
+
+func (w DiagWriter) RemoteADB(v bool) error {
+	return w.st.Update(func(c *Config) { c.Diag.RemoteADB = v })
 }
