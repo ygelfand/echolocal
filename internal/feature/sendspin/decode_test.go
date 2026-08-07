@@ -54,8 +54,12 @@ func TestPCMRefusesAPartialSample(t *testing.T) {
 }
 
 func TestNoDecoderForAnUnknownCodec(t *testing.T) {
-	if _, err := decoderFor("mp3", 48000, 2, 16); err == nil {
+	if _, err := decoderFor("mp3", 48000, 2, 16, nil); err == nil {
 		t.Error("mp3 was accepted")
+	}
+	// FLAC cannot start without the header, and starting anyway would decode noise.
+	if _, err := decoderFor("flac", 48000, 2, 16, nil); err == nil {
+		t.Error("flac was accepted with no codec header")
 	}
 	if _, err := newPCMDecoder(8, 2); err == nil {
 		t.Error("8-bit pcm was accepted")
@@ -80,10 +84,19 @@ func TestTheReusedBufferIsCutToLength(t *testing.T) {
 }
 
 // Opus is always 48 kHz whatever the source was, which is the whole reason it is advertised first.
-func TestOpusIsOfferedBeforePCM(t *testing.T) {
+// The server takes the first it can serve, so the order is what decides whether the room gets a
+// lossless stream or a lossy one.
+func TestLosslessIsOfferedFirst(t *testing.T) {
 	offered := formats()
-	if len(offered) < 2 || offered[0].Codec != "opus" {
-		t.Fatalf("opus is not first: %+v", offered)
+
+	want := []string{"flac", "opus", "pcm"}
+	if len(offered) != len(want) {
+		t.Fatalf("offered %d formats, want %d: %+v", len(offered), len(want), offered)
+	}
+	for i, codec := range want {
+		if offered[i].Codec != codec {
+			t.Errorf("offered[%d] is %q, want %q", i, offered[i].Codec, codec)
+		}
 	}
 	for _, f := range offered {
 		if f.SampleRate != 48000 || f.Channels != 2 || f.BitDepth != 16 {
