@@ -23,30 +23,33 @@ func ringInDir(t *testing.T) *Ring {
 	return &Ring{Path: dir}
 }
 
-// shown is the color of segment 0 as it reached the hardware.
+// shown is the color of segment 0 as it reached the hardware: the frame SetFrame last wrote.
 //
-// A frame write truncates the file and writes it again, so reading while an animation is running can
-// catch it empty. That is an artefact of a file standing in for the hardware — the real attribute takes
-// a whole frame at once — so a short read is retried rather than being a failure.
+// Not read back from the attribute. A file standing in for the hardware is truncated and refilled on
+// every write, so a read can catch it empty — which the real attribute, taking a whole frame at once,
+// never does. Waiting only for the first frame, because until the driver has drawn one there is
+// nothing to be the answer.
 func shown(t *testing.T, r *Ring) Color {
 	t.Helper()
 
-	for try := range 20 {
-		if try > 0 {
-			time.Sleep(2 * time.Millisecond)
+	deadline := time.Now().Add(time.Second)
+	for {
+		r.mu.Lock()
+		drawn := len(r.last) >= 3
+		var c Color
+		if drawn {
+			c = Color{R: r.last[0], G: r.last[1], B: r.last[2]}
 		}
+		r.mu.Unlock()
 
-		vals, err := r.Frame()
-		if err != nil {
-			t.Fatalf("reading frame: %v", err)
+		if drawn {
+			return c
 		}
-		if len(vals) >= 3 {
-			return Color{R: vals[0], G: vals[1], B: vals[2]}
+		if time.Now().After(deadline) {
+			t.Fatal("the ring was never written")
 		}
+		time.Sleep(2 * time.Millisecond)
 	}
-
-	t.Fatal("the frame stayed empty")
-	return Color{}
 }
 
 // settle waits for the render loop to write. The driver renders as soon as it is woken, so this only
