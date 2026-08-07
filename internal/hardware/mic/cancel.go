@@ -128,8 +128,9 @@ func playing(ref []int16) bool {
 	return len(ref) > 0 && sum/float64(len(ref)) > refQuiet
 }
 
-// referenceInto decodes ch7, the left half of the playback loopback, into dst. The speaker is mono into
-// one driver, so ch8 carries the same programme and either alone is the reference.
+// referenceInto decodes ch7, the left half of the playback loopback, into dst. ch8 is left alone: on
+// music the two measure within 12-17 dB of each other, which caps cancellation far above anything the
+// filter reaches, so a stereo reference would buy nothing.
 func referenceInto(raw []byte, dst []int16) {
 	const frameBytes = Channels * Bits / 8
 

@@ -2,6 +2,7 @@ package sendspin
 
 import (
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"math"
 	"time"
@@ -81,8 +82,10 @@ func newSession(conn *websocket.Conn, o *out, bg *speaker.Arbiter, name string, 
 }
 
 // bufferCapacity caps how far ahead the server may send. The spec counts bytes of coded audio, so what
-// it buys in seconds depends on the codec: 256 KB is about 19 s of Opus but only 1.4 s of 48k PCM.
-const bufferCapacity = 1 << 18
+// it buys in seconds depends on the codec, and it is advertised before one is chosen: 512 KB is about
+// 4 s of FLAC, 38 s of Opus and 2.7 s of 48k PCM. Sized for FLAC, since that is what we ask for, and
+// kept under holdMax so even the Opus case is audio we would still be holding rather than dropping.
+const bufferCapacity = 1 << 19
 
 // run drives the connection until it closes or ctx ends.
 func (s *session) run(ctx context.Context) error {
@@ -147,7 +150,14 @@ func (s *session) began(start protocol.StreamStart) {
 	}
 	p := start.Player
 
-	dec, err := decoderFor(p.Codec, p.SampleRate, p.Channels, p.BitDepth)
+	// FLAC arrives as bare frames; what makes them a stream is this.
+	header, err := base64.StdEncoding.DecodeString(p.CodecHeader)
+	if err != nil {
+		slog.Error("sendspin codec header", "codec", p.Codec, "err", err)
+		return
+	}
+
+	dec, err := decoderFor(p.Codec, p.SampleRate, p.Channels, p.BitDepth, header)
 	if err != nil {
 		slog.Error("sendspin cannot play what was offered", "codec", p.Codec,
 			"rate", p.SampleRate, "ch", p.Channels, "bits", p.BitDepth, "err", err)
@@ -159,6 +169,9 @@ func (s *session) began(start protocol.StreamStart) {
 	}
 
 	first := s.dec == nil
+	if !first {
+		s.dec.close()
+	}
 	s.dec = dec
 	s.opened = true
 	if first {
@@ -199,6 +212,7 @@ func (s *session) ended() {
 	if s.dec == nil {
 		return
 	}
+	s.dec.close()
 	s.dec = nil
 	s.cleared()
 	s.out.close()
@@ -216,6 +230,10 @@ func (s *session) heard(chunk protocol.AudioChunk) {
 	pcm, err := s.dec.decode(chunk.Data)
 	if err != nil {
 		slog.Warn("sendspin decode", "err", err)
+		return
+	}
+	// A frame can span chunks, and the one that did not finish it carries no audio of its own.
+	if len(pcm) == 0 {
 		return
 	}
 	s.out.write(chunk.Timestamp, pcm)

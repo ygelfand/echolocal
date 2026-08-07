@@ -10,14 +10,17 @@ import (
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 )
 
-// decoder turns one chunk into interleaved samples. The returned slice is reused and valid until the
-// next call: chunks arrive every 20 ms.
+// decoder turns one chunk into interleaved samples, or into nothing when the chunk did not complete a
+// frame. The returned slice is valid until the next call: chunks arrive every 20 ms.
 type decoder interface {
 	decode(chunk []byte) ([]int16, error)
+	close() error
 }
 
-func decoderFor(codec string, sampleRate, channels, bitDepth int) (decoder, error) {
+func decoderFor(codec string, sampleRate, channels, bitDepth int, header []byte) (decoder, error) {
 	switch strings.ToLower(codec) {
+	case "flac":
+		return newFLACDecoder(header)
 	case "opus":
 		return newOpusDecoder(sampleRate, channels)
 	case "pcm":
@@ -48,6 +51,9 @@ func (d *opusDecoder) decode(chunk []byte) ([]int16, error) {
 	}
 	return d.out[:n*d.channels], nil
 }
+
+// Nothing to let go of: the decoder is state in this struct.
+func (*opusDecoder) close() error { return nil }
 
 // pcmDecoder unpacks what is already samples. The wire is little-endian signed, and 24-bit is packed
 // three bytes to a sample rather than padded into four.
@@ -100,10 +106,15 @@ func (d *pcmDecoder) decode(chunk []byte) ([]int16, error) {
 	return d.out, nil
 }
 
-// formats is what we can play, in preference order. Opus leads because it is always 48 kHz whatever
-// the source was, and the speaker is 48 kHz only.
+func (*pcmDecoder) close() error { return nil }
+
+// formats is what we can play, in preference order, which the spec has the server honour. FLAC leads
+// because it is the only lossless one this radio can afford — pcm is three times the bytes, on an
+// antenna already shared with BLE. Opus is the fallback that always arrives at 48 kHz whatever the
+// source was, and the speaker is 48 kHz only.
 func formats() []audioFormat {
 	return []audioFormat{
+		{Codec: "flac", Channels: speaker.Channels, SampleRate: speaker.Rate, BitDepth: speaker.Bits},
 		{Codec: "opus", Channels: speaker.Channels, SampleRate: speaker.Rate, BitDepth: speaker.Bits},
 		{Codec: "pcm", Channels: speaker.Channels, SampleRate: speaker.Rate, BitDepth: speaker.Bits},
 	}
