@@ -196,10 +196,19 @@ manifest: build-echod ## Write the manifest a device fetches to find this build
 .PHONY: release-dev
 release-dev: ## Publish this working tree to the dev channel, without pushing anything
 	@command -v gh >/dev/null || { echo "needs the gh CLI: brew install gh"; exit 1; }
-	@$(MAKE) --no-print-directory manifest FROM=$(RELEASES)/download/dev PAGE=$(RELEASES)/tag/dev
+	@command -v goreleaser >/dev/null || { echo "needs goreleaser: brew install goreleaser"; exit 1; }
+	VERSION=$(VERSION) goreleaser release --snapshot --clean
+	@for f in dist/echoctl_*/echoctl; do \
+		d=$$(basename $$(dirname $$f)); \
+		os=$$(echo $$d | cut -d_ -f2); \
+		arch=$$(echo $$d | cut -d_ -f3); \
+		if [ "$$arch" = amd64 ]; then arch=x86_64; fi; \
+		cp "$$f" "dist/echolocal_$${os}_$${arch}"; \
+	done
+	@$(MAKE) --no-print-directory manifest VERSION=$(VERSION) FROM=$(RELEASES)/download/dev PAGE=$(RELEASES)/tag/dev
 	@gh release view dev >/dev/null 2>&1 || \
 		gh release create dev --prerelease --title dev --notes "Rolling build for devices on the dev channel."
-	gh release upload dev $(BUILD_DIR)/echod $(BUILD_DIR)/manifest.json --clobber
+	gh release upload dev dist/echolocal_* $(BUILD_DIR)/echod $(BUILD_DIR)/manifest.json --clobber
 	@echo "dev channel now serves $(VERSION)"
 
 .PHONY: release
