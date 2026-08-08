@@ -187,13 +187,13 @@ const stageTries = 3
 
 // stage puts the image on the device and does not return until what is there is the image.
 func (r *run) stage() error {
-	var last string
+	tries := make([]string, 0, stageTries)
 
 	for try := range stageTries {
 		if err := r.settle(); err != nil {
 			return err
 		}
-		if err := r.d.Stream(remoteImage, r.cfg.BootImage); err != nil && try == stageTries-1 {
+		if err := r.d.WriteFile(remoteImage, r.cfg.BootImage, 0o644); err != nil && try == stageTries-1 {
 			return err
 		}
 		if err := r.settle(); err != nil {
@@ -207,9 +207,24 @@ func (r *run) stage() error {
 		if staged == bootimg.Ours.SHA256 {
 			return nil
 		}
-		last = staged
+		tries = append(tries, fmt.Sprintf("%s bytes %s", sizeOf(r.d, remoteImage), staged))
 	}
-	return fmt.Errorf("the staged image hashes to %s, want %s", last, bootimg.Ours.SHA256)
+
+	return fmt.Errorf("the staged image never matched. tries: %s. want: %d bytes %s",
+		strings.Join(tries, "; "), bootimg.Ours.Size, bootimg.Ours.SHA256)
+}
+
+// sizeOf is what the device says is there, which is what tells a short write from a wrong one.
+func sizeOf(d *device.Device, remote string) string {
+	out, err := d.Shell("wc -c < " + remote)
+	if err != nil {
+		return "?"
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return "?"
+	}
+	return fields[0]
 }
 
 func bootRecovery(r *run) (string, bool, error) {

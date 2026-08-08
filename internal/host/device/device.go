@@ -8,7 +8,6 @@
 package device
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -331,20 +330,6 @@ func (d *Device) ReadFile(path string) ([]byte, error) {
 func (d *Device) PullFile(remote, local string) error {
 	if _, err := d.run(context.Background(), "pull", remote, local); err != nil {
 		return fmt.Errorf("device: pulling %s: %w", remote, err)
-	}
-	return nil
-}
-
-// Stream writes bytes into a file on the device through exec-in, which pipes stdin to a command
-// untranslated and without the sync protocol. `adb shell` is not an alternative: it mangles binary on
-// the way in.
-func (d *Device) Stream(remote string, data []byte) error {
-	cmd := d.command(context.Background(), "exec-in", fmt.Sprintf("dd of=%s bs=1M", quote(remote)))
-	cmd.Stdin = bytes.NewReader(data)
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("device: streaming %s: %w: %s", remote, err, strings.Join(strings.Fields(string(out)), " "))
 	}
 	return nil
 }
