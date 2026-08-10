@@ -198,12 +198,14 @@ release-dev: ## Publish this working tree to the dev channel, without pushing an
 	@command -v gh >/dev/null || { echo "needs the gh CLI: brew install gh"; exit 1; }
 	@command -v goreleaser >/dev/null || { echo "needs goreleaser: brew install goreleaser"; exit 1; }
 	VERSION=$(VERSION) goreleaser release --snapshot --clean
-	@for f in dist/echoctl_*/echoctl; do \
+	@for f in dist/echoctl_*/echoctl dist/echoctl_*/echoctl.exe; do \
+		[ -f "$$f" ] || continue; \
 		d=$$(basename $$(dirname $$f)); \
 		os=$$(echo $$d | cut -d_ -f2); \
 		arch=$$(echo $$d | cut -d_ -f3); \
 		if [ "$$arch" = amd64 ]; then arch=x86_64; fi; \
-		cp "$$f" "dist/echolocal_$${os}_$${arch}"; \
+		ext=$${f##*.}; [ "$$ext" = exe ] && ext=.exe || ext=; \
+		cp "$$f" "dist/echolocal_$${os}_$${arch}$${ext}"; \
 	done
 	@$(MAKE) --no-print-directory manifest VERSION=$(VERSION) FROM=$(RELEASES)/download/dev PAGE=$(RELEASES)/tag/dev
 	@gh release view dev >/dev/null 2>&1 || \
