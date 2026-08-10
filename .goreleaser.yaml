@@ -18,11 +18,12 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.Version={{.Version}} -X main.GitCommit={{.Commit}} -X main.BuildDate={{.Date}}
+      - -s -w -X github.com/ygelfand/echolocal/internal/layout.Version={{.Version}} -X github.com/ygelfand/echolocal/internal/layout.GitCommit={{.Commit}} -X github.com/ygelfand/echolocal/internal/layout.BuildDate={{.Date}}
 
 archives:
   - formats: ["binary"]
