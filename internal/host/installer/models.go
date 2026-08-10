@@ -2,7 +2,7 @@ package installer
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"github.com/ygelfand/echolocal/internal/host/assets"
 	"github.com/ygelfand/echolocal/internal/layout"
@@ -30,9 +30,9 @@ func installModels(r *run) (string, bool, error) {
 
 	var written, kept int
 	for _, m := range models {
-		path := filepath.Join(layout.ModelDir, m.ID+".tflite")
+		modelPath := path.Join(layout.ModelDir, m.ID+".tflite")
 
-		have, err := r.d.Exists(path)
+		have, err := r.d.Exists(modelPath)
 		if err != nil {
 			return "", false, err
 		}
@@ -43,10 +43,10 @@ func installModels(r *run) (string, bool, error) {
 
 		// The manifest carries the phrase and the window the engine reads it with, so it is written
 		// first: a model without one falls back to defaults that are only right by coincidence.
-		if err := r.d.WriteFile(filepath.Join(layout.ModelDir, m.ID+".json"), m.Manifest, 0o644); err != nil {
+		if err := r.d.WriteFile(path.Join(layout.ModelDir, m.ID+".json"), m.Manifest, 0o644); err != nil {
 			return "", false, err
 		}
-		if err := r.d.WriteFile(path, m.Model, 0o644); err != nil {
+		if err := r.d.WriteFile(modelPath, m.Model, 0o644); err != nil {
 			return "", false, err
 		}
 		written++
