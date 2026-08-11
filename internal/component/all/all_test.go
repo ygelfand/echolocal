@@ -88,6 +88,7 @@ var registered = []string{
 	"speaker",
 	"stop_word_sensitivity",
 	"test_playback",
+	"timers",
 	"update_channel",
 	"update_outcome",
 	"update_status",

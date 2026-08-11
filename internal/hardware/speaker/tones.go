@@ -23,6 +23,14 @@ var (
 	// ToneCancel is one short falling pair: the request was dropped, which is neither a failure nor
 	// an answer.
 	ToneCancel = []Note{{Freq: 698, Ms: 60}, {Freq: 466, Ms: 90}}
+
+	// ToneTimer is a timer that has finished. Three of the same note, because it repeats until
+	// somebody stops it and a melody wears out faster than a beep does.
+	ToneTimer = []Note{
+		{Freq: 880, Ms: 160}, {Ms: 130},
+		{Freq: 880, Ms: 160}, {Ms: 130},
+		{Freq: 880, Ms: 160},
+	}
 )
 
 // wakeTones is what a detection can sound like. They are told apart by shape rather than pitch, so

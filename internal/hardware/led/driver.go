@@ -35,6 +35,9 @@ const (
 	// room it is not listening to.
 	PriorityMute
 
+	// PriorityTimer is a timer counting down.
+	PriorityTimer
+
 	// PriorityBusy is the device working on something the user asked for and is waiting on, such as a
 	// newly chosen wake word being fetched and warmed up. Over mute, because the mute button has a
 	// light of its own and so says the microphones are cut whatever the ring is doing, and under a
@@ -43,6 +46,10 @@ const (
 
 	// PriorityTurn is a conversation, which holds the ring from the wake word to the end of the reply.
 	PriorityTurn
+
+	// PriorityAlarm is a timer that has finished and is ringing, which outranks the turn somebody
+	// starts to tell it to stop.
+	PriorityAlarm
 
 	// PriorityNotice is a brief acknowledgement of something the user just did, like a volume change.
 	// It outranks a conversation because it is a direct response to a button they are holding.

@@ -18,6 +18,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/media"
+	"github.com/ygelfand/echolocal/internal/feature/timer"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
@@ -33,7 +34,8 @@ func init() {
 const Features = esphome.DefaultVoiceFeatures |
 	esphome.FeatureSpeaker |
 	esphome.FeatureAnnounce |
-	esphome.FeatureStartConversation
+	esphome.FeatureStartConversation |
+	esphome.FeatureTimers
 
 type Voice struct {
 	vs   *esphome.VoiceSatellite
@@ -68,6 +70,13 @@ func build() *Voice {
 	}
 	v.turn = newConversation(v.vs)
 	slog.Info("wake words", "ours", len(ours), "active", active)
+
+	v.vs.OnTimer = timer.Get().Event
+	v.vs.OnSubscribed = func(subscribed bool) {
+		if !subscribed {
+			timer.Get().Forget()
+		}
+	}
 
 	wakeword.Requested.Listen(v.Start)
 
@@ -133,7 +142,7 @@ func (v *Voice) Action() {
 // would be worse than not listening for it at all. Nothing is playing then, so there is nothing the word
 // could sensibly mean.
 func (v *Voice) Interrupt() {
-	if !speaker.Sound().Busy() {
+	if !speaker.Sound().Busy() && !timer.Get().Ringing() {
 		if playing, _ := media.Get().Playing(); !playing {
 			slog.Debug("stop word ignored, nothing to stop")
 			return
@@ -148,6 +157,11 @@ func (v *Voice) Interrupt() {
 // stopped. The action button falls through to starting a turn when it returns false; a stop word has
 // nothing to fall through to and simply does nothing.
 func (v *Voice) Stop() bool {
+	// Before the turn, because a timer ringing over one is what the person is reaching for.
+	if timer.Get().Stop() {
+		return true
+	}
+
 	if v.turn.Busy() {
 		v.turn.Cancel()
 		return true
