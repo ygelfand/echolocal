@@ -6,7 +6,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Where echod and its state live. /system is read-only once installed, so anything written
@@ -111,15 +110,6 @@ const ModelDir = StateDir + "/models"
 
 // RecordingDir holds the kept turn audio, one WAV and one metadata file per turn, named by turn id.
 const RecordingDir = StateDir + "/recordings"
-
-// Free is the space left on the filesystem holding path, in bytes.
-func Free(path string) (int64, error) {
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(path, &fs); err != nil {
-		return 0, err
-	}
-	return int64(fs.Bavail) * int64(fs.Bsize), nil
-}
 
 // MAC normalizes an address into the form Home Assistant compares against, and reports "" for
 // anything that would not identify a device. idme writes twelve hex digits with no separators.
