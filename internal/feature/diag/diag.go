@@ -421,7 +421,7 @@ func (d *Diag) Measure() {
 	_, cached := wake.Cached(wake.Lib().Dir(), inUse())
 	d.cached.Set(float32(cached / 1024))
 
-	free, err := layout.Free(layout.StateDir)
+	free, err := metrics.Free(layout.StateDir)
 	if err != nil {
 		slog.Error("reading free space failed", "dir", layout.StateDir, "err", err)
 		return
