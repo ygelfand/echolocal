@@ -153,7 +153,10 @@ func (b *Proxy) settle() {
 // tune starts or stops the radio to match what is wanted, and reports which. A change of mode is a
 // restart: the scan type is fixed when scanning begins.
 func (b *Proxy) tune() {
-	want := b.Enabled() && b.proxy.Subscribed()
+	// Home Assistant keeps its requested scan mode while the proxy reconnects. Reporting NONE until
+	// it subscribes makes that requested/current mismatch look like a broken scanner, so subscription
+	// controls delivery below rather than whether the radio scans.
+	want := b.Enabled()
 	active := b.proxy.Active()
 
 	b.mu.Lock()
@@ -184,6 +187,11 @@ func (b *Proxy) tune() {
 // found runs on the radio's reader. It must not block: anything slow here stalls the reader, and the
 // controller's queue overflows into the kernel log.
 func (b *Proxy) found(a ble.Advertisement) {
+	// The radio stays up to preserve its Home Assistant scan state, but reports have nowhere to go
+	// before a client subscribes and would only fill the queue.
+	if !b.proxy.Subscribed() {
+		return
+	}
 	select {
 	case b.reports <- a:
 	default:
