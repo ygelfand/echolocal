@@ -17,6 +17,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/ble"
+	"github.com/ygelfand/echolocal/internal/hardware/metrics"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
@@ -26,8 +27,9 @@ func init() {
 
 const (
 	// batch is how many reports go in one message, and hold how long to wait for them.
-	batch = 16
-	hold  = 250 * time.Millisecond
+	batch       = 16
+	hold        = 250 * time.Millisecond
+	addressPoll = 10 * time.Second
 
 	// queued is how many reports may wait for Home Assistant. Past this they are dropped: the radio
 	// must never wait on the network, or the controller's own queue overflows and the driver starts
@@ -40,24 +42,32 @@ const bluetoothFeatures = esphome.BluetoothPassiveScan |
 	esphome.BluetoothRawAdvertisements |
 	esphome.BluetoothStateAndMode
 
+type beaconState struct {
+	advertisement []byte
+	minor         int
+}
+
 // bluetooth carries what the radio hears to Home Assistant. The switch says whether the radio may
 // run at all, and the subscription whether anyone is reading.
 //
-// Three goroutines, deliberately: the radio's reader only ever hands a report to a channel, a sender
-// batches and writes them, and a third starts and stops the radio. Handlers run on the connection's
-// goroutine, and HCI commands wait on the controller, so doing that work inline stops the connection
-// answering anything at all.
+// Separate goroutines read reports, deliver batches, watch the address used by the beacon, and tune
+// the radio. Handlers run on the connection's goroutine, and HCI commands wait on the controller, so
+// doing that work inline stops the connection answering anything at all.
 type Proxy struct {
 	proxy  *esphome.BluetoothProxy
 	radio  *ble.Radio
 	enable *esphome.Switch
 
-	wanted  chan struct{}
-	reports chan ble.Advertisement
-	dropped atomic.Uint64
+	wanted        chan struct{}
+	refreshBeacon chan struct{}
+	beacons       chan beaconState
+	reports       chan ble.Advertisement
+	dropped       atomic.Uint64
 
 	mu     sync.Mutex
 	active bool
+	// minor is the IPv4 suffix in the running iBeacon, or -1 when none is running.
+	minor int
 }
 
 var (
@@ -72,10 +82,13 @@ func Get() *Proxy {
 
 func build() *Proxy {
 	b := &Proxy{
-		proxy:   &esphome.BluetoothProxy{},
-		radio:   ble.Get(),
-		wanted:  make(chan struct{}, 1),
-		reports: make(chan ble.Advertisement, queued),
+		proxy:         &esphome.BluetoothProxy{},
+		radio:         ble.Get(),
+		wanted:        make(chan struct{}, 1),
+		refreshBeacon: make(chan struct{}, 1),
+		beacons:       make(chan beaconState, 1),
+		reports:       make(chan ble.Advertisement, queued),
+		minor:         -1,
 		enable: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "bluetooth_proxy",
@@ -97,6 +110,7 @@ func build() *Proxy {
 			return
 		}
 		b.apply()
+		b.refreshAddress()
 
 		// What the device advertises has changed, and that is only read when a client connects.
 		component.Reconnect.Emit(struct{}{})
@@ -104,6 +118,7 @@ func build() *Proxy {
 
 	safe.Go("ble radio", b.settle)
 	safe.Go("ble reports", b.deliver)
+	safe.Go("ble address", b.watchAddress)
 	return b
 }
 
@@ -144,30 +159,71 @@ func (b *Proxy) apply() {
 	}
 }
 
-func (b *Proxy) settle() {
-	for range b.wanted {
-		b.tune()
+func (b *Proxy) refreshAddress() {
+	select {
+	case b.refreshBeacon <- struct{}{}:
+	default:
 	}
 }
 
-// tune starts or stops the radio to match what is wanted, and reports which. A change of mode is a
-// restart: the scan type is fixed when scanning begins.
-func (b *Proxy) tune() {
+func (b *Proxy) watchAddress() {
+	tick := time.NewTicker(addressPoll)
+	defer tick.Stop()
+	last := -2
+	for {
+		state := beaconState{minor: -1}
+		if b.Enabled() {
+			state.advertisement, state.minor = beaconAdvertisement(metrics.Addresses())
+		}
+		if state.minor != last {
+			b.beacons <- state
+			last = state.minor
+		}
+		select {
+		case <-b.refreshBeacon:
+		case <-tick.C:
+		}
+	}
+}
+
+// settle serializes radio changes on one goroutine. Requests react immediately to proxy state, and
+// address updates carry a new iBeacon payload without doing network discovery here.
+func (b *Proxy) settle() {
+	beacon := beaconState{minor: -1}
+	for {
+		select {
+		case <-b.wanted:
+		case beacon = <-b.beacons:
+		}
+		b.tune(beacon)
+	}
+}
+
+// tune starts or stops the radio to match what is wanted, and reports which. A change of scan mode or
+// beacon minor is a restart: both are fixed when the controller starts.
+func (b *Proxy) tune(beacon beaconState) {
+	enabled := b.Enabled()
 	// Home Assistant keeps its requested scan mode while the proxy reconnects. Reporting NONE until
 	// it subscribes makes that requested/current mismatch look like a broken scanner, so subscription
 	// controls delivery below rather than whether the radio scans.
-	want := b.Enabled()
+	scan := enabled
+	if !enabled {
+		beacon = beaconState{minor: -1}
+	}
+	want := scan || len(beacon.advertisement) != 0
 	active := b.proxy.Active()
 
 	b.mu.Lock()
-	settled := want == b.radio.Scanning() && (!want || active == b.active)
+	settled := want == b.radio.Running() && scan == b.radio.Scanning() &&
+		(!scan || active == b.active) && beacon.minor == b.minor
 	b.active = active
+	b.minor = beacon.minor
 	b.mu.Unlock()
 
 	if settled {
 		return
 	}
-	if b.radio.Scanning() {
+	if b.radio.Running() {
 		b.radio.Stop()
 	}
 	if !want {
@@ -175,13 +231,20 @@ func (b *Proxy) tune() {
 		return
 	}
 
-	if err := b.radio.Start(active, b.found); err != nil {
-		slog.Error("ble scan failed to start", "err", err)
-		_ = b.proxy.Report(esphome.ScannerFailed)
+	if err := b.radio.Start(scan, active, beacon.advertisement, b.found); err != nil {
+		slog.Error("ble radio failed to start", "err", err)
+		if scan {
+			_ = b.proxy.Report(esphome.ScannerFailed)
+		}
 		return
 	}
-	slog.Info("ble scanning", "active", active)
-	_ = b.proxy.Report(esphome.ScannerRunning)
+	if len(beacon.advertisement) != 0 {
+		slog.Info("ble iBeacon advertising", "minor", beacon.minor)
+	}
+	if scan {
+		slog.Info("ble scanning", "active", active)
+		_ = b.proxy.Report(esphome.ScannerRunning)
+	}
 }
 
 // found runs on the radio's reader. It must not block: anything slow here stalls the reader, and the

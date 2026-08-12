@@ -22,16 +22,20 @@ const (
 	evtLEMeta           = 0x3E
 	leAdvertisingReport = 0x02
 
-	cmdReset        = 0x0C03
-	cmdLEScanParams = 0x200B
-	cmdLEScanEnable = 0x200C
+	cmdReset               = 0x0C03
+	cmdLEAdvertisingParams = 0x2006
+	cmdLEAdvertisingData   = 0x2008
+	cmdLEAdvertisingEnable = 0x200A
+	cmdLEScanParams        = 0x200B
+	cmdLEScanEnable        = 0x200C
 )
 
 // How much of the time the radio listens, in units of 0.625 ms: 18.75 ms out of every 200 ms. Wifi
 // and Bluetooth share one antenna here, so a window equal to the interval never gives it back.
 const (
-	scanInterval = 320
-	scanWindow   = 30
+	scanInterval        = 320
+	scanWindow          = 30
+	advertisingInterval = 1600
 )
 
 // Advertisement is one LE advertising report.
@@ -56,6 +60,7 @@ type Radio struct {
 	mu       sync.Mutex
 	fd       int
 	open     bool
+	scanning bool
 	stop     context.CancelFunc
 	finished chan struct{}
 
@@ -77,6 +82,13 @@ func Get() *Radio {
 func (r *Radio) Scanning() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.scanning
+}
+
+// Running reports whether the controller is open for scanning or advertising.
+func (r *Radio) Running() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.open
 }
 
@@ -87,9 +99,10 @@ func (r *Radio) Reports() uint64 {
 	return r.reports
 }
 
-// Start opens the controller and scans until Stop. Reports arrive on the reader's goroutine. Active
-// asks for scan responses, which transmits rather than only listening.
-func (r *Radio) Start(active bool, found func(Advertisement)) error {
+// Start opens the controller until Stop. Reports arrive on the reader's goroutine when scan is true.
+// Active asks for scan responses, which transmits rather than only listening. Advertisement is raw
+// advertising data; nil disables advertising.
+func (r *Radio) Start(scan, active bool, advertisement []byte, found func(Advertisement)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -108,7 +121,7 @@ func (r *Radio) Start(active bool, found func(Advertisement)) error {
 	}
 	r.fd = fd
 
-	if err := r.begin(active); err != nil {
+	if err := r.begin(scan, active, advertisement); err != nil {
 		_ = syscall.Close(fd)
 		r.fd = -1
 		return err
@@ -116,13 +129,13 @@ func (r *Radio) Start(active bool, found func(Advertisement)) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r.stop, r.finished, r.open = cancel, make(chan struct{}), true
+	r.scanning = scan
 
 	go r.read(ctx, found)
-	slog.Info("ble scanning")
 	return nil
 }
 
-// Stop ends the scan and closes the node.
+// Stop ends scanning and advertising and closes the node.
 func (r *Radio) Stop() {
 	r.mu.Lock()
 	if !r.open {
@@ -131,12 +144,14 @@ func (r *Radio) Stop() {
 	}
 	stop, done, fd := r.stop, r.finished, r.fd
 	r.open = false
+	r.scanning = false
 	r.mu.Unlock()
 
 	stop()
 	<-done
 
 	_ = command(fd, cmdLEScanEnable, []byte{0x00, 0x00})
+	_ = command(fd, cmdLEAdvertisingEnable, []byte{0x00})
 	_ = syscall.Close(fd)
 
 	r.mu.Lock()
@@ -145,27 +160,60 @@ func (r *Radio) Stop() {
 	slog.Info("ble stopped")
 }
 
-// begin resets the controller and starts scanning. Held with mu.
-func (r *Radio) begin(active bool) error {
-	scan := make([]byte, 7)
-	if active {
-		scan[0] = 0x01
+// begin resets and configures the controller. Held with mu.
+func (r *Radio) begin(scanning, active bool, advertisement []byte) error {
+	if err := r.send("reset", cmdReset, nil); err != nil {
+		return err
 	}
-	binary.LittleEndian.PutUint16(scan[1:], scanInterval)
-	binary.LittleEndian.PutUint16(scan[3:], scanWindow)
-
-	for _, step := range []struct {
-		name   string
-		opcode uint16
-		params []byte
-	}{
-		{"reset", cmdReset, nil},
-		{"scan parameters", cmdLEScanParams, scan},
-		{"scan enable", cmdLEScanEnable, []byte{0x01, 0x00}},
-	} {
-		if err := command(r.fd, step.opcode, step.params); err != nil {
-			return fmt.Errorf("ble: %s: %w", step.name, err)
+	// This MTK controller can scan and advertise together, but only when scanning is enabled first.
+	// Enabling advertising first leaves the subsequent scan command waiting indefinitely.
+	if scanning {
+		scan := make([]byte, 7)
+		if active {
+			scan[0] = 0x01
 		}
+		binary.LittleEndian.PutUint16(scan[1:], scanInterval)
+		binary.LittleEndian.PutUint16(scan[3:], scanWindow)
+
+		if err := r.send("scan parameters", cmdLEScanParams, scan); err != nil {
+			return err
+		}
+		if err := r.send("scan enable", cmdLEScanEnable, []byte{0x01, 0x00}); err != nil {
+			return err
+		}
+	}
+	if len(advertisement) != 0 {
+		return r.advertise(advertisement)
+	}
+	return nil
+}
+
+func (r *Radio) advertise(advertisement []byte) error {
+	if len(advertisement) > 31 {
+		return errors.New("ble: advertising data exceeds 31 bytes")
+	}
+	params := make([]byte, 15)
+	binary.LittleEndian.PutUint16(params[0:], advertisingInterval)
+	binary.LittleEndian.PutUint16(params[2:], advertisingInterval)
+	params[4] = 0x03 // ADV_NONCONN_IND
+	params[13] = 0x07
+
+	data := make([]byte, 32)
+	data[0] = byte(len(advertisement))
+	copy(data[1:], advertisement)
+
+	if err := r.send("advertising parameters", cmdLEAdvertisingParams, params); err != nil {
+		return err
+	}
+	if err := r.send("advertising data", cmdLEAdvertisingData, data); err != nil {
+		return err
+	}
+	return r.send("advertising enable", cmdLEAdvertisingEnable, []byte{0x01})
+}
+
+func (r *Radio) send(name string, opcode uint16, params []byte) error {
+	if err := command(r.fd, opcode, params); err != nil {
+		return fmt.Errorf("ble: %s: %w", name, err)
 	}
 	return nil
 }
