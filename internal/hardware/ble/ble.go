@@ -245,7 +245,8 @@ func (r *Radio) read(ctx context.Context, found func(Advertisement), held []byte
 		held, err = r.parse(append(held, buf[:n]...), found)
 		if err != nil {
 			slog.Error("ble event framing failed", "err", err)
-			return
+			held = nil
+			continue
 		}
 	}
 }
