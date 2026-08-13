@@ -2,7 +2,6 @@ package bluetooth
 
 import (
 	"encoding/binary"
-	"net"
 )
 
 const (
@@ -24,18 +23,10 @@ var iBeaconUUID = [16]byte{
 	0xbb, 0x9f, 0xd9, 0x2a, 0xcf, 0xd9, 0xd4, 0x0b,
 }
 
-// beaconAdvertisement uses the last octet of the first IPv4 address as the iBeacon minor. It
-// returns nil and -1 until an IPv4 address is available.
-func beaconAdvertisement(addresses []net.IP) ([]byte, int) {
-	minor := -1
-	for _, address := range addresses {
-		if ipv4 := address.To4(); ipv4 != nil {
-			minor = int(ipv4[3])
-			break
-		}
-	}
-	if minor < 0 {
-		return nil, minor
+// beaconAdvertisement formats an iBeacon advertisement for minor.
+func beaconAdvertisement(minor int) []byte {
+	if minor < 0 || minor > 0xffff {
+		return nil
 	}
 
 	advertisement := []byte{
@@ -51,5 +42,5 @@ func beaconAdvertisement(addresses []net.IP) ([]byte, int) {
 	measuredPower := int8(iBeaconMeasuredPower)
 	advertisement = append(advertisement, byte(measuredPower))
 	advertisement[manufacturerLength] = byte(len(advertisement) - manufacturerLength - 1)
-	return advertisement, minor
+	return advertisement
 }

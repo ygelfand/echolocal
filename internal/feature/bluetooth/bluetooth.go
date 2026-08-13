@@ -4,7 +4,9 @@ package bluetooth
 
 import (
 	"context"
+	"encoding/binary"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,7 +19,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/ble"
-	"github.com/ygelfand/echolocal/internal/hardware/metrics"
+	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
@@ -27,9 +29,8 @@ func init() {
 
 const (
 	// batch is how many reports go in one message, and hold how long to wait for them.
-	batch       = 16
-	hold        = 250 * time.Millisecond
-	addressPoll = 10 * time.Second
+	batch = 16
+	hold  = 250 * time.Millisecond
 
 	// queued is how many reports may wait for Home Assistant. Past this they are dropped: the radio
 	// must never wait on the network, or the controller's own queue overflows and the driver starts
@@ -50,24 +51,21 @@ type beaconState struct {
 // bluetooth carries what the radio hears to Home Assistant. The switch says whether the radio may
 // run at all, and the subscription whether anyone is reading.
 //
-// Separate goroutines read reports, deliver batches, watch the address used by the beacon, and tune
-// the radio. Handlers run on the connection's goroutine, and HCI commands wait on the controller, so
-// doing that work inline stops the connection answering anything at all.
+// Separate goroutines read reports, deliver batches, and tune the radio. Handlers run on the
+// connection's goroutine, and HCI commands wait on the controller, so doing that work inline stops
+// the connection answering anything at all.
 type Proxy struct {
 	proxy  *esphome.BluetoothProxy
 	radio  *ble.Radio
 	enable *esphome.Switch
+	beacon beaconState
 
-	wanted        chan struct{}
-	refreshBeacon chan struct{}
-	beacons       chan beaconState
-	reports       chan ble.Advertisement
-	dropped       atomic.Uint64
+	wanted  chan struct{}
+	reports chan ble.Advertisement
+	dropped atomic.Uint64
 
 	mu     sync.Mutex
 	active bool
-	// minor is the IPv4 suffix in the running iBeacon, or -1 when none is running.
-	minor int
 }
 
 var (
@@ -81,14 +79,14 @@ func Get() *Proxy {
 }
 
 func build() *Proxy {
+	mac, _ := layout.FactoryMAC()
+	minor := beaconMinor(mac)
 	b := &Proxy{
-		proxy:         &esphome.BluetoothProxy{},
-		radio:         ble.Get(),
-		wanted:        make(chan struct{}, 1),
-		refreshBeacon: make(chan struct{}, 1),
-		beacons:       make(chan beaconState, 1),
-		reports:       make(chan ble.Advertisement, queued),
-		minor:         -1,
+		proxy:   &esphome.BluetoothProxy{},
+		radio:   ble.Get(),
+		beacon:  beaconState{advertisement: beaconAdvertisement(minor), minor: minor},
+		wanted:  make(chan struct{}, 1),
+		reports: make(chan ble.Advertisement, queued),
 		enable: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "bluetooth_proxy",
@@ -110,7 +108,6 @@ func build() *Proxy {
 			return
 		}
 		b.apply()
-		b.refreshAddress()
 
 		// What the device advertises has changed, and that is only read when a client connects.
 		component.Reconnect.Emit(struct{}{})
@@ -118,8 +115,16 @@ func build() *Proxy {
 
 	safe.Go("ble radio", b.settle)
 	safe.Go("ble reports", b.deliver)
-	safe.Go("ble address", b.watchAddress)
+	b.apply()
 	return b
+}
+
+func beaconMinor(mac string) int {
+	address, err := net.ParseMAC(mac)
+	if err != nil || len(address) != 6 {
+		return -1
+	}
+	return int(binary.BigEndian.Uint16(address[4:]))
 }
 
 func (b *Proxy) Name() string { return "bluetooth proxy" }
@@ -159,48 +164,17 @@ func (b *Proxy) apply() {
 	}
 }
 
-func (b *Proxy) refreshAddress() {
-	select {
-	case b.refreshBeacon <- struct{}{}:
-	default:
-	}
-}
-
-func (b *Proxy) watchAddress() {
-	tick := time.NewTicker(addressPoll)
-	defer tick.Stop()
-	last := -2
-	for {
-		state := beaconState{minor: -1}
-		if b.Enabled() {
-			state.advertisement, state.minor = beaconAdvertisement(metrics.Addresses())
-		}
-		if state.minor != last {
-			b.beacons <- state
-			last = state.minor
-		}
-		select {
-		case <-b.refreshBeacon:
-		case <-tick.C:
-		}
-	}
-}
-
 // settle serializes radio changes on one goroutine. Requests react immediately to proxy state, and
-// address updates carry a new iBeacon payload without doing network discovery here.
+// the iBeacon payload is fixed from the factory MAC.
 func (b *Proxy) settle() {
-	beacon := beaconState{minor: -1}
 	for {
-		select {
-		case <-b.wanted:
-		case beacon = <-b.beacons:
-		}
-		b.tune(beacon)
+		<-b.wanted
+		b.tune(b.beacon)
 	}
 }
 
 // tune starts or stops the radio to match what is wanted, and reports which. A change of scan mode or
-// beacon minor is a restart: both are fixed when the controller starts.
+// scan activity is a restart: both scanning and advertising are fixed when the controller starts.
 func (b *Proxy) tune(beacon beaconState) {
 	enabled := b.Enabled()
 	// Home Assistant keeps its requested scan mode while the proxy reconnects. Reporting NONE until
@@ -215,9 +189,8 @@ func (b *Proxy) tune(beacon beaconState) {
 
 	b.mu.Lock()
 	settled := want == b.radio.Running() && scan == b.radio.Scanning() &&
-		(!scan || active == b.active) && beacon.minor == b.minor
+		(!scan || active == b.active)
 	b.active = active
-	b.minor = beacon.minor
 	b.mu.Unlock()
 
 	if settled {

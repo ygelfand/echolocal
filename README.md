@@ -21,10 +21,10 @@ Music can duck under a wake word, and resumes. Also supports white-noise generat
 **Bluetooth proxy.** BLE advertisements forwarded to Home Assistant, so the Dot extends your
 Bluetooth and can be used in integrations like [bermuda](https://github.com/agittins/bermuda).
 While the proxy is enabled, the Dot also advertises as an iBeacon with UUID
-`9c5fa6f1-91c4-4f56-bb9f-d92acfd9d40b`, major `1`, and a minor matching the last octet of its IPv4
-address. The beacon stops when the proxy is disabled and updates after the Dot's address changes.
-This supports tools such as [BLE Positioning System](https://github.com/Hogster/BPS), which use the
-physical positions of BLE receivers to locate tracked devices.
+`9c5fa6f1-91c4-4f56-bb9f-d92acfd9d40b`, major `1`, and a minor derived from the final two bytes of
+its factory MAC address. The beacon stops when the proxy is disabled. This supports tools such as
+[BLE Positioning System](https://github.com/Hogster/BPS), which use the physical positions of BLE
+receivers to locate tracked devices.
 
 **Lux sensor.** The board carries an ambient light sensor that Amazon appears to have left unused.
 
