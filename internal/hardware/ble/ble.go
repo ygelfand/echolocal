@@ -16,11 +16,6 @@ const Node = "/dev/stpbt"
 
 const (
 	h4Command = 0x01
-	h4Event   = 0x04
-
-	evtCommandComplete  = 0x0E
-	evtLEMeta           = 0x3E
-	leAdvertisingReport = 0x02
 
 	cmdReset               = 0x0C03
 	cmdLEAdvertisingParams = 0x2006
@@ -62,7 +57,10 @@ type Radio struct {
 	open     bool
 	scanning bool
 	stop     context.CancelFunc
-	finished chan struct{}
+	// finished is both the reader's completion signal and its handoff of an unfinished H4 event.
+	finished chan []byte
+	// held carries an unfinished H4 event between synchronous startup commands.
+	held []byte
 
 	reports uint64
 }
@@ -124,14 +122,17 @@ func (r *Radio) Start(scan, active bool, advertisement []byte, found func(Advert
 	if err := r.begin(scan, active, advertisement); err != nil {
 		_ = syscall.Close(fd)
 		r.fd = -1
+		r.held = nil
 		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	r.stop, r.finished, r.open = cancel, make(chan struct{}), true
+	r.stop, r.finished, r.open = cancel, make(chan []byte, 1), true
 	r.scanning = scan
+	held := r.held
+	r.held = nil
 
-	go r.read(ctx, found)
+	go r.read(ctx, found, held, r.finished)
 	return nil
 }
 
@@ -148,10 +149,10 @@ func (r *Radio) Stop() {
 	r.mu.Unlock()
 
 	stop()
-	<-done
+	held := <-done
 
-	_ = command(fd, cmdLEScanEnable, []byte{0x00, 0x00})
-	_ = command(fd, cmdLEAdvertisingEnable, []byte{0x00})
+	held, _ = command(fd, held, cmdLEScanEnable, []byte{0x00, 0x00})
+	_, _ = command(fd, held, cmdLEAdvertisingEnable, []byte{0x00})
 	_ = syscall.Close(fd)
 
 	r.mu.Lock()
@@ -212,18 +213,19 @@ func (r *Radio) advertise(advertisement []byte) error {
 }
 
 func (r *Radio) send(name string, opcode uint16, params []byte) error {
-	if err := command(r.fd, opcode, params); err != nil {
+	var err error
+	r.held, err = command(r.fd, r.held, opcode, params)
+	if err != nil {
 		return fmt.Errorf("ble: %s: %w", name, err)
 	}
 	return nil
 }
 
-func (r *Radio) read(ctx context.Context, found func(Advertisement)) {
-	defer close(r.finished)
+func (r *Radio) read(ctx context.Context, found func(Advertisement), held []byte, finished chan<- []byte) {
+	defer func() { finished <- held }()
 
 	// The driver refuses a read larger than its own buffer, and an HCI event is at most 258 bytes.
 	buf := make([]byte, 512)
-	var held []byte
 
 	for ctx.Err() == nil {
 		n, err := syscall.Read(r.fd, buf)
@@ -240,30 +242,32 @@ func (r *Radio) read(ctx context.Context, found func(Advertisement)) {
 			continue
 		}
 
-		held = r.parse(append(held, buf[:n]...), found)
+		held, err = r.parse(append(held, buf[:n]...), found)
+		if err != nil {
+			slog.Error("ble event framing failed", "err", err)
+			return
+		}
 	}
 }
 
 // parse takes whole packets off the front and returns the remainder. A read carries as many as the
 // controller had ready, and the last can be cut short.
-func (r *Radio) parse(b []byte, found func(Advertisement)) []byte {
-	for len(b) >= 3 {
-		if b[0] != h4Event {
-			return nil
+func (r *Radio) parse(b []byte, found func(Advertisement)) ([]byte, error) {
+	for {
+		event, remainder, ok, err := nextEvent(b)
+		if err != nil {
+			return nil, err
 		}
-		size := 3 + int(b[2])
-		if len(b) < size {
-			break
+		if !ok {
+			return append([]byte(nil), remainder...), nil
 		}
 
-		if b[1] == evtLEMeta {
+		if event[1] == evtLEMeta {
 			r.reports++
-			reports(b[3:size], found)
+			reports(event[3:], found)
 		}
-		b = b[size:]
+		b = remainder
 	}
-
-	return append([]byte(nil), b...)
 }
 
 // reports walks an LE Meta event: event type, address type, address, data length, data, RSSI.
@@ -293,7 +297,7 @@ func reports(p []byte, found func(Advertisement)) {
 }
 
 // command writes one HCI command and waits for its Command Complete.
-func command(fd int, opcode uint16, params []byte) error {
+func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, error) {
 	pkt := make([]byte, 4, 4+len(params))
 	pkt[0] = h4Command
 	binary.LittleEndian.PutUint16(pkt[1:], opcode)
@@ -301,7 +305,7 @@ func command(fd int, opcode uint16, params []byte) error {
 	pkt = append(pkt, params...)
 
 	if _, err := syscall.Write(fd, pkt); err != nil {
-		return err
+		return held, err
 	}
 
 	buf := make([]byte, 512)
@@ -311,16 +315,20 @@ func command(fd int, opcode uint16, params []byte) error {
 			if errors.Is(err, syscall.EINTR) {
 				continue
 			}
-			return err
+			return held, err
 		}
-		if n >= 7 && buf[0] == h4Event && buf[1] == evtCommandComplete {
-			if binary.LittleEndian.Uint16(buf[4:]) != opcode {
-				continue
-			}
-			if status := buf[6]; status != 0 {
-				return fmt.Errorf("status 0x%02x", status)
-			}
-			return nil
+		if n == 0 {
+			continue
+		}
+
+		held = append(held, buf[:n]...)
+		var complete bool
+		held, complete, err = commandResult(held, opcode)
+		if err != nil {
+			return held, err
+		}
+		if complete {
+			return held, nil
 		}
 	}
 }
