@@ -62,7 +62,7 @@ func (a *API) Start(context.Context) error {
 	if err != nil {
 		return err
 	}
-	mac, err := macAddress()
+	mac, err := layout.FactoryMAC()
 	if err != nil {
 		return err
 	}
@@ -212,19 +212,4 @@ func writePSK(path string, k esphome.PSK) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(k.String()+"\n"), 0o600)
-}
-
-// macAddress is how Home Assistant recognises the device, and it refuses one whose address is not
-// the address it registered. So there is no stand-in: without an address there is nothing to
-// announce, and announcing the wrong one costs the pairing.
-func macAddress() (string, error) {
-	b, err := os.ReadFile(layout.MACPath)
-	if err != nil {
-		return "", fmt.Errorf("reading the device address: %w", err)
-	}
-	mac := layout.MAC(string(b))
-	if mac == "" {
-		return "", fmt.Errorf("%s holds %q, which is not an address", layout.MACPath, strings.TrimSpace(string(b)))
-	}
-	return mac, nil
 }

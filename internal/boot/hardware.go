@@ -17,9 +17,9 @@ func name() string {
 		}
 	}
 
-	b, err := os.ReadFile(layout.MACPath)
+	mac, err := layout.FactoryMAC()
 	if err != nil {
 		return layout.DefaultName
 	}
-	return layout.NameFromMAC(string(b))
+	return layout.NameFromMAC(mac)
 }

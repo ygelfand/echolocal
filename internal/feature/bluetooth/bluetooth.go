@@ -4,7 +4,9 @@ package bluetooth
 
 import (
 	"context"
+	"encoding/binary"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/ble"
+	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 )
 
@@ -40,17 +43,22 @@ const bluetoothFeatures = esphome.BluetoothPassiveScan |
 	esphome.BluetoothRawAdvertisements |
 	esphome.BluetoothStateAndMode
 
+type beaconState struct {
+	advertisement []byte
+	minor         int
+}
+
 // bluetooth carries what the radio hears to Home Assistant. The switch says whether the radio may
 // run at all, and the subscription whether anyone is reading.
 //
-// Three goroutines, deliberately: the radio's reader only ever hands a report to a channel, a sender
-// batches and writes them, and a third starts and stops the radio. Handlers run on the connection's
-// goroutine, and HCI commands wait on the controller, so doing that work inline stops the connection
-// answering anything at all.
+// Separate goroutines read reports, deliver batches, and tune the radio. Handlers run on the
+// connection's goroutine, and HCI commands wait on the controller, so doing that work inline stops
+// the connection answering anything at all.
 type Proxy struct {
 	proxy  *esphome.BluetoothProxy
 	radio  *ble.Radio
 	enable *esphome.Switch
+	beacon beaconState
 
 	wanted  chan struct{}
 	reports chan ble.Advertisement
@@ -71,9 +79,12 @@ func Get() *Proxy {
 }
 
 func build() *Proxy {
+	mac, _ := layout.FactoryMAC()
+	minor := beaconMinor(mac)
 	b := &Proxy{
 		proxy:   &esphome.BluetoothProxy{},
 		radio:   ble.Get(),
+		beacon:  beaconState{advertisement: beaconAdvertisement(minor), minor: minor},
 		wanted:  make(chan struct{}, 1),
 		reports: make(chan ble.Advertisement, queued),
 		enable: &esphome.Switch{
@@ -104,7 +115,16 @@ func build() *Proxy {
 
 	safe.Go("ble radio", b.settle)
 	safe.Go("ble reports", b.deliver)
+	b.apply()
 	return b
+}
+
+func beaconMinor(mac string) int {
+	address, err := net.ParseMAC(mac)
+	if err != nil || len(address) != 6 {
+		return -1
+	}
+	return int(binary.BigEndian.Uint16(address[4:]))
 }
 
 func (b *Proxy) Name() string { return "bluetooth proxy" }
@@ -144,46 +164,69 @@ func (b *Proxy) apply() {
 	}
 }
 
+// settle serializes radio changes on one goroutine. Requests react immediately to proxy state, and
+// the iBeacon payload is fixed from the factory MAC.
 func (b *Proxy) settle() {
-	for range b.wanted {
-		b.tune()
-	}
+	settleRadio(b.wanted, func() bool { return b.tune(b.beacon) }, time.After)
 }
 
-// tune starts or stops the radio to match what is wanted, and reports which. A change of mode is a
-// restart: the scan type is fixed when scanning begins.
-func (b *Proxy) tune() {
-	want := b.Enabled() && b.proxy.Subscribed()
+// tune starts or stops the radio to match what is wanted, and reports which. A change of scan mode or
+// scan activity is a restart: both scanning and advertising are fixed when the controller starts.
+// It reports whether the requested state was reached; failures are retried by settle.
+func (b *Proxy) tune(beacon beaconState) bool {
+	enabled := b.Enabled()
+	// Home Assistant keeps its requested scan mode while the proxy reconnects. Reporting NONE until
+	// it subscribes makes that requested/current mismatch look like a broken scanner, so subscription
+	// controls delivery below rather than whether the radio scans.
+	scan := enabled
+	if !enabled {
+		beacon = beaconState{minor: -1}
+	}
+	want := scan || len(beacon.advertisement) != 0
 	active := b.proxy.Active()
 
 	b.mu.Lock()
-	settled := want == b.radio.Scanning() && (!want || active == b.active)
+	settled := want == b.radio.Running() && scan == b.radio.Scanning() &&
+		(!scan || active == b.active)
 	b.active = active
 	b.mu.Unlock()
 
 	if settled {
-		return
+		return true
 	}
-	if b.radio.Scanning() {
+	if b.radio.Running() {
 		b.radio.Stop()
 	}
 	if !want {
 		_ = b.proxy.Report(esphome.ScannerStopped)
-		return
+		return true
 	}
 
-	if err := b.radio.Start(active, b.found); err != nil {
-		slog.Error("ble scan failed to start", "err", err)
-		_ = b.proxy.Report(esphome.ScannerFailed)
-		return
+	if err := b.radio.Start(scan, active, beacon.advertisement, b.found); err != nil {
+		slog.Error("ble radio failed to start", "err", err)
+		if scan {
+			_ = b.proxy.Report(esphome.ScannerFailed)
+		}
+		return false
 	}
-	slog.Info("ble scanning", "active", active)
-	_ = b.proxy.Report(esphome.ScannerRunning)
+	if len(beacon.advertisement) != 0 {
+		slog.Info("ble iBeacon advertising", "minor", beacon.minor)
+	}
+	if scan {
+		slog.Info("ble scanning", "active", active)
+		_ = b.proxy.Report(esphome.ScannerRunning)
+	}
+	return true
 }
 
 // found runs on the radio's reader. It must not block: anything slow here stalls the reader, and the
 // controller's queue overflows into the kernel log.
 func (b *Proxy) found(a ble.Advertisement) {
+	// The radio stays up to preserve its Home Assistant scan state, but reports have nowhere to go
+	// before a client subscribes and would only fill the queue.
+	if !b.proxy.Subscribed() {
+		return
+	}
 	select {
 	case b.reports <- a:
 	default:

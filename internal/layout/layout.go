@@ -3,6 +3,7 @@
 package layout
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -134,6 +135,19 @@ func MAC(raw string) string {
 		mac.WriteString(s[i : i+2])
 	}
 	return mac.String()
+}
+
+// FactoryMAC reads and normalizes the immutable address recorded for the Wi-Fi device.
+func FactoryMAC() (string, error) {
+	raw, err := os.ReadFile(MACPath)
+	if err != nil {
+		return "", fmt.Errorf("reading the factory MAC: %w", err)
+	}
+	mac := MAC(string(raw))
+	if mac == "" {
+		return "", fmt.Errorf("%s holds %q, which is not an address", MACPath, strings.TrimSpace(string(raw)))
+	}
+	return mac, nil
 }
 
 // NameFromMAC builds the fallback display name, unique per device.

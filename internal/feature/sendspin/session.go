@@ -55,6 +55,7 @@ func newSession(conn *websocket.Conn, o *out, bg *speaker.Arbiter, name string, 
 			Codec: f.Codec, Channels: f.Channels, SampleRate: f.SampleRate, BitDepth: f.BitDepth,
 		})
 	}
+	mac, _ := layout.FactoryMAC()
 
 	client := protocol.NewClientFromConn(protocol.Config{
 		Name: name,
@@ -65,7 +66,7 @@ func newSession(conn *websocket.Conn, o *out, bg *speaker.Arbiter, name string, 
 		SupportedRoles: []string{"player@v1"},
 
 		// The factory mac: survives a reinstall, a rename and a new address.
-		ClientID: layout.MAC(layout.Idme("mac_addr")),
+		ClientID: mac,
 		DeviceInfo: protocol.DeviceInfo{
 			ProductName:     layout.Model,
 			Manufacturer:    layout.Manufacturer,
