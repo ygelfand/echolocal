@@ -167,15 +167,13 @@ func (b *Proxy) apply() {
 // settle serializes radio changes on one goroutine. Requests react immediately to proxy state, and
 // the iBeacon payload is fixed from the factory MAC.
 func (b *Proxy) settle() {
-	for {
-		<-b.wanted
-		b.tune(b.beacon)
-	}
+	settleRadio(b.wanted, func() bool { return b.tune(b.beacon) }, time.After)
 }
 
 // tune starts or stops the radio to match what is wanted, and reports which. A change of scan mode or
 // scan activity is a restart: both scanning and advertising are fixed when the controller starts.
-func (b *Proxy) tune(beacon beaconState) {
+// It reports whether the requested state was reached; failures are retried by settle.
+func (b *Proxy) tune(beacon beaconState) bool {
 	enabled := b.Enabled()
 	// Home Assistant keeps its requested scan mode while the proxy reconnects. Reporting NONE until
 	// it subscribes makes that requested/current mismatch look like a broken scanner, so subscription
@@ -194,14 +192,14 @@ func (b *Proxy) tune(beacon beaconState) {
 	b.mu.Unlock()
 
 	if settled {
-		return
+		return true
 	}
 	if b.radio.Running() {
 		b.radio.Stop()
 	}
 	if !want {
 		_ = b.proxy.Report(esphome.ScannerStopped)
-		return
+		return true
 	}
 
 	if err := b.radio.Start(scan, active, beacon.advertisement, b.found); err != nil {
@@ -209,7 +207,7 @@ func (b *Proxy) tune(beacon beaconState) {
 		if scan {
 			_ = b.proxy.Report(esphome.ScannerFailed)
 		}
-		return
+		return false
 	}
 	if len(beacon.advertisement) != 0 {
 		slog.Info("ble iBeacon advertising", "minor", beacon.minor)
@@ -218,6 +216,7 @@ func (b *Proxy) tune(beacon beaconState) {
 		slog.Info("ble scanning", "active", active)
 		_ = b.proxy.Report(esphome.ScannerRunning)
 	}
+	return true
 }
 
 // found runs on the radio's reader. It must not block: anything slow here stalls the reader, and the
