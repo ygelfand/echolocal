@@ -78,6 +78,24 @@ func newStatusCmd() *cobra.Command {
 			if s.AgentState != "" {
 				row("agent", s.AgentState)
 			}
+			if s.APIListening {
+				row("ESPHome API", styleDone.Render("listening")+fmt.Sprintf(" on tcp/%d", layout.Port))
+			} else {
+				row("ESPHome API", styleFail.Render("not listening"))
+			}
+			if s.AndroidMedia {
+				row("audio", styleDone.Render("Android media bridge"))
+			} else {
+				row("audio", styleSkip.Render("direct ALSA"))
+			}
+			switch {
+			case s.PryonInstalled && s.PryonConfigured:
+				row("Alexa", styleDone.Render("Pryon installed and configured"))
+			case s.PryonInstalled:
+				row("Alexa", styleFail.Render("Pryon installed but not finalized"))
+			default:
+				row("Alexa", styleSkip.Render("not installed"))
+			}
 			if running, ok := s.RunningFor(); ok {
 				row("running", fmt.Sprintf("%s %s", running.Round(time.Second),
 					styleDetail.Render("since uptime "+s.StartedAt+"s")))

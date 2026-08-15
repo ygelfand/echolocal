@@ -41,6 +41,12 @@ type Config struct {
 	// same way.
 	Echod []byte
 
+	// Pryon installs the wake-only privileged APK and the user-owned Android media bridge.
+	// The Amazon libraries, APK and models stay on the attached Dot and are discovered there.
+	Pryon        bool
+	PryonAPK     []byte
+	AndroidMedia []byte
+
 	// Name is what Home Assistant calls the device. Only needed on a device that has none.
 	Name string
 
@@ -66,12 +72,15 @@ type step struct {
 
 var steps = []step{
 	{"check device", checkDevice},
+	{"inspect Pryon firmware", inspectPryon},
 	{"hide Amazon packages", hidePackages},
 	{"gate Amazon init services", gateProps},
 	{"device name", installName},
 	{"encryption key", installKey},
 	{"default wake words", installModels},
+	{"install Android media bridge", installAndroidMedia},
 	{"remount /system rw", remountRW},
+	{"install Pryon companion", installPryonAPK},
 	{"install echod", installBinary},
 	{"back up stock ledcontroller", backupService},
 	{"take over ledcontroller service", takeOverService},
@@ -89,11 +98,14 @@ var restartSteps = []step{
 
 var uninstallSteps = []step{
 	{"stop echod", stopService},
+	{"stop Pryon companion", stopPryon},
 	{"remount /system rw", remountRW},
+	{"remove Pryon companion", removePryonAPK},
 	{"close the API port", removeFirewallHook},
 	{"restore the boot animation", restoreBootAnimation},
 	{"restore stock ledcontroller", restoreService},
 	{"remove echod", removeBinary},
+	{"remove Android media bridge", removeAndroidMedia},
 	{"remount /system ro", remountRO},
 	{"start ledcontroller", startStock},
 }
@@ -108,6 +120,7 @@ type run struct {
 	// state is what the device last said about itself. The flash stage reads it before deciding to
 	// write anything and again afterwards to judge whether it worked.
 	state state
+	pryon pryonPaths
 
 	// reboot is or-ed by the steps that change something init only acts on at start-up. The rest of a
 	// run — checks, remounts, writing the binary, restarting the service — happens every time and
@@ -178,6 +191,14 @@ func execute(ctx context.Context, steps []step, r *run, report Reporter) error {
 func checkDevice(r *run) (string, bool, error) {
 	if len(r.cfg.Echod) == 0 {
 		return "", false, errors.New("no echod binary given")
+	}
+	if r.cfg.Pryon {
+		if len(r.cfg.PryonAPK) == 0 {
+			return "", false, errors.New("Pryon enabled but no companion APK was given")
+		}
+		if len(r.cfg.AndroidMedia) == 0 {
+			return "", false, errors.New("Pryon enabled but no Android media helper was given")
+		}
 	}
 
 	sdk, err := r.d.Getprop("ro.build.version.sdk")

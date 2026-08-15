@@ -17,6 +17,8 @@
 # Build artifacts
 bin/
 dist/
+android/pryon/build/
+android/amazon-helper/build/
 
 # Embedded payload — staged by `make payload`, never committed
 internal/host/assets/payload/
@@ -28,6 +30,12 @@ captures/
 .secrets/
 .echolocal.yaml
 *.local.yaml
+
+# User-owned Amazon firmware artifacts used only for local inspection
+.local-amazon/
+.local-device-backup/
+proprietary/
+*.apk
 
 # Python (HACS integration)
 __pycache__/

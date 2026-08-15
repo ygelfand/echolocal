@@ -29,42 +29,38 @@ func rebootChoiceOf(yes, no bool) rebootChoice {
 	return rebootAsk
 }
 
-// offerReboot restarts the device when that is wanted, and then waits for echod to come back by itself.
-//
-// settles is the installer's own answer to whether anything changed that the device will only act on
-// when it next starts: an init service gated, a package hidden while it was running, a boot script
-// stubbed, the ledcontroller link newly pointed at echod. It is deliberately not "did any step do
-// work" — writing the binary, remounting /system and restarting the service happen on every run and a
-// reboot settles none of them, so counting those would raise the question every time and teach anyone
-// re-running an install to dismiss it.
-func offerReboot(ctx context.Context, out io.Writer, d *device.Device, settles bool, choice rebootChoice) error {
+// offerReboot restarts the device when requested, waits for echod, and reports whether the reboot
+// actually happened. Pryon finalization needs that distinction because Android scans a new system APK
+// only during boot.
+func offerReboot(ctx context.Context, out io.Writer, d *device.Device, settles bool, choice rebootChoice) (bool, error) {
 	switch choice {
 	case rebootNo:
-		return nil
+		return false, nil
 
 	case rebootAsk:
 		if !settles {
-			return nil
+			return false, nil
 		}
 		if !isTerminal() {
 			fmt.Fprintf(out, "%s\n", styleSkip.Render(
 				"• some of this takes effect on the next boot; pass --reboot to have it done here"))
-			return nil
+			return false, nil
 		}
 
 		yes, err := confirm(ctx, out,
 			"Reboot now? Some of what was installed only takes effect on the next boot.")
 		if err != nil && !errors.Is(err, ErrCancelled) {
-			return err
+			return false, err
 		}
 		if !yes {
 			fmt.Fprintf(out, "%s\n", styleSkip.Render("• not rebooting; the rest lands whenever it next boots"))
-			return nil
+			return false, nil
 		}
 	}
 
-	return render(ctx, out, "Rebooting", "✓ device came back and echod started on its own",
+	err := render(ctx, out, "Rebooting", "✓ device came back and echod started on its own",
 		func(report installer.Reporter) error {
 			return installer.RebootAndWait(ctx, d, report)
 		})
+	return err == nil, err
 }
