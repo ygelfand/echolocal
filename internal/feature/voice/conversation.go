@@ -921,7 +921,12 @@ func activeWakeWords(models []wake.Model, slots int) []string {
 	// whatever this device does have — a device carrying one model somebody copied on should listen for
 	// that one rather than for nothing.
 	if len(active) == 0 {
-		if m, ok := wake.Find(models, wake.DefaultModel); ok {
+		// A complete Pryon install was explicitly chosen by the installer, so Alexa is the useful
+		// first-run default there. Saved choices still win above, and direct-ALSA installations keep
+		// the established Okay Nabu default.
+		if m, ok := wake.Find(models, wake.PryonID); ok {
+			active = []string{m.ID}
+		} else if m, ok := wake.Find(models, wake.DefaultModel); ok {
 			active = []string{m.ID}
 		} else if len(models) > 0 {
 			active = []string{models[0].ID}

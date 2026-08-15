@@ -1,0 +1,30 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.echolocal.pryon"
+    android:versionCode="5"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="22" android:targetSdkVersion="22" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAPTURE_AUDIO_HOTWORD" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:allowBackup="false"
+        android:label="EchoLocal Pryon">
+        <service
+            android:name=".PryonDetectorService"
+            android:exported="true"
+            android:stopWithTask="false" />
+        <service
+            android:name=".AudioProviderService"
+            android:exported="false"
+            android:process=":audio" />
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

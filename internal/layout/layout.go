@@ -18,6 +18,16 @@ const (
 	KeyPath  = StateDir + "/psk"
 	NamePath = StateDir + "/name"
 
+	// AndroidMediaJar is our 32-bit app_process helper. It uses Android's AudioRecord and
+	// AudioTrack so Amazon Pryon and EchoLocal share the firmware audio service instead of
+	// competing for the raw ALSA capture device.
+	AndroidMediaJar = StateDir + "/amazon-helper.jar"
+	PryonUIDPath    = StateDir + "/pryon.uid"
+
+	PryonPackage = "com.echolocal.pryon"
+	PryonDir     = "/system/priv-app/EchoLocalPryon"
+	PryonAPK     = PryonDir + "/EchoLocalPryon.apk"
+
 	// PrevBinary is the binary an update replaced, kept until the new one has proved itself. Its
 	// presence at boot is what says a trial never finished, so nothing may leave one lying around.
 	// OldBinary is where a proven update files it, one generation back.
