@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/android/amazon"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
@@ -268,6 +269,9 @@ func (p *Player) apply(seq []kctl) {
 
 // Run feeds the stream until ctx is cancelled, writing silence when nothing is queued.
 func (p *Player) Run(ctx context.Context) error {
+	if amazon.Enabled() {
+		return p.runAmazon(ctx)
+	}
 	pb, _ := p.device()
 	if pb == nil {
 		return errors.New("speaker: the playback device is not held")
@@ -302,6 +306,26 @@ func (p *Player) Run(ctx context.Context) error {
 				return nil
 			}
 			return err
+		}
+		p.written.Add(period)
+	}
+}
+
+func (p *Player) runAmazon(ctx context.Context) error {
+	buf := make([]byte, period*Channels*Bits/8)
+	slog.Info("playback path up", "output", "android-media")
+	p.OnOutput.Emit(p.Output())
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+		p.fill(buf)
+		if err := amazon.Get().Play(buf); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("speaker: Android media write: %w", err)
 		}
 		p.written.Add(period)
 	}
@@ -388,7 +412,7 @@ func (p *Player) render() []int16 {
 // queue then, so it would grow for as long as the speaker stayed away — and a device that cannot play
 // should say so in the log rather than in memory.
 func (p *Player) Play(samples []int16) {
-	if pb, _ := p.device(); pb == nil {
+	if !p.available() {
 		if n := p.deaf.Add(1); n == 1 || n%100 == 0 {
 			slog.Warn("audio dropped, no playback device", "times", n)
 		}
@@ -398,6 +422,14 @@ func (p *Player) Play(samples []int16) {
 	p.mu.Lock()
 	p.pending = append(p.pending, samples...)
 	p.mu.Unlock()
+}
+
+func (p *Player) available() bool {
+	if amazon.Enabled() {
+		return amazon.Get().Connected()
+	}
+	pb, _ := p.device()
+	return pb != nil
 }
 
 // Take empties the queue and hands back what had not been played, so a sound that yields to another
@@ -505,7 +537,7 @@ func (p *Player) Chime(level float64, notes ...Note) {
 // Overlay mixes samples into what is already queued, extending the queue if they outlast it. Sums are
 // clamped: two things at once are louder than either, and wrapping would turn that into a crack.
 func (p *Player) Overlay(samples []int16) {
-	if pb, _ := p.device(); pb == nil {
+	if !p.available() {
 		p.Play(samples)
 		return
 	}
@@ -569,6 +601,12 @@ func (p *Player) Volume() float32 { return math.Float32frombits(p.volume.Load())
 // Close mutes the codec, turns the amplifier off and lets the device go. The Player stays usable:
 // Start can take it again, which is how a restart works.
 func (p *Player) Close() error {
+	if amazon.Enabled() {
+		if amazon.Get().Connected() {
+			return amazon.Get().StopPlayback()
+		}
+		return nil
+	}
 	p.apply(initSequence)
 
 	p.devMu.Lock()

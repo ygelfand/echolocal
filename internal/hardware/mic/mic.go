@@ -4,6 +4,7 @@ package mic
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/android/amazon"
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
@@ -154,6 +156,13 @@ func (s *Source) Name() string { return "capture" }
 
 // Start takes the capture device, off Android if it got there first, the same way the speaker does.
 func (s *Source) Start(context.Context) error {
+	if amazon.Enabled() {
+		if !amazon.Get().Connected() {
+			return errors.New("mic: Android media helper is not connected")
+		}
+		slog.Info("capture using Android media helper", "rate", Rate, "channels", 1, "bits", 16)
+		return nil
+	}
 	err := s.open()
 	if err == nil || !errors.Is(err, alsa.ErrBusy) {
 		return err
@@ -291,6 +300,9 @@ func decode(raw []byte, first, n int) [][]int16 {
 // Run reads until ctx is cancelled. It reads whether or not anyone is listening, because a stream
 // left unread overruns and the hardware ring is only 160 ms deep.
 func (s *Source) Run(ctx context.Context) error {
+	if amazon.Enabled() {
+		return s.runAmazon(ctx)
+	}
 	pcm := s.device()
 	if pcm == nil {
 		return errors.New("mic: the capture device is not held")
@@ -311,6 +323,35 @@ func (s *Source) Run(ctx context.Context) error {
 			return err
 		}
 		s.broadcast(raw[:n])
+	}
+}
+
+func (s *Source) runAmazon(ctx context.Context) error {
+	frames := make(chan []byte, 16)
+	unlisten := amazon.Get().ListenAudio(func(frame []byte) {
+		select {
+		case frames <- frame:
+		default:
+			s.dropped.Add(1)
+		}
+	})
+	defer unlisten()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case raw := <-frames:
+			if len(raw) == 0 || len(raw)%2 != 0 {
+				slog.Warn("Android media helper sent malformed audio", "bytes", len(raw))
+				continue
+			}
+			mono := make([]int16, len(raw)/2)
+			for i := range mono {
+				mono[i] = int16(binary.LittleEndian.Uint16(raw[i*2:]))
+			}
+			s.broadcastMono(mono)
+		}
 	}
 }
 
@@ -338,6 +379,33 @@ func (s *Source) broadcast(raw []byte) {
 	}
 
 	s.findFacing(mics)
+	s.deliver(frame)
+
+	if len(s.raw) == 0 {
+		return
+	}
+
+	// The reader reuses its buffer, so raw listeners get their own copy.
+	interleaved := make([]byte, len(raw))
+	copy(interleaved, raw)
+	for _, ch := range s.raw {
+		select {
+		case ch <- interleaved:
+		default:
+		}
+	}
+}
+
+// broadcastMono accepts the already mixed 16-bit stream Android's AudioRecord produces.
+func (s *Source) broadcastMono(frame []int16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deliver(frame)
+}
+
+// deliver applies processing common to direct ALSA and Android media and fans a mono frame out.
+// Called with mu held.
+func (s *Source) deliver(frame []int16) {
 	// Turning leveling off throws away what it learned, so a room it has adapted badly to is
 	// recovered by switching it off and on rather than by restarting anything.
 	on := s.leveling.Load()
@@ -365,20 +433,6 @@ func (s *Source) broadcast(raw []byte) {
 			s.dropped.Add(1)
 		}
 	}
-
-	if len(s.raw) == 0 {
-		return
-	}
-
-	// The reader reuses its buffer, so raw listeners get their own copy.
-	interleaved := make([]byte, len(raw))
-	copy(interleaved, raw)
-	for _, ch := range s.raw {
-		select {
-		case ch <- interleaved:
-		default:
-		}
-	}
 }
 
 // Dropped is how many frames a listener has missed.
@@ -387,6 +441,9 @@ func (s *Source) Dropped() uint64 { return s.dropped.Load() }
 // Close lets the device go. The Source stays usable and its listeners stay subscribed: Start can take
 // the hardware again, which is how a restart works.
 func (s *Source) Close() error {
+	if amazon.Enabled() {
+		return nil
+	}
 	s.devMu.Lock()
 	pcm := s.pcm
 	s.pcm = nil
