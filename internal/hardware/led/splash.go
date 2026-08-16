@@ -15,47 +15,61 @@ const (
 
 	// SplashConfirm is how long the comet runs once the pipeline is listening.
 	SplashConfirm = 2 * time.Second
+
+	// SplashWait bounds the Home Assistant wait indication. A missing subscription is useful state
+	// during startup, but leaving the cyan ring spinning forever looks like recovery or a boot loop.
+	SplashWait = 60 * time.Second
 )
 
 // Splash animates the ring while the device comes up, then fades out. It steps around the ring
-// until ready reports true, then runs the comet for SplashConfirm, so the ring says whether the
-// device is merely running or actually able to answer. A nil ready goes straight to the comet.
-//
-// ctx cancellation ends it wherever it has got to, so a device Home Assistant never talks to does
-// not step around forever.
+// until ready reports true or SplashWait expires. A ready device runs the confirmation comet; a
+// device Home Assistant has not subscribed to simply fades out instead of looking stuck in recovery.
+// A nil ready goes straight to the comet.
 func Splash(ctx context.Context, r *Ring, ready func() bool) error {
+	return splash(ctx, r, ready, SplashWait, SplashConfirm, 250*time.Millisecond)
+}
+
+func splash(ctx context.Context, r *Ring, ready func() bool, wait, confirm, fadeDuration time.Duration) error {
+	confirmed := ready == nil
 	if ready != nil {
-		if err := until(ctx, r, walk(HomeAssistant), ready); err != nil {
+		waiting, cancel := context.WithTimeout(ctx, wait)
+		var err error
+		confirmed, err = until(waiting, r, walk(HomeAssistant), ready)
+		cancel()
+		if err != nil {
 			return err
 		}
 	}
-	if err := play(ctx, r, SplashConfirm, comet(Palette{HomeAssistant})); err != nil {
-		return err
+	if confirmed {
+		if err := play(ctx, r, confirm, comet(Palette{HomeAssistant})); err != nil {
+			return err
+		}
 	}
 
 	// ctx may be done by now, so the fade needs its own.
 	fade, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
-	return fadeOut(fade, r, 250*time.Millisecond)
+	return fadeOut(fade, r, fadeDuration)
 }
 
-// until animates frame until ready reports true, or ctx is cancelled.
-func until(ctx context.Context, r *Ring, frame Frame, ready func() bool) error {
+// until animates frame until ready reports true, or ctx is cancelled. The boolean distinguishes a
+// real ready signal from a timeout so callers do not show a false confirmation animation.
+func until(ctx context.Context, r *Ring, frame Frame, ready func() bool) (bool, error) {
 	t := time.NewTicker(FrameInterval)
 	defer t.Stop()
 
 	start := time.Now()
 	for !ready() {
 		if err := r.SetSegments(frame(time.Since(start))); err != nil {
-			return err
+			return false, err
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return false, nil
 		case <-t.C:
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // walk lights one segment at a time, hopping two positions per step so it lands on every other

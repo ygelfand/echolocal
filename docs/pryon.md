@@ -34,8 +34,10 @@ Use `-Serial G090XXXXXXXXXXXX` when more than one ADB/Fastboot device is attache
 5. discovers the required Amazon files on the attached Dot;
 6. installs EchoLocal, reboots when Android must scan the privileged companion, and restores
    `/system` read-only;
-7. verifies the ESPHome API, mDNS identity, Android media bridge and Pryon readiness; and
-8. prints the device's unique ESPHome encryption key last.
+7. verifies the ESPHome API, mDNS identity, Android media bridge, Pryon frame counter and shared
+   live microphone path; and
+8. saves a private Home Assistant credential receipt in the gitignored rollback directory and
+   prints the device's unique ESPHome encryption key last.
 
 `-SkipBuild` reuses already built local payloads. `-BuildOnly` builds and validates the installer
 without touching a device.
@@ -51,6 +53,8 @@ Use `--no-pryon` only when deliberately installing the legacy direct-ALSA audio 
 ## Home Assistant
 
 Add the discovered EchoLocal ESPHome device and paste the encryption key printed by the installer.
+The same key is saved as `home-assistant-credentials.txt` inside the rollback snapshot reported by
+the script, so it can be recovered after the terminal closes. Keep that file private.
 Choose **Alexa** in the desired assistant's Wake word select. Bundled microWakeWord choices and
 downloaded openWakeWord/microWakeWord models remain available in other assistant slots.
 
@@ -62,16 +66,20 @@ that may differ by firmware and locale.
 ## Architecture and security boundary
 
 The privileged `com.echolocal.pryon` APK initializes Amazon's on-device detector and sends bounded
-wake metadata to EchoLocal. A separate Android media helper uses `AudioRecord` and `AudioTrack` so
-Pryon and EchoLocal share the firmware audio service instead of competing for raw ALSA capture.
-EchoLocal authenticates the companion process by Android UID before accepting wake events. No audio
-is sent to Amazon or another remote service by this integration.
+wake metadata to EchoLocal. Pryon's native service owns the single privileged `AudioRecord` and its
+Amazon `AudioStream`; EchoLocal's Android media helper reads conversation PCM through a second
+authenticated reader on that same stream. This avoids the Fire OS single-input race caused by two
+independent recorders. The helper continues to own `AudioTrack` playback. EchoLocal authenticates
+the companion process by Android UID before accepting wake events. No audio is sent to Amazon or
+another remote service by this integration.
 
 ## Verification and rollback
 
 `echoctl status` reports the ESPHome API, Android media bridge and Pryon configuration. A successful
-startup includes `PRYON_READY`; speaking “Alexa” should then produce a wake event and start the
-selected Home Assistant Assist pipeline.
+install requires `PRYON_CAPTURE_ACTIVE`, `PRYON_SHARED_PCM_FIRST_FRAME` and `PRYON_READY`; speaking
+“Alexa” should then produce a wake event and start the selected Home Assistant Assist pipeline.
+The cyan startup walk waits up to 60 seconds for Home Assistant to subscribe to a voice pipeline,
+then fades out rather than looking like a recovery or boot loop.
 
 The companion owns `/system/priv-app/EchoLocalPryon`, while the media helper and Pryon UID marker are
 stored under `/data/misc/echolocal`. To roll back, force-stop `com.echolocal.pryon`, remove only the

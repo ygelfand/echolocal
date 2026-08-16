@@ -8,7 +8,7 @@ Build and provision EchoLocal with local Amazon Pryon/Alexa wake detection.
 This is the supported source-tree installer for an unlocked Echo Dot 2 with TWRP recovery. It
 selects only an Amazon "biscuit" device, proves SDK 22, builds every EchoLocal-owned payload, saves a
 rollback snapshot, installs the verified root/permissive boot image when needed, installs and reboots
-the Dot, verifies the ESPHome native API and Pryon, then prints the encryption key last.
+the Dot, verifies the ESPHome native API and Pryon, then saves and prints the encryption key.
 
 Amazon libraries, models, and SpeechInteractionManager remain on the user's own Dot and are
 discovered there. They are never copied into the source tree or embedded in the installer.
@@ -416,7 +416,7 @@ pm list packages -u
         $safeName = $remotePath.TrimStart('/').Replace('/', '__')
         $destination = Join-Path $backupDir $safeName
         Invoke-Program -FilePath $Adb -Description "back up $remotePath" `
-            -ArgumentList @("-s", $DeviceSerial, "pull", $remotePath, $destination)
+            -ArgumentList @("-s", $DeviceSerial, "pull", $remotePath, $destination) | Out-Host
     }
 
     $hashLines = @(Get-ChildItem -LiteralPath $backupDir -File |
@@ -427,6 +427,7 @@ pm list packages -u
         })
     Set-Content -LiteralPath (Join-Path $backupDir "sha256.txt") -Value $hashLines -Encoding ASCII
     Write-Host "Rollback snapshot: $backupDir"
+    return $backupDir
 }
 
 if ($SkipBuild -and $BuildOnly) {
@@ -453,7 +454,7 @@ try {
     Assert-CompatibleBiscuit -Adb $adb -DeviceSerial $targetSerial
 
     Write-Section "Saving a rollback snapshot"
-    Save-RollbackSnapshot -Adb $adb -DeviceSerial $targetSerial
+    $backupDir = Save-RollbackSnapshot -Adb $adb -DeviceSerial $targetSerial
 
     # echoctl and its Android subprocesses locate adb by name.
     $adbDirectory = Split-Path -Parent $adb
@@ -468,11 +469,6 @@ try {
     }
     Invoke-Program -FilePath $echoctlPath -ArgumentList $installArgs -Description "EchoLocal installation"
 
-    Write-Section "Final device status"
-    Invoke-Program -FilePath $echoctlPath `
-        -ArgumentList @("status", "--serial", $targetSerial) `
-        -Description "EchoLocal status"
-
     $key = Get-ProgramOutput -FilePath $echoctlPath `
         -ArgumentList @("key", "--serial", $targetSerial, "show") `
         -Description "reading the ESPHome encryption key"
@@ -485,9 +481,31 @@ try {
         throw "echoctl returned a $($keyBytes.Length)-byte key; ESPHome requires 32 bytes."
     }
 
+    $deviceName = Get-AdbShell -Adb $adb -DeviceSerial $targetSerial `
+        -Command "cat /data/misc/echolocal/name"
+    $receiptPath = Join-Path $backupDir "home-assistant-credentials.txt"
+    $receipt = @(
+        "EchoLocal Home Assistant credentials",
+        "",
+        "Device name: $deviceName",
+        "ADB serial: $targetSerial",
+        "",
+        "In Home Assistant, open Settings -> Devices & services -> ESPHome,",
+        "select the discovered EchoLocal device, and paste this encryption key:",
+        "",
+        $key
+    )
+    Set-Content -LiteralPath $receiptPath -Value $receipt -Encoding UTF8
+
+    Write-Section "Final device status"
+    Invoke-Program -FilePath $echoctlPath `
+        -ArgumentList @("status", "--serial", $targetSerial) `
+        -Description "EchoLocal status"
+
     Write-Host ""
     Write-Host "Provisioning complete." -ForegroundColor Green
     Write-Host "Home Assistant: Settings -> Devices & services -> ESPHome, select the discovered EchoLocal device."
+    Write-Host "Credential receipt (keep private): $receiptPath" -ForegroundColor Green
     Write-Host "ESPHome encryption key (paste when prompted):" -ForegroundColor Green
     Write-Output $key
 } finally {

@@ -50,7 +50,8 @@ You need a 2nd-generation Echo Dot connected by USB and unlocked with TWRP as it
 partition. `echoctl` discovers the attached Dot's own Pryon libraries, SpeechInteractionManager APK
 and locale model manifests; no Amazon binary or model is shipped by EchoLocal. It prompts for Wi-Fi,
 generates an ESPHome encryption key, reboots when Android must scan the wake-only companion, and
-does not report completion until the native API, mDNS EchoLocal identity and Pryon detector are ready.
+does not report completion until the native API, mDNS EchoLocal identity, Pryon detector and shared
+live microphone path are ready.
 
 For an unlocked Dot with TWRP recovery on Windows, run the complete source-tree provisioner:
 
@@ -60,8 +61,9 @@ For an unlocked Dot with TWRP recovery on Windows, run the complete source-tree 
 
 Pass `-Serial` when more than one device is attached. The script refuses non-`biscuit` hardware,
 saves a gitignored rollback snapshot, builds and embeds all EchoLocal-owned payloads, installs and
-reboots the Dot, verifies ESPHome plus Pryon/Alexa, and prints the unique 32-byte ESPHome encryption
-key last. Connect the Dot to local Wi-Fi when prompted; an Amazon account or Amazon registration is
+reboots the Dot, verifies ESPHome plus Pryon/Alexa, saves a private credential receipt inside that
+snapshot, and prints the unique 32-byte ESPHome encryption key last. Connect the Dot to local Wi-Fi
+when prompted; an Amazon account or Amazon registration is
 not required. When the running Android image is not already root and permissive, the script uses
 EchoLocal's verified boot image and TWRP recovery before changing `/system`.
 
