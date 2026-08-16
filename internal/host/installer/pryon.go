@@ -20,6 +20,10 @@ type pryonPaths struct {
 	aed       string
 }
 
+// A newly installed SpeechInteractionManager can spend over 30 seconds in dex2oat before Pryon can
+// load its native model. Keep this bounded, but allow enough time for the first boot on the Dot.
+const pryonReadyTimeout = 90 * time.Second
+
 func inspectPryon(r *run) (string, bool, error) {
 	if !r.cfg.Pryon {
 		return "not requested", true, nil
@@ -357,7 +361,7 @@ func verifyESPHome(r *run) (string, bool, error) {
 }
 
 func verifyPryon(r *run) (string, bool, error) {
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(pryonReadyTimeout)
 	var logs string
 	for time.Now().Before(deadline) {
 		// Fire OS routes privileged-app logs to amazon_main rather than the default buffer. `-b all`
@@ -376,8 +380,8 @@ func verifyPryon(r *run) (string, bool, error) {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	return "", false, fmt.Errorf("Pryon did not report ready with Alexa installed within 30s; recent state: %s",
-		strings.TrimSpace(logs))
+	return "", false, fmt.Errorf("Pryon did not report ready with Alexa installed within %s; recent state: %s",
+		pryonReadyTimeout, strings.TrimSpace(logs))
 }
 
 func lastLines(s string, n int) string {

@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -104,5 +105,43 @@ func TestCheckImageRefusesAnEmptyOne(t *testing.T) {
 
 	if _, _, err := checkImage(r); err == nil {
 		t.Error("accepted an empty image")
+	}
+}
+
+func TestParseUserdataMounts(t *testing.T) {
+	raw := strings.Join([]string{
+		"rootfs / rootfs rw 0 0",
+		"/dev/block/mmcblk0p16 /data ext4 rw 0 0",
+		"/dev/block/mmcblk0p16 /sdcard ext4 rw 0 0",
+		"/dev/block/mmcblk0p1 /system ext4 ro 0 0",
+	}, "\n")
+
+	got, err := parseUserdataMounts(raw, "/dev/block/mmcblk0p16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/sdcard", "/data"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseUserdataMountsAcceptsByNameSource(t *testing.T) {
+	raw := userdataNode + " /data ext4 rw 0 0\n"
+
+	got, err := parseUserdataMounts(raw, "/dev/block/mmcblk0p16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/data"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseUserdataMountsRefusesUnexpectedTarget(t *testing.T) {
+	raw := "/dev/block/mmcblk0p16 /unexpected ext4 rw 0 0\n"
+
+	if _, err := parseUserdataMounts(raw, "/dev/block/mmcblk0p16"); err == nil {
+		t.Fatal("accepted an unexpected userdata mount")
 	}
 }
