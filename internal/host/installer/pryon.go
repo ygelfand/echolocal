@@ -183,6 +183,12 @@ func installPryonAPK(r *run) (string, bool, error) {
 	} else if same {
 		return "already installed", true, nil
 	}
+	// Android may still have the previous APK and its native libraries mapped. Replacing that file
+	// underneath a live privileged process can keep /system busy and make the safety remount to
+	// read-only fail. A fresh install is harmlessly force-stopped too.
+	if _, err := r.d.Shell("am force-stop " + layout.PryonPackage); err != nil {
+		return "", false, fmt.Errorf("stopping the existing Pryon companion: %w", err)
+	}
 	if _, err := r.d.Shell("mkdir -p " + layout.PryonDir); err != nil {
 		return "", false, err
 	}
@@ -367,12 +373,12 @@ func verifyPryon(r *run) (string, bool, error) {
 		// Fire OS routes privileged-app logs to amazon_main rather than the default buffer. `-b all`
 		// keeps verification independent of which Android UID emitted each half of the handshake.
 		poc, _ := r.d.Shell("logcat -b all -d -s EchoLocalPryon:I '*:S'")
+		helper, _ := r.d.Shell("logcat -b all -d -s echolocal-helper:I '*:S'")
 		echo, _ := r.d.Shell("logcat -b all -d -s echolocal:I '*:S'")
-		logs = "Pryon: " + lastLines(poc, 4) + " | EchoLocal: " + lastLines(echo, 4)
-		echoReady := strings.Contains(echo, "pryon=1") ||
-			strings.Contains(echo, "id=pryon_alexa engine=pryon")
-		if strings.Contains(poc, "PRYON_READY") && echoReady {
-			return "native detector ready; Alexa advertised", false, nil
+		logs = "Pryon: " + lastLines(poc, 6) + " | Helper: " + lastLines(helper, 4) +
+			" | EchoLocal: " + lastLines(echo, 4)
+		if pryonRuntimeReady(poc, helper, echo) {
+			return "native detector and shared microphone ready; Alexa advertised", false, nil
 		}
 		select {
 		case <-r.ctx.Done():
@@ -380,8 +386,17 @@ func verifyPryon(r *run) (string, bool, error) {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	return "", false, fmt.Errorf("Pryon did not report ready with Alexa installed within %s; recent state: %s",
+	return "", false, fmt.Errorf("Pryon and its shared live microphone did not report ready within %s; recent state: %s",
 		pryonReadyTimeout, strings.TrimSpace(logs))
+}
+
+func pryonRuntimeReady(poc, helper, echo string) bool {
+	echoReady := strings.Contains(echo, "pryon=1") ||
+		strings.Contains(echo, "id=pryon_alexa engine=pryon")
+	return strings.Contains(poc, "PRYON_READY") &&
+		strings.Contains(poc, "PRYON_CAPTURE_ACTIVE") &&
+		strings.Contains(poc, "PRYON_SHARED_PCM_FIRST_FRAME") &&
+		strings.Contains(helper, "shared Pryon capture first frame") && echoReady
 }
 
 func lastLines(s string, n int) string {

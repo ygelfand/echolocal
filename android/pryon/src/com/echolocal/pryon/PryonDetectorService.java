@@ -178,7 +178,19 @@ public final class PryonDetectorService extends Service {
                     "Detector enable failed result=" + enableResult + " enabled=" + enabled);
         }
 
+        Method frames = findMethod(coreClass, "nGetInputFrameCount", 0);
+        frames.setAccessible(true);
+        long before = ((Number) frames.invoke(core)).longValue();
+        Thread.sleep(1500);
+        long after = ((Number) frames.invoke(core)).longValue();
+        if (after <= before) {
+            Log.e(PryonProtocol.TAG, "PRYON_CAPTURE_STALLED before=" + before + " after=" + after);
+            throw new IllegalStateException("Pryon input frame counter did not advance");
+        }
+
         initialized = true;
+        Log.i(PryonProtocol.TAG, "PRYON_CAPTURE_ACTIVE before=" + before + " after=" + after
+                + " delta=" + (after - before));
         Log.i(PryonProtocol.TAG,
                 "PRYON_READY enabled=true recorder=HOTWORD sample_rate=16000 word=alexa");
     }

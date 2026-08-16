@@ -5,6 +5,8 @@ This API-22 privileged APK is deliberately limited to Pryon wake detection and w
 - create the firmware-owned Amazon `AudioStream` in a separate Binder process;
 - initialize `NativeWakeWordServiceCore` with paths discovered on the attached Dot;
 - let `libwakewordserver_jni.so` own the privileged 16 kHz HOTWORD recorder;
+- expose a root-authenticated second `AudioStream` reader to EchoLocal's media helper, so live
+  conversation audio and Pryon detection use the same recorder instead of racing for two inputs;
 - print `PRYON_WAKEWORD_DETECTED word=alexa ...` for accepted live detections;
 - deliver a bounded, versioned JSON wake event to EchoLocal's authenticated filesystem socket;
 - disable and destroy the native service during an orderly shutdown.
@@ -47,8 +49,10 @@ Observe only the companion tag:
 adb logcat -v time -s EchoLocalPryon:I '*:S'
 ```
 
-Success requires `PRYON_READY`, followed by repeated deterministic
-`PRYON_WAKEWORD_DETECTED word=alexa` lines when a person speaks to the physical Dot.
+Startup verification requires `PRYON_CAPTURE_ACTIVE`, `PRYON_SHARED_PCM_FIRST_FRAME` and
+`PRYON_READY`, proving that the native frame counter and EchoLocal's shared reader both receive live
+microphone audio. Speaking near the physical Dot should then produce repeated deterministic
+`PRYON_WAKEWORD_DETECTED word=alexa` lines.
 WAV injection is not accepted as proof of live microphone operation.
 
 ## Rollback boundary

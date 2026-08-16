@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.echolocal.pryon"
-    android:versionCode="5"
+    android:versionCode="6"
     android:versionName="1.0">
 
     <uses-sdk android:minSdkVersion="22" android:targetSdkVersion="22" />

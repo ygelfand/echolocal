@@ -2,11 +2,11 @@ package echolocal;
 
 import android.media.AudioFormat;
 import android.media.AudioManager;
-import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.net.Credentials;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -41,6 +41,7 @@ public final class AmazonHelper {
 
     static final String SOCKET = "echolocal-amazon";
     static final String PRYON_SOCKET = "echolocal-pryon";
+    static final String PRYON_PCM_SOCKET = "echolocal-pryon-pcm";
     static final String PRYON_UID_PATH = "/data/misc/echolocal/pryon.uid";
     static final String TAG = "echolocal-helper";
     static final int MAX_EVENT_BYTES = 1024;
@@ -48,26 +49,13 @@ public final class AmazonHelper {
     private AmazonHelper() { }
 
     public static void main(String[] args) {
-        int source = 1;
-        if (args.length > 0) {
-            try {
-                source = Integer.parseInt(args[0]);
-            } catch (NumberFormatException error) {
-                Log.w(TAG, "ignoring bad audio source '" + args[0] + "'");
-            }
-        }
-        Log.i(TAG, "starting, audio source " + source);
-        new Server(source).run();
+        Log.i(TAG, "starting with shared Pryon PCM capture");
+        new Server().run();
     }
 
     static final class Server {
-        private final int audioSource;
         private volatile Connection current;
         private long lastPryonMonotonicMs = -1;
-
-        Server(int source) {
-            audioSource = source;
-        }
 
         void run() {
             Thread pryon = new Thread(new Runnable() {
@@ -87,7 +75,7 @@ public final class AmazonHelper {
                     while (true) {
                         LocalSocket socket = server.accept();
                         Log.i(TAG, "echod connected");
-                        Connection connection = new Connection(socket, audioSource);
+                        Connection connection = new Connection(socket);
                         current = connection;
                         connection.serve();
                         if (current == connection) current = null;
@@ -194,18 +182,17 @@ public final class AmazonHelper {
     }
 
     static final class Connection {
-        private final int audioSource;
         private volatile boolean capturing;
+        private volatile LocalSocket captureSocket;
         private final DataInputStream in;
         private final DataOutputStream out;
         private final LocalSocket socket;
         private AudioTrack track;
 
-        Connection(LocalSocket socket, int source) throws IOException {
+        Connection(LocalSocket socket) throws IOException {
             this.socket = socket;
             in = new DataInputStream(socket.getInputStream());
             out = new DataOutputStream(socket.getOutputStream());
-            audioSource = source;
         }
 
         void serve() {
@@ -273,38 +260,54 @@ public final class AmazonHelper {
             Log.i(TAG, "capture started");
         }
 
-        private synchronized void stopCapture() { capturing = false; }
+        private synchronized void stopCapture() {
+            capturing = false;
+            closeQuietly(captureSocket);
+            captureSocket = null;
+        }
 
         private void capture() {
-            AudioRecord recorder = null;
-            try {
-                int buffer = Math.max(AudioRecord.getMinBufferSize(SAMPLE_RATE,
-                        AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), 5120);
-                recorder = new AudioRecord(audioSource, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT, buffer);
-                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
-                    Log.e(TAG, "AudioRecord not initialized");
-                    return;
-                }
-                recorder.startRecording();
-                byte[] frame = new byte[FRAME_BYTES];
-                while (capturing) {
-                    int count = recorder.read(frame, 0, frame.length);
-                    if (count < 0) {
-                        Log.w(TAG, "AudioRecord.read returned " + count);
-                        break;
+            int failures = 0;
+            while (capturing) {
+                LocalSocket shared = null;
+                try {
+                    shared = new LocalSocket();
+                    // The timeout overload throws UnsupportedOperationException on Fire OS 5.
+                    // This is a local abstract socket, and the outer loop already retries a failed
+                    // connection, so use the API-22-compatible overload.
+                    shared.connect(new LocalSocketAddress(
+                            PRYON_PCM_SOCKET, LocalSocketAddress.Namespace.ABSTRACT));
+                    captureSocket = shared;
+                    InputStream input = shared.getInputStream();
+                    Log.i(TAG, "shared Pryon capture connected");
+                    failures = 0;
+                    byte[] frame = new byte[FRAME_BYTES];
+                    boolean first = true;
+                    while (capturing) {
+                        int count = input.read(frame, 0, frame.length);
+                        if (count < 0) throw new EOFException("shared Pryon PCM ended");
+                        if (count == 0) continue;
+                        if (!send(MSG_AUDIO, Arrays.copyOf(frame, count))) break;
+                        if (first) {
+                            Log.i(TAG, "shared Pryon capture first frame bytes=" + count);
+                            first = false;
+                        }
                     }
-                    if (count > 0) send(MSG_AUDIO, Arrays.copyOf(frame, count));
+                } catch (IOException error) {
+                    failures++;
+                    if (capturing && (failures == 1 || failures % 20 == 0)) {
+                        Log.i(TAG, "waiting for shared Pryon capture attempt=" + failures
+                                + " reason=" + error.getMessage());
+                    }
+                } catch (Throwable error) {
+                    if (capturing) Log.w(TAG, "shared Pryon capture error", error);
+                } finally {
+                    if (captureSocket == shared) captureSocket = null;
+                    closeQuietly(shared);
                 }
-            } catch (Throwable error) {
-                Log.e(TAG, "capture error: " + error);
-            } finally {
-                if (recorder != null) {
-                    try { recorder.stop(); } catch (Throwable ignored) { }
-                    recorder.release();
-                }
-                Log.i(TAG, "capture stopped");
+                if (capturing) sleep(250);
             }
+            Log.i(TAG, "shared Pryon capture stopped");
         }
 
         private void play(byte[] payload) {
