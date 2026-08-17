@@ -23,8 +23,7 @@ func board(t *testing.T) Reader {
 		"sys/devices/system/cpu/online":        "0-1\n",
 		"proc/loadavg":                         "7.40 7.30 7.25 5/623 6841\n",
 		"proc/meminfo":                         "MemTotal:         482956 kB\nMemFree:           25708 kB\nMemAvailable:     247308 kB\n",
-		// The board declares two light sensors and binds whichever is fitted, so this is not always
-		// iio:device0. Put it elsewhere to prove it is searched for.
+		// Which index the sensor lands on is not fixed, so put it elsewhere to prove it is searched for.
 		"sys/bus/iio/devices/iio:device2/illuminance0_input": "556\n",
 	} {
 		full := filepath.Join(root, path)
@@ -143,5 +142,26 @@ func TestLux(t *testing.T) {
 
 	if got := r.Lux(path); !got.Known || got.Value != 556 {
 		t.Errorf("Lux() = %v, want 556", got)
+	}
+}
+
+func TestLuxFallsBackToTheVendorDriver(t *testing.T) {
+	root := t.TempDir()
+	client := filepath.Join(root, "sys/bus/i2c/devices/0-0039")
+	if err := os.MkdirAll(client, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(client, "als_lux"), []byte("8\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := Reader{Root: root}
+	path := r.LuxPath()
+	if want := filepath.Join(client, "als_lux"); path != want {
+		t.Fatalf("LuxPath() = %q, want %q", path, want)
+	}
+
+	if got := r.Lux(path); !got.Known || got.Value != 8 {
+		t.Errorf("Lux() = %v, want 8", got)
 	}
 }

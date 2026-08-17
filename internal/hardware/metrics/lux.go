@@ -1,14 +1,26 @@
 package metrics
 
-import "strconv"
+import (
+	"path/filepath"
+	"strconv"
+)
 
-// LuxPath is the file the light sensor's reading comes from, empty when the board has none. The board
-// declares two and binds whichever one is fitted, so which index it lands on has to be looked for —
-// once, at start-up, rather than on every reading.
+// LuxPath is the file the light sensor's reading comes from, empty when the board has none. Two parts
+// turn up across units: a tsl2584tsv on an IIO driver, or a tsl2540 on a vendor one with no IIO device
+// at all. Looked for once, at start-up.
+//
+// Reading the calibrated value either driver offers beside these crashes the device.
 func (r Reader) LuxPath() string {
 	for i := range 8 {
 		at := r.path("sys/bus/iio/devices/iio:device"+strconv.Itoa(i)) + "/illuminance0_input"
 
+		if _, err := number(at); err == nil {
+			return at
+		}
+	}
+
+	vendor, _ := filepath.Glob(r.path("sys/bus/i2c/devices/*/als_lux"))
+	for _, at := range vendor {
 		if _, err := number(at); err == nil {
 			return at
 		}
