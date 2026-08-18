@@ -29,6 +29,7 @@ import java.util.Set;
 public final class AmazonHelper {
     static final int SAMPLE_RATE = 16000;
     static final int PLAY_RATE = 48000;
+    static final int PLAYBACK_PERIODS = 2;
     static final int FRAME_BYTES = 640;
     static final int MAX_PAYLOAD = 1024 * 1024;
 
@@ -316,7 +317,7 @@ public final class AmazonHelper {
                 try {
                     int buffer = Math.max(AudioTrack.getMinBufferSize(PLAY_RATE,
                             AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT),
-                            payload.length * 8);
+                            payload.length * PLAYBACK_PERIODS);
                     AudioTrack candidate = new AudioTrack(AudioManager.STREAM_MUSIC, PLAY_RATE,
                             AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT,
                             buffer, AudioTrack.MODE_STREAM);

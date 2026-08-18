@@ -36,6 +36,10 @@ const VolumeSteps = speaker.VolumeSteps
 // volumeFlash is how long the ring shows the level after a change.
 const volumeFlash = 2 * time.Second
 
+// turnVolumeSettle keeps Home Assistant's assistant-volume restore out of the ring after the turn
+// itself closes. Those commands are transport housekeeping, not volume changes somebody made.
+const turnVolumeSettle = 3 * time.Second
+
 type Player struct {
 	mp     *esphome.MediaPlayer
 	jack   *esphome.BinarySensor
@@ -58,6 +62,11 @@ type Player struct {
 	speaking atomic.Bool
 
 	external atomic.Bool
+
+	// volumeQuietUntil is the end of the interval in which volume commands arriving from Home
+	// Assistant belong to a voice turn. MaxInt64 means the turn is still open. Physical controls do
+	// not consult it: their volume arc is real feedback and must remain visible.
+	volumeQuietUntil atomic.Int64
 
 	step int
 }
@@ -263,7 +272,7 @@ func (p *Player) sound() {
 // it to a goroutine and returns.
 func (p *Player) command(c esphome.MediaCommand) {
 	if c.HasVolume {
-		p.Set(int(math.Round(float64(c.Volume) * VolumeSteps)))
+		p.set(int(math.Round(float64(c.Volume)*VolumeSteps)), p.volumeFeedback(time.Now()))
 	}
 
 	// An announcement is a url too, but a short one at the pipeline's rate, and it interrupts rather
@@ -377,10 +386,31 @@ func (p *Player) state() esphome.MediaPlayerState {
 
 // Set applies a level and remembers it.
 func (p *Player) Set(step int) {
-	applied := p.apply(step, true)
+	p.set(step, true)
+}
+
+// set applies and remembers a level. tell controls only user-facing feedback; assistant-managed
+// volume still has to reach the speaker and Home Assistant while its arc stays off the ring.
+func (p *Player) set(step int, tell bool) {
+	applied := p.apply(step, tell)
 	if err := config.Set().Speaker().Volume(applied); err != nil {
 		slog.Error("saving volume failed", "err", err)
 	}
+}
+
+// VoiceTurn marks the interval in which Home Assistant may temporarily move the media player's
+// volume for an assistant response. The short tail includes its restore commands, which can arrive
+// just after the conversation pipeline reports that the turn is over.
+func (p *Player) VoiceTurn(on bool) {
+	until := time.Now().Add(turnVolumeSettle).UnixNano()
+	if on {
+		until = math.MaxInt64
+	}
+	p.volumeQuietUntil.Store(until)
+}
+
+func (p *Player) volumeFeedback(at time.Time) bool {
+	return at.UnixNano() > p.volumeQuietUntil.Load()
 }
 
 // apply drives the speaker and reports the step it settled on. tell is false when nothing happened that

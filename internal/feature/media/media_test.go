@@ -7,9 +7,30 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 )
+
+func TestVoiceTurnSuppressesOnlyAutomaticVolumeFeedback(t *testing.T) {
+	p := &Player{}
+	now := time.Now()
+
+	p.VoiceTurn(true)
+	if p.volumeFeedback(now) {
+		t.Fatal("showed Home Assistant volume feedback during a voice turn")
+	}
+
+	p.VoiceTurn(false)
+	if p.volumeFeedback(time.Now()) {
+		t.Fatal("showed Home Assistant volume feedback during its restore tail")
+	}
+
+	p.volumeQuietUntil.Store(now.Add(-time.Second).UnixNano())
+	if !p.volumeFeedback(now) {
+		t.Fatal("kept suppressing volume feedback after the restore tail")
+	}
+}
 
 // wave builds a RIFF stream: the header, the chunks given, then samples.
 func wave(chunks []byte, samples []byte) []byte {
