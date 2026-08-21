@@ -34,6 +34,7 @@ var registered = []string{
 	"free_space",
 	"hardware_color",
 	"headphones",
+	"insecure_tls",
 	"ip_address",
 	"keep_recordings_1",
 	"keep_recordings_2",

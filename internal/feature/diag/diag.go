@@ -4,7 +4,9 @@ package diag
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +59,7 @@ type Diag struct {
 	luxPath string
 
 	adb   *esphome.Switch
+	tls   *esphome.Switch
 	ip    *esphome.TextSensor
 	color *esphome.TextSensor
 
@@ -106,7 +109,7 @@ func (d *Diag) Entities() []esphome.Entity {
 		d.cached, d.free, d.purge,
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.lux,
 		d.roomLevel, d.roomFloor,
-		d.adb, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
+		d.adb, d.tls, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
 		d.testPlayback, d.interval,
 	}
 }
@@ -200,6 +203,23 @@ func (d *Diag) remote() {
 		}
 	}
 
+	d.tls = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "insecure_tls",
+			Name:     "Skip certificate checks",
+			Icon:     "mdi:lock-off-outline",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+
+	d.tls.OnCommand = func(on bool) {
+		insecureTLS(on)
+		d.tls.Set(on)
+		if err := config.Set().Diag().InsecureTLS(on); err != nil {
+			slog.Error("saving a setting failed", "setting", d.tls.ObjectID, "err", err)
+		}
+	}
+
 	// The protocol's device info carries the mac and no address, so this is the only place Home
 	// Assistant can learn where the device actually is.
 	d.ip = &esphome.TextSensor{
@@ -211,6 +231,15 @@ func (d *Diag) remote() {
 		},
 	}
 	d.address()
+}
+
+// insecureTLS applies to everything the device downloads: models, firmware and the audio Home
+// Assistant serves all go through the default transport.
+func insecureTLS(on bool) {
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: on}
+	if on {
+		slog.Warn("certificates are not being checked")
+	}
 }
 
 // reachable opens or closes the adb port and moves the switch to match what the chain now says.
@@ -447,6 +476,10 @@ func (d *Diag) Restore(c config.Config) {
 	if err := d.reachable(c.Diag.RemoteADB); err == nil {
 		slog.Info("restored", "what", d.adb.ObjectID, "using", c.Diag.RemoteADB)
 	}
+
+	insecureTLS(c.Diag.InsecureTLS)
+	d.tls.Set(c.Diag.InsecureTLS)
+	slog.Info("restored", "what", d.tls.ObjectID, "using", c.Diag.InsecureTLS)
 }
 
 // Sample takes every reading at once, so they come from the same moment and line up when something

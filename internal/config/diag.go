@@ -6,6 +6,9 @@ type Diag struct {
 	Interval int `json:"interval"`
 
 	RemoteADB bool `json:"remote_adb"`
+
+	// InsecureTLS stops certificates being checked on anything the device downloads.
+	InsecureTLS bool `json:"insecure_tls"`
 }
 
 // DefaultInterval is five minutes. The readings move slowly and every one of them costs a read of
@@ -25,4 +28,8 @@ func (w DiagWriter) Interval(v int) error {
 
 func (w DiagWriter) RemoteADB(v bool) error {
 	return w.st.Update(func(c *Config) { c.Diag.RemoteADB = v })
+}
+
+func (w DiagWriter) InsecureTLS(v bool) error {
+	return w.st.Update(func(c *Config) { c.Diag.InsecureTLS = v })
 }
