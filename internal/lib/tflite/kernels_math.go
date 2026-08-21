@@ -410,5 +410,11 @@ func init() {
 		OpReshape:    reshape,
 		OpSqueeze:    squeeze,
 		OpExpandDims: expandDims,
+
+		OpShape:        shapeOf,
+		OpFill:         fill,
+		OpPack:         pack,
+		OpStridedSlice: stridedSlice,
+		OpReduceProd:   reduceProdI32,
 	}
 }

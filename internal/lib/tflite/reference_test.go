@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,5 +144,65 @@ func TestEmbeddingMatchesReferenceRuntime(t *testing.T) {
 	t.Logf("largest difference %.6g at index %d (ours %.6f, reference %.6f)", worst, at, got[at], want[at])
 	if worst > 0.01 {
 		t.Errorf("our embedding output differs from the reference by %.6g", worst)
+	}
+}
+
+// referenceEmbeddings is the deterministic window of embeddings the classifier fixture was produced
+// from: 16 frames of 96, the shape an openWakeWord classifier takes.
+func referenceEmbeddings() []float32 {
+	out := make([]float32, 16*96)
+	for i := range out {
+		f := float64(i)
+		out[i] = float32(0.6*math.Sin(f*0.037) + 0.4*math.Cos(f*0.011) - 0.3*math.Sin(f*0.9))
+	}
+	return out
+}
+
+// TestClassifierMatchesReferenceRuntime checks the shape ops a wake word classifier needs against
+// TensorFlow Lite's own runtime. CLASSIFIER names the model the fixture was produced from.
+func TestClassifierMatchesReferenceRuntime(t *testing.T) {
+	model := os.Getenv("CLASSIFIER")
+	if model == "" {
+		t.Skip("set CLASSIFIER to a model testdata has a fixture for")
+	}
+
+	// The fixture is named after the model, so pointing this at one it was not produced from skips
+	// rather than comparing a score against another wake word's.
+	stem := strings.TrimSuffix(filepath.Base(model), ".tflite")
+	want := readGolden(t, filepath.Join("testdata", "classifier_"+stem+"_reference.txt"))
+
+	raw, err := os.ReadFile(model)
+	if err != nil {
+		t.Skip(err)
+	}
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := New(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	copy(in.Input(0).F32, referenceEmbeddings())
+	if err := in.Invoke(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := in.Output(0).F32
+	if len(got) != len(want) {
+		t.Fatalf("got %d values, reference has %d", len(got), len(want))
+	}
+
+	var worst float64
+	for i := range want {
+		if d := math.Abs(float64(got[i] - want[i])); d > worst {
+			worst = d
+		}
+	}
+	t.Logf("ours %v, reference %v, largest difference %.6g", got, want, worst)
+
+	if worst > 1e-4 {
+		t.Errorf("our classifier output differs from the reference by %.6g", worst)
 	}
 }

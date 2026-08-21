@@ -1,0 +1,2 @@
+# reference tflite output, classifier of /Users/ygelfand/GIT/echolocal/scratch/Friday_20260626_070221.tflite, shape [np.int32(1), np.int32(1)]
+0.99259537

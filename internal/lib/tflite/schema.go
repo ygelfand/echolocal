@@ -97,8 +97,12 @@ const (
 	OpSum            Op = 74
 	OpSqrt           Op = 75
 	OpRsqrt          Op = 76
+	OpShape          Op = 77
+	OpReduceProd     Op = 81
 	OpReduceMax      Op = 82
+	OpPack           Op = 83
 	OpSquare         Op = 92
+	OpFill           Op = 94
 	OpLeakyRelu      Op = 98
 	OpSquaredDiff    Op = 99
 	OpBatchMatMul    Op = 126
@@ -114,6 +118,7 @@ var opNames = map[Op]string{
 	OpMaximum: "MAXIMUM", OpMinimum: "MINIMUM", OpExpandDims: "EXPAND_DIMS",
 	OpLog: "LOG", OpSum: "SUM", OpSqrt: "SQRT", OpRsqrt: "RSQRT",
 	OpReduceMax: "REDUCE_MAX", OpSquare: "SQUARE", OpLeakyRelu: "LEAKY_RELU",
+	OpShape: "SHAPE", OpReduceProd: "REDUCE_PROD", OpPack: "PACK", OpFill: "FILL",
 	OpSquaredDiff: "SQUARED_DIFFERENCE", OpBatchMatMul: "BATCH_MATMUL",
 }
 
@@ -178,8 +183,17 @@ type OpDesc struct {
 	keepDims bool
 	alpha    float32
 	dims     []int
-	adjX     bool
-	adjY     bool
+	count    int
+	axis     int
+
+	beginMask    int
+	endMask      int
+	ellipsisMask int
+	newAxisMask  int
+	shrinkMask   int
+
+	adjX bool
+	adjY bool
 }
 
 var errShort = errors.New("tflite: buffer too short")
@@ -314,8 +328,19 @@ func (o *OpDesc) decodeOptions(t table, present bool) {
 	case OpAdd, OpSub, OpMul, OpDiv, OpFullyConnected, OpConcatenation:
 		o.act = Activation(t.u8f(0, 0))
 
-	case OpMean, OpSum, OpReduceMax:
+	case OpMean, OpSum, OpReduceMax, OpReduceProd:
 		o.keepDims = t.boolf(0, false)
+
+	case OpPack:
+		o.count = int(t.i32f(0, 0))
+		o.axis = int(t.i32f(1, 0))
+
+	case OpStridedSlice:
+		o.beginMask = int(t.i32f(0, 0))
+		o.endMask = int(t.i32f(1, 0))
+		o.ellipsisMask = int(t.i32f(2, 0))
+		o.newAxisMask = int(t.i32f(3, 0))
+		o.shrinkMask = int(t.i32f(4, 0))
 
 	case OpLeakyRelu:
 		o.alpha = t.f32f(0, 0)
