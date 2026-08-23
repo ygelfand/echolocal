@@ -98,6 +98,8 @@ func Get() *Diag {
 		shared.playback()
 		shared.identity()
 		shared.collector()
+
+		component.Subscribed.Listen(func(struct{}) { shared.soon() })
 	})
 	return shared
 }
@@ -134,10 +136,15 @@ func (d *Diag) collector() {
 		}
 
 		// The wait already running was measured against the old interval.
-		select {
-		case d.wake <- struct{}{}:
-		default:
-		}
+		d.soon()
+	}
+}
+
+// soon asks the collector to sample without waiting out the rest of its interval.
+func (d *Diag) soon() {
+	select {
+	case d.wake <- struct{}{}:
+	default:
 	}
 }
 
