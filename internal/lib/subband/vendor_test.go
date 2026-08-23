@@ -4,6 +4,8 @@ import (
 	"math"
 	"os"
 	"testing"
+
+	"github.com/ygelfand/echolocal/internal/lib/fft"
 )
 
 // The vendor's coefficients are not ours to ship, so the tests that use them run against a copy
@@ -50,7 +52,7 @@ func TestVendorWindowReconstructs(t *testing.T) {
 		t.Errorf("reconstruction gain varies by %.1f%% across the hop, so the fold is wrong", 100*spread)
 	}
 
-	f := newFFT(FFTLen)
+	f := fft.New(FFTLen)
 	a := newAnalysis(w.window, f)
 	s := newSynthesis(w.window, f)
 	scale := 1 / bankGain(w.window)

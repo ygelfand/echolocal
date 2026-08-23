@@ -1,0 +1,9 @@
+Speech at controlled noise levels, with the reference implementation's output beside it.
+
+    in_SNR5_sp01.wav   sp01 mixed with noise at 5 dB SNR
+    out_SNR5_sp01.wav  what mmse_log_spu.py makes of it
+    in_SNR15_sp01.wav  the same at 15 dB
+    out_SNR15_sp01.wav
+
+From github.com/vipchengrui/traditional-speech-enhancement (MIT), which follows Loizou, Speech
+Enhancement: Theory and Practice. Mono, 16-bit, 8 kHz.

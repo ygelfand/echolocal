@@ -25,6 +25,7 @@ type Microphone struct {
 	gain        *esphome.Number
 	leveling    *esphome.Switch
 	cancel      *esphome.Switch
+	denoise     *esphome.Switch
 	sensitivity *esphome.Number
 }
 
@@ -64,6 +65,14 @@ func build() *Microphone {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		denoise: &esphome.Switch{
+			Base: esphome.Base{
+				ObjectID: "microphone_noise_reduction",
+				Name:     "Microphone noise reduction",
+				Icon:     "mdi:blur-off",
+				Category: esphome.CategoryConfig,
+			},
+		},
 		sensitivity: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: "microphone_sensitivity",
@@ -87,7 +96,8 @@ func build() *Microphone {
 	}
 
 	for _, b := range []*esphome.Base{
-		&m.mixing.Base, &m.gain.Base, &m.leveling.Base, &m.cancel.Base, &m.sensitivity.Base,
+		&m.mixing.Base, &m.gain.Base, &m.leveling.Base, &m.cancel.Base, &m.denoise.Base,
+		&m.sensitivity.Base,
 	} {
 		b.DeviceID = component.DeviceMicrophone
 	}
@@ -111,6 +121,14 @@ func build() *Microphone {
 		}
 	}
 
+	m.denoise.OnCommand = func(on bool) {
+		m.denoise.Set(on)
+		source.SetDenoising(on)
+		if err := config.Set().Microphone().Denoise(on); err != nil {
+			slog.Error("saving the noise reduction setting failed", "err", err)
+		}
+	}
+
 	m.sensitivity.OnCommand = func(v float32) {
 		m.sensitivity.Set(v)
 		source.SetSensitivity(int(v))
@@ -131,7 +149,7 @@ func build() *Microphone {
 func (m *Microphone) Name() string { return "microphone settings" }
 
 func (m *Microphone) Entities() []esphome.Entity {
-	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel, m.sensitivity}
+	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel, m.denoise, m.sensitivity}
 }
 
 // Restore puts the knobs back. The analog gain is only published here: the capture service applies
@@ -148,6 +166,10 @@ func (m *Microphone) Restore(c config.Config) {
 	m.cancel.Set(c.Microphone.Cancel)
 	source.SetCancelling(c.Microphone.Cancel)
 	slog.Info("restored", "what", m.cancel.ObjectID, "using", c.Microphone.Cancel)
+
+	m.denoise.Set(c.Microphone.Denoise)
+	source.SetDenoising(c.Microphone.Denoise)
+	slog.Info("restored", "what", m.denoise.ObjectID, "using", c.Microphone.Denoise)
 
 	m.sensitivity.Set(float32(c.Microphone.Sensitivity))
 	source.SetSensitivity(c.Microphone.Sensitivity)

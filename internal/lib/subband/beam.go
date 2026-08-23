@@ -1,6 +1,10 @@
 package subband
 
-import "math"
+import (
+	"math"
+
+	"github.com/ygelfand/echolocal/internal/lib/fft"
+)
 
 // Bands the beam is chosen on, roughly 250 Hz to 4 kHz. Below that the array has no directivity to
 // speak of and the room has most of its energy; above it, little of speech is left.
@@ -38,7 +42,7 @@ type Beamformer struct {
 
 // New builds a stream that uses these coefficients.
 func (w *Weights) New() *Beamformer {
-	f := newFFT(FFTLen)
+	f := fft.New(FFTLen)
 	b := &Beamformer{
 		w:     w,
 		scale: float32(math.Pow(10, BoostDB/20)) / bankGain(w.window),

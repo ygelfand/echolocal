@@ -328,6 +328,12 @@ func (s *Source) SetLeveling(on bool) {
 	slog.Info("microphone leveling", "on", on)
 }
 
+// SetDenoising turns the noise estimator on or off. It takes effect on the next frame.
+func (s *Source) SetDenoising(on bool) {
+	s.denoising.Store(on)
+	slog.Info("microphone noise reduction", "on", on)
+}
+
 // SetSensitivity sets how far over the room's own floor counts as something happening, in dB.
 func (s *Source) SetSensitivity(db int) {
 	s.leveler.atSensitivity(db)

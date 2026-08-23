@@ -1,5 +1,7 @@
 package subband
 
+import "github.com/ygelfand/echolocal/internal/lib/fft"
+
 // The bank is the standard polyphase pair. Analysis windows the last WindowLen samples with the
 // prototype, folds them onto FFTLen by summing every FFTLen apart, and transforms; synthesis
 // transforms back, spreads the result over WindowLen, windows it again and overlap-adds. Hop is half
@@ -9,14 +11,14 @@ package subband
 // analysis turns one microphone's samples into subbands, Hop samples at a time.
 type analysis struct {
 	window []float32
-	fft    *fft
+	fft    *fft.FFT
 
 	// hist is the last WindowLen samples, oldest first.
 	hist []float32
 	fold []complex64
 }
 
-func newAnalysis(window []float32, f *fft) *analysis {
+func newAnalysis(window []float32, f *fft.FFT) *analysis {
 	return &analysis{
 		window: window,
 		fft:    f,
@@ -37,21 +39,21 @@ func (a *analysis) push(samples []float32, out []complex64) {
 		a.fold[n%FFTLen] += complex(h*a.hist[n], 0)
 	}
 
-	a.fft.forward(a.fold)
+	a.fft.Forward(a.fold)
 	copy(out, a.fold[:Bands])
 }
 
 // synthesis turns subbands back into samples, Hop at a time.
 type synthesis struct {
 	window []float32
-	fft    *fft
+	fft    *fft.FFT
 
 	spread []complex64
 	// tail is what previous frames have already added to samples not yet returned.
 	tail []float32
 }
 
-func newSynthesis(window []float32, f *fft) *synthesis {
+func newSynthesis(window []float32, f *fft.FFT) *synthesis {
 	return &synthesis{
 		window: window,
 		fft:    f,
@@ -67,11 +69,11 @@ func (s *synthesis) pull(bands []complex64, out []float32) {
 	s.spread[0] = complex(real(bands[0]), 0)
 	for k := 1; k < Bands; k++ {
 		s.spread[k] = bands[k]
-		s.spread[FFTLen-k] = conj(bands[k])
+		s.spread[FFTLen-k] = fft.Conj(bands[k])
 	}
 	s.spread[Bands] = 0
 
-	s.fft.inverse(s.spread)
+	s.fft.Inverse(s.spread)
 
 	// Overlap-add the windowed period, then hand back the oldest Hop samples.
 	for n, h := range s.window {

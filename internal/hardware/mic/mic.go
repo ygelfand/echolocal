@@ -16,6 +16,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
 	"github.com/ygelfand/echolocal/internal/lib/audio"
+	"github.com/ygelfand/echolocal/internal/lib/denoise"
 	"github.com/ygelfand/echolocal/internal/service"
 )
 
@@ -87,6 +88,11 @@ type Source struct {
 	wasLeveling bool
 	leveling    atomic.Bool
 
+	// The same shape for the noise estimator, which also has state to throw away when it is turned off.
+	denoiser     *denoise.Stream
+	wasDenoising bool
+	denoising    atomic.Bool
+
 	// Which way the loudest sound is, as a beam, or -1 until something asks. finder belongs to the
 	// reader; wantFacing is how anything else asks it to look.
 	finder     *Beamformer
@@ -125,10 +131,12 @@ func New() *Source {
 		finder:     NewBeamformer(),
 		cancel:     newCanceller(),
 		cancelling: config.Get().Microphone.Cancel,
+		denoiser:   denoise.NewStream(Rate),
 	}
 	s.finder.hold = 1
 	s.facing.Store(-1)
 	s.leveling.Store(config.Get().Microphone.Leveling)
+	s.denoising.Store(config.Get().Microphone.Denoise)
 	return s
 }
 
@@ -338,6 +346,17 @@ func (s *Source) broadcast(raw []byte) {
 	}
 
 	s.findFacing(mics)
+
+	// After the echo canceller, so the estimator is not asked to learn the speaker as part of the
+	// room, and before leveling, so the gain is not put back on a floor that has just been removed.
+	if quiet := s.denoising.Load(); quiet {
+		s.denoiser.Apply(frame)
+		s.wasDenoising = true
+	} else if s.wasDenoising {
+		s.denoiser.Forget()
+		s.wasDenoising = false
+	}
+
 	// Turning leveling off throws away what it learned, so a room it has adapted badly to is
 	// recovered by switching it off and on rather than by restarting anything.
 	on := s.leveling.Load()

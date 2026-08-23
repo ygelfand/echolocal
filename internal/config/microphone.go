@@ -21,6 +21,9 @@ type Microphone struct {
 	// Sensitivity is how far over the room's own floor, in dB, counts as something happening. Lower
 	// notices a chair being moved; higher waits for someone to speak.
 	Sensitivity int `json:"sensitivity"`
+
+	// Denoise estimates the steady part of the room and takes it out of what the microphones heard.
+	Denoise bool `json:"denoise"`
 }
 
 const (
@@ -42,6 +45,8 @@ const (
 	// Measured on a quiet room: 0.8 dB at the 99th percentile of frames, so this is well clear of the
 	// room itself and is really about brief small sounds — a chair, a keyboard.
 	DefaultSensitivity = 8
+
+	DefaultDenoise = false
 )
 
 func defaultMicrophone() Microphone {
@@ -53,6 +58,7 @@ func defaultMicrophone() Microphone {
 		Mixing:      DefaultMixing,
 		Cancel:      DefaultCancel,
 		Sensitivity: DefaultSensitivity,
+		Denoise:     DefaultDenoise,
 	}
 }
 
@@ -84,6 +90,10 @@ func (w MicrophoneWriter) Cancel(v bool) error {
 
 func (w MicrophoneWriter) Sensitivity(db int) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Sensitivity = db })
+}
+
+func (w MicrophoneWriter) Denoise(v bool) error {
+	return w.st.Update(func(c *Config) { c.Microphone.Denoise = v })
 }
 
 // Mixing is how a microphone array is reduced to the single channel recognition reads.
