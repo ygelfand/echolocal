@@ -3,6 +3,7 @@ package wake
 import (
 	"context"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -27,8 +28,9 @@ type Library struct {
 	dir string
 
 	// ours is cached because reading it parses every model to work out which engine runs it.
-	muOurs sync.Mutex
-	ours   []Model
+	muOurs  sync.Mutex
+	ours    []Model
+	virtual []Model
 
 	muOffers sync.Mutex
 	offers   map[string]esphome.ExternalWakeWord
@@ -48,7 +50,12 @@ var (
 
 // Lib is the device's library, built on first use.
 func Lib() *Library {
-	once.Do(func() { lib = NewLibrary(layout.ModelDir) })
+	once.Do(func() {
+		lib = NewLibrary(layout.ModelDir)
+		if _, err := os.Stat(layout.PryonUIDPath); err == nil {
+			lib.AddVirtual(PryonModel())
+		}
+	})
 	return lib
 }
 
@@ -67,7 +74,25 @@ func (l *Library) Dir() string { return l.dir }
 func (l *Library) Ours() []Model {
 	l.muOurs.Lock()
 	defer l.muOurs.Unlock()
-	return l.ours
+	out := make([]Model, 0, len(l.ours)+len(l.virtual))
+	out = append(out, l.ours...)
+	out = append(out, l.virtual...)
+	return out
+}
+
+// AddVirtual adds a detector that is installed outside the TFLite model directory. Replacing by ID
+// makes the operation safe to repeat and gives tests a way to describe device capabilities without
+// manufacturing a model file.
+func (l *Library) AddVirtual(model Model) {
+	l.muOurs.Lock()
+	defer l.muOurs.Unlock()
+	for i := range l.virtual {
+		if l.virtual[i].ID == model.ID {
+			l.virtual[i] = model
+			return
+		}
+	}
+	l.virtual = append(l.virtual, model)
 }
 
 // Reload re-reads the directory, and is called wherever what is on disk changes.
@@ -77,7 +102,6 @@ func (l *Library) Reload() {
 		slog.Error("listing wake words failed", "dir", l.dir, "err", err)
 		return
 	}
-
 	l.muOurs.Lock()
 	l.ours = models
 	l.muOurs.Unlock()

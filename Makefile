@@ -20,6 +20,8 @@ LDFLAGS := -X '$(BUILDVARS).Version=$(VERSION)' \
 BUILD_DIR := bin
 ASSET_DIR := internal/host/assets/payload
 BOOT_IMAGE := images/echolocal-boot.img
+PRYON_APK ?= android/pryon/build/EchoLocalPryon.apk
+ANDROID_MEDIA ?= android/amazon-helper/build/amazon-helper.jar
 
 # echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). Amazon ships a 32-bit userspace but
 # the SoC and kernel are arm64 and /system/lib64 is present, so echod is built 64-bit: the wake word
@@ -117,10 +119,16 @@ check: fmt vet lint test ## Format, vet, lint and test
 .PHONY: payload
 payload: build-echod ## Stage echod and the boot image for embedding into echoctl
 	@mkdir -p $(ASSET_DIR)
+	@test -f $(PRYON_APK) || { echo "missing $(PRYON_APK); build android/pryon first"; exit 1; }
+	@test -f $(ANDROID_MEDIA) || { echo "missing $(ANDROID_MEDIA); build android/amazon-helper first"; exit 1; }
 	cp $(BUILD_DIR)/echod $(ASSET_DIR)/echod
 	cp $(BOOT_IMAGE) $(ASSET_DIR)/boot.img
+	cp $(PRYON_APK) $(ASSET_DIR)/EchoLocalPryon.apk
+	cp $(ANDROID_MEDIA) $(ASSET_DIR)/amazon-helper.jar
 	@shasum -a 256 $(ASSET_DIR)/echod | awk '{print $$1}' > $(ASSET_DIR)/echod.sha256
 	@shasum -a 256 $(ASSET_DIR)/boot.img | awk '{print $$1}' > $(ASSET_DIR)/boot.img.sha256
+	@shasum -a 256 $(ASSET_DIR)/EchoLocalPryon.apk | awk '{print $$1}' > $(ASSET_DIR)/EchoLocalPryon.apk.sha256
+	@shasum -a 256 $(ASSET_DIR)/amazon-helper.jar | awk '{print $$1}' > $(ASSET_DIR)/amazon-helper.jar.sha256
 
 .PHONY: dist
 dist: payload ## Full build: echod, the boot image, then echoctl carrying both

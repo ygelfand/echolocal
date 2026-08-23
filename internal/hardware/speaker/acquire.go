@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ygelfand/echolocal/internal/android/amazon"
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
 )
@@ -24,6 +25,13 @@ const (
 // so a restart can leave us with no speaker. Stopping the service releases it; it is started again
 // either way, because leaving it down trips the framework watchdog.
 func (p *Player) Start(context.Context) error {
+	if amazon.Enabled() {
+		if !amazon.Get().Connected() {
+			return errors.New("speaker: Android media helper is not connected")
+		}
+		slog.Info("playback using Android media helper", "rate", Rate, "channels", Channels, "bits", Bits)
+		return nil
+	}
 	err := p.open()
 	if err == nil || !errors.Is(err, alsa.ErrBusy) {
 		return err

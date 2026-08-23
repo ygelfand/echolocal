@@ -34,15 +34,18 @@ var (
 
 func newInstallCmd() *cobra.Command {
 	var (
-		serial    string
-		echod     string
-		name      string
-		bootImage string
-		zeroPSK   bool
-		flashOnly bool
-		assumeYes bool
-		doReboot  bool
-		noReboot  bool
+		serial       string
+		echod        string
+		name         string
+		bootImage    string
+		pryonAPK     string
+		androidMedia string
+		zeroPSK      bool
+		noPryon      bool
+		flashOnly    bool
+		assumeYes    bool
+		doReboot     bool
+		noReboot     bool
 	)
 
 	c := &cobra.Command{
@@ -65,7 +68,7 @@ func newInstallCmd() *cobra.Command {
 				return err
 			}
 
-			cfg := installer.Config{ZeroPSK: zeroPSK}
+			cfg := installer.Config{ZeroPSK: zeroPSK, Pryon: !noPryon}
 
 			// The image is only resolved when it is going to be written. A device that already has root
 			// and a permissive kernel needs none, so a build that ships no payload can still install to
@@ -101,6 +104,14 @@ func newInstallCmd() *cobra.Command {
 			if cfg.Echod, _, err = payload(assets.Echod(), echod, "echod binary"); err != nil {
 				return err
 			}
+			if cfg.Pryon {
+				if cfg.PryonAPK, _, err = payload(assets.PryonAPK(), pryonAPK, "Pryon companion APK"); err != nil {
+					return err
+				}
+				if cfg.AndroidMedia, _, err = payload(assets.AndroidMedia(), androidMedia, "Android media helper"); err != nil {
+					return err
+				}
+			}
 			chosen, err := resolveName(cmd.Context(), out, d, name)
 			if err != nil {
 				return err
@@ -134,8 +145,27 @@ func newInstallCmd() *cobra.Command {
 
 			// Before the pairing key rather than after, so the one thing to carry off the screen is the
 			// last thing printed.
-			if err := offerReboot(cmd.Context(), out, d, settles, rebootChoiceOf(doReboot, noReboot)); err != nil {
+			rebooted, err := offerReboot(cmd.Context(), out, d, settles, rebootChoiceOf(doReboot, noReboot))
+			if err != nil {
 				return err
+			}
+			if cfg.Pryon {
+				if !rebooted {
+					scanned, scanErr := installer.PryonScanned(d)
+					if scanErr != nil {
+						return scanErr
+					}
+					if !scanned {
+						return errors.New("Pryon companion is staged but Android has not scanned it; rerun with --reboot to complete the install")
+					}
+				}
+				if err := render(cmd.Context(), out, "Finalizing Alexa and ESPHome",
+					"✓ EchoLocal is discoverable in ESPHome with Pryon/Alexa ready",
+					func(report installer.Reporter) error {
+						return installer.FinalizePryon(cmd.Context(), d, cfg, report)
+					}); err != nil {
+					return err
+				}
 			}
 			return printPairing(out, d, chosen)
 		},
@@ -144,6 +174,9 @@ func newInstallCmd() *cobra.Command {
 	c.Flags().StringVar(&serial, "serial", "", "device serial, when more than one is connected")
 	c.Flags().StringVar(&echod, "echod", "", "echod binary to install, instead of the one shipped")
 	c.Flags().StringVar(&bootImage, "boot-image", "", "boot image to write, instead of the one shipped")
+	c.Flags().StringVar(&pryonAPK, "pryon-apk", "", "Pryon companion APK to install, instead of the one shipped")
+	c.Flags().StringVar(&androidMedia, "android-media", "", "Android media helper JAR to install, instead of the one shipped")
+	c.Flags().BoolVar(&noPryon, "no-pryon", false, "install direct-ALSA EchoLocal without Pryon/Alexa")
 	c.Flags().BoolVar(&flashOnly, "flash-only", false,
 		"write the boot image and stop, without installing echod")
 	c.Flags().BoolVarP(&assumeYes, "yes", "y", false,

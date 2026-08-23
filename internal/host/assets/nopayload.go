@@ -3,6 +3,8 @@
 package assets
 
 var (
-	echod     []byte
-	bootImage []byte
+	echod        []byte
+	bootImage    []byte
+	pryonAPK     []byte
+	androidMedia []byte
 )

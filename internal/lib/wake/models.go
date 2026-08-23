@@ -31,7 +31,23 @@ type Kind string
 const (
 	KindOpenWakeWord  Kind = "openwakeword"
 	KindMicroWakeWord Kind = "microwakeword"
+	// KindPryon is Amazon's firmware detector. It has no TFLite path: the privileged Android
+	// companion owns its model and microphone, and sends only a wake event to echod.
+	KindPryon Kind = "pryon"
 )
+
+const PryonID = "pryon_alexa"
+
+// PryonModel is the virtual model Home Assistant selects when the device-side companion is
+// installed. It deliberately carries no path or inference configuration.
+func PryonModel() Model {
+	return Model{
+		ID:        PryonID,
+		Phrase:    "Alexa",
+		Languages: []string{"en"},
+		Kind:      KindPryon,
+	}
+}
 
 type Model struct {
 	// ID is the file's base name. Home Assistant selects by it.

@@ -469,18 +469,23 @@ func (c *conversation) start(n nextTurn) {
 
 	c.slot = slot
 	c.followUp = n.followUp
+	c.player.VoiceTurn(true)
 
-	// Before the chime, and before Home Assistant is told anything. Ducking is what the room hears
-	// first, and it has a second of queued music to get through, so every step it waits behind is a
-	// step of full-volume music over somebody who has already started talking.
+	// Visual detection feedback begins locally, before ducking or the request to Home Assistant.
+	if effect := wakeword.Effect(slot); effect != "" {
+		c.claim.Play(effect, c.ring.Base())
+	}
+
+	// Before Home Assistant is told anything. Ducking is what the room hears first, and it has queued
+	// music to get through, so every step it waits behind is a step of full-volume music over somebody
+	// who has already started talking.
 	//
-	// It also keeps the chime out of the duck: the chime is mixed into the queue after this, so it
-	// sounds at its own level rather than being faded along with the track underneath it.
+	// The chime follows the duck so re-scaling queued background audio cannot attenuate it. This is a
+	// local queue operation, not a network round trip, and the tone remains optional per wake-word slot.
 	c.hold(true)
-
-	// A follow-up chimes like any other turn: the microphone is open with nothing said to say so.
-	// It is not a wake, though, so it does not report a phrase nobody spoke.
 	wakeword.Chime(slot)
+
+	// A follow-up reports no wake phrase, because nobody spoke one.
 	if !n.followUp {
 		c.log.Woke(phrase)
 	}
@@ -488,6 +493,7 @@ func (c *conversation) start(n nextTurn) {
 	recording.Get().Opens(c.turn.ID(), slot)
 	if err := c.vs.StartTurn(phrase, audioSettings()); err != nil {
 		slog.Error("starting the turn failed", "slot", slot+1, "err", err)
+		c.idle("start failed", activity.Failed)
 		c.trouble()
 		return
 	}
@@ -495,10 +501,6 @@ func (c *conversation) start(n nextTurn) {
 	c.enter(phaseListening)
 	c.turn.Listening()
 	c.reply = reply{}
-
-	if effect := wakeword.Effect(slot); effect != "" {
-		c.claim.Play(effect, c.ring.Base())
-	}
 
 	c.arm(c.listenFor(n))
 	c.startAudio(slot)
@@ -592,6 +594,7 @@ func (c *conversation) idle(why string, how activity.Outcome) {
 
 	c.enter(phaseIdle)
 	c.claim.Clear()
+	c.player.VoiceTurn(false)
 	c.player.Sounding(false)
 	c.reply = reply{}
 	c.hold(c.pending != nil)
@@ -921,7 +924,12 @@ func activeWakeWords(models []wake.Model, slots int) []string {
 	// whatever this device does have — a device carrying one model somebody copied on should listen for
 	// that one rather than for nothing.
 	if len(active) == 0 {
-		if m, ok := wake.Find(models, wake.DefaultModel); ok {
+		// A complete Pryon install was explicitly chosen by the installer, so Alexa is the useful
+		// first-run default there. Saved choices still win above, and direct-ALSA installations keep
+		// the established Okay Nabu default.
+		if m, ok := wake.Find(models, wake.PryonID); ok {
+			active = []string{m.ID}
+		} else if m, ok := wake.Find(models, wake.DefaultModel); ok {
 			active = []string{m.ID}
 		} else if len(models) > 0 {
 			active = []string{models[0].ID}

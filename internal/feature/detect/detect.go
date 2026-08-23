@@ -85,7 +85,8 @@ func newDetect() *Detect {
 	ours := wake.Lib().Ours()
 	slog.Info("wake words installed", "count", len(ours),
 		"openwakeword", len(wake.OfKind(ours, wake.KindOpenWakeWord)),
-		"microwakeword", len(wake.OfKind(ours, wake.KindMicroWakeWord)))
+		"microwakeword", len(wake.OfKind(ours, wake.KindMicroWakeWord)),
+		"pryon", len(wake.OfKind(ours, wake.KindPryon)))
 
 	return d
 }
@@ -120,6 +121,14 @@ func (d *Detect) load(ids []string) []string {
 		if !ok {
 			slog.Warn("unknown wake word", "slot", slot+1, "id", ids[slot])
 			d.engine.Clear(slot)
+			continue
+		}
+		if m.Kind == wake.KindPryon {
+			// Pryon scores in Amazon's privileged Android process. Keeping this slot out of the
+			// PCM engine is the boundary that prevents a fake model path or a second detector.
+			d.engine.Clear(slot)
+			accepted = append(accepted, m.ID)
+			slog.Info("external wake word selected", "slot", slot+1, "id", m.ID, "engine", m.Kind)
 			continue
 		}
 		if err := d.engine.Use(slot, m); err != nil {

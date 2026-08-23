@@ -107,3 +107,19 @@ func TestAdvertiseIsStableAcrossCalls(t *testing.T) {
 		t.Errorf("advertised %q, want the first by id", first[0].ID)
 	}
 }
+
+func TestAdvertiseIncludesVirtualPryon(t *testing.T) {
+	l := installed(t, map[string]string{"okay_nabu": "Okay Nabu"})
+	l.AddVirtual(PryonModel())
+
+	words, shadowed := l.Advertise()
+	if shadowed != 0 {
+		t.Fatalf("shadowed %d, want none", shadowed)
+	}
+	for _, word := range words {
+		if word.ID == PryonID && word.Phrase == "Alexa" {
+			return
+		}
+	}
+	t.Fatalf("Pryon/Alexa missing from %+v", words)
+}

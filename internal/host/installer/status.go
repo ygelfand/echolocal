@@ -21,10 +21,14 @@ type State struct {
 	Name        string
 	Provisioned bool
 
-	Installed  bool
-	LinkTarget string
-	HaveBackup bool
-	Version    string
+	Installed       bool
+	LinkTarget      string
+	HaveBackup      bool
+	Version         string
+	AndroidMedia    bool
+	PryonInstalled  bool
+	PryonConfigured bool
+	APIListening    bool
 
 	ServiceState string
 	AgentState   string
@@ -70,7 +74,17 @@ func ReadState(d *device.Device) (State, error) {
 	if s.Installed {
 		// A binary that will not execute is what a file listing hides.
 		if out, err := d.Shell(layout.Binary + " --version"); err == nil {
-			s.Version = strings.TrimSpace(out)
+			// Package initializers may log before Cobra handles --version. Keep only the actual
+			// version line so status remains readable on both old and new builds.
+			for line := range strings.SplitSeq(out, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "echod version ") {
+					s.Version = line
+				}
+			}
+			if s.Version == "" {
+				s.Version = strings.TrimSpace(out)
+			}
 		} else {
 			s.Version = "will not run: " + err.Error()
 		}
@@ -84,6 +98,13 @@ func ReadState(d *device.Device) (State, error) {
 		return s, err
 	}
 	s.Provisioned = key != ""
+	s.AndroidMedia, _ = d.Exists(layout.AndroidMediaJar)
+	s.PryonInstalled, _ = d.Exists(layout.PryonAPK)
+	s.PryonConfigured, _ = d.Exists(layout.PryonUIDPath)
+	port := strings.ToUpper(strconv.FormatInt(layout.Port, 16))
+	port = strings.Repeat("0", 4-len(port)) + port
+	_, code, _ := d.ShellCode("cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep ':" + port + " '")
+	s.APIListening = code == 0
 
 	s.ServiceState, _ = d.Getprop("init.svc." + layout.ServiceName)
 	s.AgentState, _ = d.Getprop(layout.StateProp)

@@ -11,6 +11,10 @@ Requires a device unlocked with TWRP or similar — see [xdaforums](https://xdaf
 
 **100% on-device local wake words.** Supports [openWakeWord](https://github.com/dscripka/openWakeWord)
 and [microWakeWord](https://github.com/kahrendt/microWakeWord) models, including "stop" detection.
+On compatible original firmware, the installer also enables the Dot's own native Amazon Pryon
+detector as a selectable **Alexa** wake word. Pryon performs wake detection only; EchoLocal still
+owns the Home Assistant Assist, LED, capture, TTS, media, ducking and Sendspin paths.
+[Technical details and rollback guidance](docs/pryon.md) are available for maintainers.
 
 **LED ring.** Twelve individually addressable segments, multiple animation effects across ambient, motion, alert and
 room-reactive behavior, and a color picker per segment. The ring can follow the room's volume.
@@ -42,16 +46,39 @@ Everything above works with stock Home Assistant. The
 
 ## Installing
 
-You need a 2nd-generation Echo Dot, connected via a USB cable, and a device that has been unlocked with TWRP as its
-recovery partition. `echoctl` does the rest. It'll prompt for wifi configuration if it hasn't been setup and provide espHome encryption key
+You need a 2nd-generation Echo Dot connected by USB and unlocked with TWRP as its recovery
+partition. `echoctl` discovers the attached Dot's own Pryon libraries, SpeechInteractionManager APK
+and locale model manifests; no Amazon binary or model is shipped by EchoLocal. It prompts for Wi-Fi,
+generates an ESPHome encryption key, reboots when Android must scan the wake-only companion, and
+does not report completion until the native API, mDNS EchoLocal identity, Pryon detector and shared
+live microphone path are ready.
+
+For an unlocked Dot with TWRP recovery on Windows, run the complete source-tree provisioner:
+
+```powershell
+.\provision-echo-dot.ps1 -Name "Kitchen Echo"
+```
+
+Pass `-Serial` when more than one device is attached. The script refuses non-`biscuit` hardware,
+saves a gitignored rollback snapshot, builds and embeds all EchoLocal-owned payloads, installs and
+reboots the Dot, verifies ESPHome plus Pryon/Alexa, saves a private credential receipt inside that
+snapshot, and prints the unique 32-byte ESPHome encryption key last. Connect the Dot to local Wi-Fi
+when prompted; an Amazon account or Amazon registration is
+not required. When the running Android image is not already root and permissive, the script uses
+EchoLocal's verified boot image and TWRP recovery before changing `/system`.
 
 ```sh
-echoctl install --name living-room
+echoctl install --name living-room --reboot
 ```
 
 ![echoctl install, from flashing the boot image to the device coming back on wifi](docs/images/install.gif)
 
 It then turns up in Home Assistant on its own, and the key `echoctl` printed is what pairs it:
+
+After pairing, choose **Alexa** in the assistant's Wake word select. The other installed
+openWakeWord and microWakeWord choices remain available. `echoctl status` reports the ESPHome API,
+Android-media bridge and Pryon configuration. Use `--no-pryon` only when intentionally installing
+the legacy direct-ALSA runtime.
 
 <p align="center">
   <img src="docs/images/echolocal_discovery.png" alt="Home Assistant discovering the device as an ESPHome node" height="230">
@@ -64,6 +91,10 @@ It then turns up in Home Assistant on its own, and the key `echoctl` printed is 
 make build-echod     # cross-compile the daemon for the Dot
 make install-echod   # build, install, and restart it on a connected device
 ```
+
+For a self-contained installer, first build `android/pryon` and `android/amazon-helper`, then run
+`make dist`. Their generated APK/JAR are our code and are embedded in `echoctl`; firmware-owned
+libraries, APKs and models are always read in place from the user's attached Dot.
 
 ## How it fits together
 

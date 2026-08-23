@@ -18,6 +18,7 @@ func TestWakeWordsPreselectsTheDefault(t *testing.T) {
 		"the default sorts last":       {[]string{"alexa", wake.DefaultModel}, wake.DefaultModel},
 		"the default is not installed": {[]string{"hey_jarvis"}, "hey_jarvis"},
 		"nothing installed":            {nil, ""},
+		"Pryon install prefers Alexa":  {[]string{wake.DefaultModel, wake.PryonID}, wake.PryonID},
 	} {
 		models := make([]wake.Model, 0, len(tc.installed))
 		for _, id := range tc.installed {

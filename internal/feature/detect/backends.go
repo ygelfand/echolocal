@@ -35,6 +35,9 @@ type backend interface {
 
 // newBackend builds the engine for one of them.
 func newBackend(k wake.Kind) (backend, error) {
+	if k == wake.KindPryon {
+		return nil, fmt.Errorf("wake: Pryon is an external event backend")
+	}
 	if k == wake.KindOpenWakeWord {
 		front, err := oww.New()
 		if err != nil {

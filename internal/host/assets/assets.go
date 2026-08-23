@@ -11,5 +11,13 @@ func Echod() []byte { return echod }
 // BootImage is the boot image written to boot_a_x, or empty in a build without a payload.
 func BootImage() []byte { return bootImage }
 
+// PryonAPK is EchoLocal's own wake-only privileged companion. It contains no Amazon code or models.
+func PryonAPK() []byte { return pryonAPK }
+
+// AndroidMedia is EchoLocal's own app_process bridge for AudioRecord and AudioTrack.
+func AndroidMedia() []byte { return androidMedia }
+
 // Embedded reports whether this build carries both.
-func Embedded() bool { return len(echod) > 0 && len(bootImage) > 0 }
+func Embedded() bool {
+	return len(echod) > 0 && len(bootImage) > 0 && len(pryonAPK) > 0 && len(androidMedia) > 0
+}

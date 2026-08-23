@@ -12,3 +12,9 @@ var echod []byte
 
 //go:embed payload/boot.img
 var bootImage []byte
+
+//go:embed payload/EchoLocalPryon.apk
+var pryonAPK []byte
+
+//go:embed payload/amazon-helper.jar
+var androidMedia []byte

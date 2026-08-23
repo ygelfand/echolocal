@@ -41,6 +41,7 @@ var flashSteps = []step{
 	{"check target partition", checkPartition},
 	{"write the boot image", writeImage},
 	{"verify what was written", verifyImage},
+	{"unmount recovery userdata", unmountRecoveryUserdata},
 	{"reboot to android", bootAndroid},
 	{"confirm root and policy", confirmPolicy},
 }
@@ -336,6 +337,102 @@ func verifyImage(r *run) (string, bool, error) {
 			got, bootimg.Ours.SHA256)
 	}
 	return got[:12] + " matches", false, nil
+}
+
+const userdataNode = "/dev/block/platform/mtk-msdc.0/by-name/userdata"
+
+// unmountRecoveryUserdata leaves TWRP's automatic userdata mounts in a clean state before Android
+// boots. Some TWRP builds mount the same ext4 filesystem at both /data and /sdcard; rebooting while
+// those mounts are live can abort its journal and make Android remount /data read-only.
+func unmountRecoveryUserdata(r *run) (string, bool, error) {
+	if detail, skip := r.done(); skip {
+		return detail, true, nil
+	}
+
+	node, err := r.d.Shell("readlink -f " + userdataNode)
+	if err != nil {
+		return "", false, fmt.Errorf("resolving userdata: %w", err)
+	}
+	node = strings.TrimSpace(node)
+	if node == "" || !strings.HasPrefix(node, "/dev/block/") {
+		return "", false, fmt.Errorf("userdata resolved to unsafe block device %q", node)
+	}
+
+	mounts, err := recoveryUserdataMounts(r.d, node)
+	if err != nil {
+		return "", false, err
+	}
+	if len(mounts) == 0 {
+		return "already unmounted", false, nil
+	}
+
+	if _, err := r.d.Shell("sync"); err != nil {
+		return "", false, fmt.Errorf("syncing recovery filesystems: %w", err)
+	}
+	// /sdcard is the second mount on the affected TWRP image, so release it before /data.
+	for _, target := range []string{"/sdcard", "/data"} {
+		if !contains(mounts, target) {
+			continue
+		}
+		if _, err := r.d.Shell("umount " + target); err != nil {
+			return "", false, fmt.Errorf("unmounting userdata from %s: %w", target, err)
+		}
+	}
+	if _, err := r.d.Shell("sync"); err != nil {
+		return "", false, fmt.Errorf("syncing after unmount: %w", err)
+	}
+
+	remaining, err := recoveryUserdataMounts(r.d, node)
+	if err != nil {
+		return "", false, err
+	}
+	if len(remaining) != 0 {
+		return "", false, fmt.Errorf("userdata is still mounted at %s; refusing to reboot",
+			strings.Join(remaining, ", "))
+	}
+	return strings.Join(mounts, " and "), false, nil
+}
+
+func recoveryUserdataMounts(d *device.Device, node string) ([]string, error) {
+	raw, err := d.Shell("cat /proc/mounts")
+	if err != nil {
+		return nil, fmt.Errorf("reading recovery mounts: %w", err)
+	}
+	return parseUserdataMounts(raw, node)
+}
+
+func parseUserdataMounts(raw, node string) ([]string, error) {
+	found := map[string]bool{}
+	for line := range strings.SplitSeq(raw, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || (fields[0] != node && fields[0] != userdataNode) {
+			continue
+		}
+		switch fields[1] {
+		case "/data", "/sdcard":
+			found[fields[1]] = true
+		default:
+			return nil, fmt.Errorf("userdata is unexpectedly mounted at %s; refusing to reboot", fields[1])
+		}
+	}
+
+	// Keep the unmount order deterministic and safe for TWRP's duplicate mount.
+	var mounts []string
+	for _, target := range []string{"/sdcard", "/data"} {
+		if found[target] {
+			mounts = append(mounts, target)
+		}
+	}
+	return mounts, nil
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func bootAndroid(r *run) (string, bool, error) {
