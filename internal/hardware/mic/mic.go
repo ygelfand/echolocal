@@ -63,7 +63,7 @@ type Source struct {
 	pcm   *alsa.Capture
 
 	mu        sync.Mutex
-	listeners map[int]chan []int16
+	listeners map[int]*listener
 	raw       map[int]chan []byte
 	next      int
 
@@ -123,7 +123,7 @@ func (s *Source) Mixing() config.Mixing {
 func New() *Source {
 	mixer, mixing := NewMixer(config.Get().Microphone.Mixing)
 	s := &Source{
-		listeners:  map[int]chan []int16{},
+		listeners:  map[int]*listener{},
 		raw:        map[int]chan []byte{},
 		mixer:      mixer,
 		mixing:     mixing,
@@ -229,22 +229,34 @@ func (s *Source) device() *alsa.Capture {
 	return s.pcm
 }
 
-// Listen returns a channel of mono frames and a function that stops the subscription.
-func (s *Source) Listen() (<-chan []int16, func()) {
-	ch := make(chan []int16, 8)
+type listener struct {
+	name    string
+	ch      chan []int16
+	dropped uint64
+	told    uint64
+}
+
+// Listen returns a channel of mono frames and a function that stops the subscription. The name is
+// what a dropped frame is reported against.
+func (s *Source) Listen(name string) (<-chan []int16, func()) {
+	l := &listener{name: name, ch: make(chan []int16, 8)}
 
 	s.mu.Lock()
 	id := s.next
 	s.next++
-	s.listeners[id] = ch
+	s.listeners[id] = l
 	s.mu.Unlock()
 
-	return ch, func() {
+	return l.ch, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if c, ok := s.listeners[id]; ok {
+		if was, ok := s.listeners[id]; ok {
 			delete(s.listeners, id)
-			close(c)
+			close(was.ch)
+			// A turn lasts seconds, so anything it lost would otherwise go unsaid.
+			if lost := was.dropped - was.told; lost > 0 {
+				slog.Warn("listener behind", "who", was.name, "frames", lost, "total", was.dropped)
+			}
 		}
 	}
 }
@@ -305,20 +317,51 @@ func (s *Source) Run(ctx context.Context) error {
 	}
 	raw := make([]byte, FrameSamples*Channels*Bits/8)
 
+	var overruns uint64
+	report := time.NewTicker(dropReport)
+	defer report.Stop()
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
 
+		select {
+		case <-report.C:
+			s.reportDrops()
+		default:
+		}
+
 		n, err := pcm.Read(raw)
 		if err != nil {
 			if errors.Is(err, alsa.ErrOverrun) {
-				slog.Warn("capture overrun")
+				if overruns++; overruns == 1 || overruns%100 == 0 {
+					slog.Warn("capture overrun", "times", overruns)
+				}
 				continue
 			}
 			return err
 		}
 		s.broadcast(raw[:n])
+	}
+}
+
+// dropReport is how often a listener losing frames is said out loud. Nothing is logged while nothing
+// is being lost.
+const dropReport = 30 * time.Second
+
+func (s *Source) reportDrops() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, l := range s.listeners {
+		since := l.dropped - l.told
+		if since == 0 {
+			continue
+		}
+		l.told = l.dropped
+		slog.Warn("listener behind", "who", l.name, "frames", since,
+			"per_second", float64(since)/dropReport.Seconds(), "total", l.dropped)
 	}
 }
 
@@ -377,10 +420,11 @@ func (s *Source) broadcast(raw []byte) {
 	s.wasLeveling = on
 	s.remember(frame)
 
-	for _, ch := range s.listeners {
+	for _, l := range s.listeners {
 		select {
-		case ch <- frame:
+		case l.ch <- frame:
 		default:
+			l.dropped++
 			s.dropped.Add(1)
 		}
 	}

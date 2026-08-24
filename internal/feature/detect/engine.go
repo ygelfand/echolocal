@@ -277,7 +277,7 @@ func (e *Engine) Listening() bool {
 // Run scores frames until ctx is cancelled. The microphones going away is reported rather than
 // returned quietly: detection stopping is the device going deaf, which should not be silent.
 func (e *Engine) Run(ctx context.Context) error {
-	frames, unlisten := e.source.Listen()
+	frames, unlisten := e.source.Listen("wake")
 	defer unlisten()
 
 	for {

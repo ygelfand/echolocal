@@ -184,6 +184,11 @@ func (f *Filter) apply() {
 		// The log-MMSE gain, and then the weight given to it by how likely the band holds speech.
 		a := prior / (1 + prior)
 		v := a * post
+		// E1 diverges at zero, and the Inf*0 that follows would sit in clean for good.
+		if v <= 0 {
+			f.clean[k] = 0
+			continue
+		}
 		lsa := a * math.Exp(0.5*e1(v))
 
 		present := (1 - absent) / (1 - absent + absent*(1+prior)*math.Exp(-v))

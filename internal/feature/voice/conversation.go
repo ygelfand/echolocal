@@ -781,7 +781,7 @@ func (c *conversation) stopStreaming() {
 
 // stream sends microphone frames until it is told to stop.
 func (c *conversation) stream(ctx context.Context, slot int) {
-	frames, unlisten := c.source.Listen()
+	frames, unlisten := c.source.Listen("turn")
 	defer unlisten()
 
 	buf := make([]byte, 0, mic.FrameSamples*2)

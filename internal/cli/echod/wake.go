@@ -74,7 +74,7 @@ func newWakeCmd() *cobra.Command {
 				return compareMixes(ctx, out, source, m, int(secs*1000)/20)
 			}
 
-			frames, unlisten := source.Listen()
+			frames, unlisten := source.Listen("tools wake")
 			defer unlisten()
 
 			fmt.Fprintf(out, "listening on the center mic for %.0fs: %q (%s), cutoff %.2f, window %d, step %dms\n",
