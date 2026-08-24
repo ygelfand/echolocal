@@ -129,10 +129,8 @@ github.com/subosito/gotenv v1.6.0 h1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
-github.com/ygelfand/go-esphome-device v0.0.2 h1:+WuM+O53f8w8Nr9FJ79rsmUKaqUXFxY0tAE+gbqX7y0=
-github.com/ygelfand/go-esphome-device v0.0.2/go.mod h1:Rrbk7Xmsx2Au87DCXhPfOvI8O7OXFtWqUjxqiGL0nCQ=
-github.com/ygelfand/go-esphome-device v0.0.3 h1:0fePJE4+/YDG2kuju4G6VRshEbgIrF3FN/3/wIv6O4I=
-github.com/ygelfand/go-esphome-device v0.0.3/go.mod h1:Rrbk7Xmsx2Au87DCXhPfOvI8O7OXFtWqUjxqiGL0nCQ=
+github.com/ygelfand/go-esphome-device v0.0.4 h1:WhoMOGAwRFXv22LYDGUqmb2YTXLwz0goQtMFQYu6ygs=
+github.com/ygelfand/go-esphome-device v0.0.4/go.mod h1:Rrbk7Xmsx2Au87DCXhPfOvI8O7OXFtWqUjxqiGL0nCQ=
 github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e h1:W7Rfr8nl15z15s6EMHGiuJjySfrgy2uJweO5Kk6mImo=
 github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e/go.mod h1:O7dsX2fwJHkPSXYjkoXLY6XH327YXyLdDfPWmb7OQW8=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
