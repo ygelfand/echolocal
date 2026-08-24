@@ -118,6 +118,9 @@ type conversation struct {
 
 	events chan event
 
+	// out is everything bound for Home Assistant, so nothing local waits on the socket.
+	out chan func() error
+
 	// visible is the phase, published for anything outside the loop that needs to ask. Only the loop
 	// writes it, and a reader tolerates being a moment out of date: the button uses it to choose
 	// between starting and cancelling, and posting either is safe whichever it picks.
@@ -186,6 +189,7 @@ func newConversation(vs *esphome.VoiceSatellite) *conversation {
 		leds:    led.Get(),
 		log:     activity.Get(),
 		events:  make(chan event, 32),
+		out:     make(chan func() error, outDepth),
 	}
 
 	vs.OnPipelineEvent = c.pipeline
@@ -205,6 +209,48 @@ func newConversation(vs *esphome.VoiceSatellite) *conversation {
 	return c
 }
 
+// outDepth is how far behind Home Assistant may fall before audio is dropped, in frames of 20ms.
+const outDepth = 64
+
+// send queues a message rather than writing it. Ordering is why there is one queue and not a
+// goroutine each: Start, the audio, End and Stop only mean anything in that order.
+func (c *conversation) send(what string, fn func() error) {
+	select {
+	case c.out <- fn:
+	default:
+		slog.Warn("dropped a message to home assistant", "what", what)
+	}
+}
+
+// sendAudio queues a frame or drops it. Audio held back until a stalled link recovers is audio
+// nobody wants by then, and the frame is copied because the caller reuses it.
+func (c *conversation) sendAudio(b []byte) {
+	frame := append([]byte(nil), b...)
+	select {
+	case c.out <- func() error { return c.vs.SendAudio(frame) }:
+	default:
+	}
+}
+
+// sends drains the queue. A failure ends the turn through the same path a pipeline error takes, and
+// whatever is still queued belonged to that turn, so it goes with it.
+func (c *conversation) sends(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case fn := <-c.out:
+			if err := fn(); err != nil {
+				slog.Error("sending to home assistant failed", "err", err)
+				for len(c.out) > 0 {
+					<-c.out
+				}
+				c.post(event{kind: evError, code: "send", msg: err.Error()})
+			}
+		}
+	}
+}
+
 // post hands an event to the run loop. It never blocks: an event dropped because the queue is full
 // is better than stalling the connection's read loop.
 func (c *conversation) post(e event) {
@@ -222,6 +268,8 @@ func (c *conversation) Phase() phase { return phase(c.visible.Load()) }
 func (c *conversation) Run(ctx context.Context) {
 	c.claim = c.leds.Claim(led.PriorityTurn)
 	defer c.claim.Release()
+
+	safe.Go("voice sender", func() { c.sends(ctx) })
 
 	for {
 		var expired, waited <-chan time.Time
@@ -486,11 +534,7 @@ func (c *conversation) start(n nextTurn) {
 	}
 	c.turn = c.log.Begin(slot+1, phrase)
 	recording.Get().Opens(c.turn.ID(), slot)
-	if err := c.vs.StartTurn(phrase, audioSettings()); err != nil {
-		slog.Error("starting the turn failed", "slot", slot+1, "err", err)
-		c.trouble()
-		return
-	}
+	c.send("start", func() error { return c.vs.StartTurn(phrase, audioSettings()) })
 
 	c.enter(phaseListening)
 	c.turn.Listening()
@@ -581,7 +625,7 @@ func (c *conversation) idle(why string, how activity.Outcome) {
 	c.disarm()
 
 	if was != phaseIdle {
-		_ = c.vs.StopTurn()
+		c.send("stop", c.vs.StopTurn)
 	}
 
 	kept := recording.Get()
@@ -774,9 +818,7 @@ func (c *conversation) stopStreaming() {
 	c.stopAudio()
 	c.stopAudio = nil
 
-	if err := c.vs.EndAudio(); err != nil {
-		slog.Error("ending audio failed", "err", err)
-	}
+	c.send("end of audio", c.vs.EndAudio)
 }
 
 // stream sends microphone frames until it is told to stop.
@@ -802,10 +844,7 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 		}
 		recording.Get().Frame(buf)
 
-		if err := c.vs.SendAudio(buf); err != nil {
-			slog.Error("sending audio history failed", "err", err)
-			return
-		}
+		c.sendAudio(buf)
 		slog.Debug("sent audio history", "ms", len(pre)*1000/mic.Rate)
 	}
 
@@ -870,10 +909,7 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 			}
 			recording.Get().Frame(buf)
 
-			if err := c.vs.SendAudio(buf); err != nil {
-				slog.Error("sending audio failed", "err", err)
-				return
-			}
+			c.sendAudio(buf)
 		}
 	}
 }
