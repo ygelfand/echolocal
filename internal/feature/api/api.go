@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
@@ -30,6 +31,9 @@ func init() {
 	// Last: it serves the registry, so nothing should still be coming up when it starts listening.
 	component.Register(component.Network, Get(), component.Order(99))
 }
+
+// One of Home Assistant's keepalive intervals; it gives up on us at 4.5 of them.
+const writeTimeout = 20 * time.Second
 
 type API struct {
 	srv  *esphome.Server
@@ -78,7 +82,8 @@ func (a *API) Start(context.Context) error {
 
 	a.name = layout.Slug(device.Name)
 	a.srv = &esphome.Server{
-		Addr: device.Addr,
+		Addr:         device.Addr,
+		WriteTimeout: writeTimeout,
 		Info: esphome.Info{
 			Name:              a.name,
 			FriendlyName:      device.Name,
