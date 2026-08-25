@@ -38,6 +38,9 @@ func newInstallCmd() *cobra.Command {
 		echod     string
 		name      string
 		bootImage string
+		ssid      string
+		password  string
+		wps       bool
 		zeroPSK   bool
 		flashOnly bool
 		assumeYes bool
@@ -125,7 +128,7 @@ func newInstallCmd() *cobra.Command {
 			// comes back on the network is more of the install proven. Home Assistant cannot reach the
 			// device without it, and a device that never gets a network is still installed, so declining
 			// leaves it for `echoctl wifi`.
-			if err := ensureWifi(cmd.Context(), out, d, "", "", false); err != nil {
+			if err := ensureWifi(cmd.Context(), out, d, ssid, password, wps); err != nil {
 				if !errors.Is(err, ErrCancelled) {
 					return err
 				}
@@ -144,6 +147,9 @@ func newInstallCmd() *cobra.Command {
 	c.Flags().StringVar(&serial, "serial", "", "device serial, when more than one is connected")
 	c.Flags().StringVar(&echod, "echod", "", "echod binary to install, instead of the one shipped")
 	c.Flags().StringVar(&bootImage, "boot-image", "", "boot image to write, instead of the one shipped")
+	c.Flags().StringVar(&ssid, "ssid", "", "network to join, instead of picking from a scan")
+	c.Flags().StringVar(&password, "password", "", "passphrase, for an --ssid that needs one")
+	c.Flags().BoolVar(&wps, "wps", false, "join by pressing the router's WPS button instead")
 	c.Flags().BoolVar(&flashOnly, "flash-only", false,
 		"write the boot image and stop, without installing echod")
 	c.Flags().BoolVarP(&assumeYes, "yes", "y", false,
