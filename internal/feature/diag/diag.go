@@ -14,6 +14,7 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/android/firewall"
+	"github.com/ygelfand/echolocal/internal/android/setup"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
@@ -69,6 +70,7 @@ type Diag struct {
 	ads    *esphome.Sensor
 
 	interval *esphome.Number
+	minCores *esphome.Number
 
 	// wake restarts the collector's wait when the interval changes, so a shorter one takes effect now
 	// rather than after the wait already running. Buffered: a change while nothing is waiting is not
@@ -112,7 +114,7 @@ func (d *Diag) Entities() []esphome.Entity {
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.lux,
 		d.roomLevel, d.roomFloor,
 		d.adb, d.tls, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
-		d.testPlayback, d.interval,
+		d.testPlayback, d.interval, d.minCores,
 	}
 }
 
@@ -136,6 +138,29 @@ func (d *Diag) collector() {
 		}
 
 		// The wait already running was measured against the old interval.
+		d.soon()
+	}
+
+	d.minCores = &esphome.Number{
+		Base: esphome.Base{
+			ObjectID: "min_cores",
+			Name:     "Minimum CPU cores",
+			Icon:     "mdi:cpu-64-bit",
+			Category: esphome.CategoryConfig,
+		},
+		Min: 1, Max: float64(setup.Present()), Step: 1,
+		Mode: esphome.NumberBox,
+	}
+
+	d.minCores.OnCommand = func(v float32) {
+		if err := setup.MinCores(int(v)); err != nil {
+			slog.Error("holding cores online failed", "cores", int(v), "err", err)
+			return
+		}
+		d.minCores.Set(v)
+		if err := config.Set().Diag().MinCores(int(v)); err != nil {
+			slog.Error("saving a setting failed", "setting", d.minCores.ObjectID, "err", err)
+		}
 		d.soon()
 	}
 }
@@ -487,6 +512,13 @@ func (d *Diag) Restore(c config.Config) {
 	insecureTLS(c.Diag.InsecureTLS)
 	d.tls.Set(c.Diag.InsecureTLS)
 	slog.Info("restored", "what", d.tls.ObjectID, "using", c.Diag.InsecureTLS)
+
+	if err := setup.MinCores(c.Diag.MinCores); err != nil {
+		slog.Error("holding cores online failed", "cores", c.Diag.MinCores, "err", err)
+	} else {
+		d.minCores.Set(float32(c.Diag.MinCores))
+		slog.Info("restored", "what", d.minCores.ObjectID, "using", c.Diag.MinCores)
+	}
 }
 
 // Sample takes every reading at once, so they come from the same moment and line up when something

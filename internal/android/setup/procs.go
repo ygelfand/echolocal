@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"runtime"
@@ -12,7 +13,7 @@ import (
 // number online when the runtime started is whatever the governor happened to be running, and
 // GOMAXPROCS is only read once.
 func procs() error {
-	have := present()
+	have := Present()
 	if have <= runtime.GOMAXPROCS(0) {
 		return nil
 	}
@@ -22,8 +23,16 @@ func procs() error {
 	return nil
 }
 
-// present counts what /sys says exists, online or not. The format is a list of numbers and ranges.
-func present() int {
+// MinCores holds at least n cores online.
+func MinCores(n int) error {
+	if n < 1 || n > Present() {
+		return fmt.Errorf("setup: %d cores is outside 1..%d", n, Present())
+	}
+	return os.WriteFile("/proc/hps/num_base_perf_serv", []byte(strconv.Itoa(n)), 0o644)
+}
+
+// Present counts what /sys says exists, online or not. The format is a list of numbers and ranges.
+func Present() int {
 	data, err := os.ReadFile("/sys/devices/system/cpu/present")
 	if err != nil {
 		return 0

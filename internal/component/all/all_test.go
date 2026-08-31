@@ -58,6 +58,7 @@ var registered = []string{
 	"microphone_mixing",
 	"microphone_noise_reduction",
 	"microphone_sensitivity",
+	"min_cores",
 	"mute_led_brightness",
 	"noise_layer_1",
 	"noise_layer_2",
