@@ -22,6 +22,11 @@ func Chime(slot int) { speaker.Sound().Chime(speaker.WakeTone(saved(slot).Tone))
 // Tones reports whether the slot makes a sound when it fires.
 func Tones(slot int) bool { return saved(slot).Tone != config.ToneNone }
 
+// ChimeLength is how long that sound lasts.
+func ChimeLength(slot int) time.Duration {
+	return speaker.Length(speaker.WakeTone(saved(slot).Tone))
+}
+
 // Delivery is how a slot's reply should reach the device.
 func Delivery(slot int) config.Delivery { return saved(slot).Delivery }
 

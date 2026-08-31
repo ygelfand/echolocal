@@ -853,8 +853,10 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 	// The tone plays as the turn opens and is louder at the array than a talker across the room, so
 	// nothing is sent while it is sounding. What the speaker still has queued says when that is, and
 	// hardwareTail is what the driver holds after the queue runs out.
-	playing := c.speaker != nil && c.speaker.Queued() > 0
-	var quiet time.Time
+	var sounding time.Time
+	if wakeword.Tones(slot) {
+		sounding = time.Now().Add(wakeword.ChimeLength(slot) + speaker.HardwareTail)
+	}
 	var held int
 
 	var peak, samples int
@@ -884,20 +886,13 @@ func (c *conversation) stream(ctx context.Context, slot int) {
 				return
 			}
 
-			if playing {
-				switch {
-				case c.speaker.Queued() > 0:
-					quiet = time.Time{}
-				case quiet.IsZero():
-					quiet = time.Now()
-				case time.Since(quiet) >= speaker.HardwareTail:
-					playing = false
-					slog.Debug("held the tone back", "ms", held*1000/mic.Rate)
-				}
-				if playing {
+			if !sounding.IsZero() {
+				if time.Now().Before(sounding) {
 					held += len(frame)
 					continue
 				}
+				sounding = time.Time{}
+				slog.Debug("held the tone back", "ms", held*1000/mic.Rate)
 			}
 
 			buf = buf[:0]

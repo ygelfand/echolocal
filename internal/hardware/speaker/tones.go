@@ -1,6 +1,10 @@
 package speaker
 
-import "github.com/ygelfand/echolocal/internal/config"
+import (
+	"time"
+
+	"github.com/ygelfand/echolocal/internal/config"
+)
 
 // The sounds the device makes about itself, as opposed to anything it was asked to play.
 //
@@ -44,6 +48,15 @@ var wakeTones = map[config.Tone][]Note{
 
 // WakeTone is what a slot set to t sounds like.
 func WakeTone(t config.Tone) []Note { return wakeTones[t] }
+
+// Length is how long notes take to sound, rests included.
+func Length(notes []Note) time.Duration {
+	var ms int
+	for _, n := range notes {
+		ms += n.Ms
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 // WakeTones lists them in the order they are offered.
 func WakeTones() []config.Tone {
