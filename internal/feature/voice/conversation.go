@@ -84,6 +84,7 @@ const (
 	evPending                      // a turn held back for the last one to close has waited long enough
 	evPlaying                      // the reply has audio, so the pipeline owes nothing more
 	evContinue                     // Home Assistant wants the answer to a question it just asked
+	evSpeaking                     // VAD detected speech has started
 )
 
 type event struct {
@@ -300,6 +301,11 @@ func (c *conversation) handle(e event) {
 	switch e.kind {
 	case evStart:
 		c.start(nextTurn{slot: e.slot})
+
+	case evSpeaking:
+		if c.followUp && c.phase == phaseListening {
+			c.arm(wakeword.MaxListen(c.slot))
+		}
 
 	case evContinue:
 		// The pipeline asked a question. Its answer is owed after the reply has been spoken, so this
@@ -736,6 +742,8 @@ func (c *conversation) pipeline(e esphome.PipelineEvent) {
 	switch e.Type {
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_STT_END:
 		c.post(event{kind: evHeard, text: e.Data["text"]})
+	case api.VoiceAssistantEvent_VOICE_ASSISTANT_STT_VAD_START:
+		c.post(event{kind: evSpeaking})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_STT_VAD_END:
 		c.post(event{kind: evHeard})
 	case api.VoiceAssistantEvent_VOICE_ASSISTANT_INTENT_PROGRESS:
