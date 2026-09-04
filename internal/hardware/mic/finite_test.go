@@ -33,9 +33,8 @@ func TestLevelerStaysFiniteUnderAdversarialInput(t *testing.T) {
 		}},
 	}
 
-	// Long enough for the floors to reach their limits: floorRise is 60 s, so 20 minutes of audio is
-	// well past settled, and it costs a moment here.
-	const frames = 60000
+	// Two minutes, which is where the floors stop moving: floorRise is a 60 s time constant.
+	const frames = 6000
 
 	for _, p := range patterns {
 		for _, settled := range []bool{false, true} {

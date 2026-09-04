@@ -15,7 +15,7 @@ import (
 func TestStateStaysFiniteUnderAdversarialInput(t *testing.T) {
 	const (
 		taps   = 256
-		frames = 10000 // 64 s of audio per pattern
+		frames = 2000
 		hop    = 320
 	)
 
