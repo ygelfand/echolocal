@@ -3,6 +3,7 @@ package sendspin
 import (
 	"bytes"
 	"encoding/binary"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ const (
 
 // encodedStream mirrors sendspin-go's encode.FLACEncoder, which cannot be imported: the Opus encoder
 // beside it binds libopus through cgo.
-func encodedStream(t *testing.T, block int) (header []byte, chunks [][]byte, want []int16) {
+func encodedStream(t *testing.T, block, blocks int) (header []byte, chunks [][]byte, want []int16) {
 	t.Helper()
 
 	buf := &bytes.Buffer{}
@@ -41,7 +42,7 @@ func encodedStream(t *testing.T, block int) (header []byte, chunks [][]byte, wan
 	header = append(header, buf.Bytes()...)
 	buf.Reset()
 
-	for b := range streamBlocks {
+	for b := range blocks {
 		subs := make([]*frame.Subframe, speaker.Channels)
 		for c := range subs {
 			subs[c] = &frame.Subframe{
@@ -98,7 +99,7 @@ func blockAt(t *testing.T, want []int16, block int) map[[2]int16]int {
 func lagged(t *testing.T, block int) (lags map[int]int, empty int) {
 	t.Helper()
 
-	header, chunks, want := encodedStream(t, block)
+	header, chunks, want := encodedStream(t, block, streamBlocks)
 	from := blockAt(t, want, block)
 
 	d, err := newFLACDecoder(header)
@@ -144,7 +145,7 @@ func TestFLACLagDoesNotVary(t *testing.T) {
 // The parser has not finished a frame when decode polls for it, so every frame surfaces one chunk late
 // and is placed at that chunk's timestamp.
 func TestFLACPlaysABlockBehindTheChunkThatCarriedIt(t *testing.T) {
-	header, chunks, want := encodedStream(t, chunkBlock)
+	header, chunks, want := encodedStream(t, chunkBlock, streamBlocks)
 
 	d, err := newFLACDecoder(header)
 	if err != nil {
@@ -177,18 +178,20 @@ func TestFLACPlaysABlockBehindTheChunkThatCarriedIt(t *testing.T) {
 	}
 }
 
-// The frames channel holds 8 and nothing but decode drains it. If the backlog ever grew, the pipe
-// write would block, and on the device that write is on the goroutine that reads the socket.
+// A track's worth of chunks. The write into the decoder's pipe is on the session goroutine, the one
+// that also reads the socket, so a parse that never returns takes the room with it.
 func TestFLACSurvivesALongStream(t *testing.T) {
-	header, chunks, _ := encodedStream(t, chunkBlock)
+	const total = 20000 // ~6.5 minutes at 20 ms a chunk
+
+	// FLAC frames are self-contained, so replaying them is a longer stream to the parser and spares
+	// the test encoding six minutes of audio.
+	header, chunks, _ := encodedStream(t, chunkBlock, streamBlocks)
 
 	d, err := newFLACDecoder(header)
 	if err != nil {
 		t.Fatalf("newFLACDecoder: %v", err)
 	}
 	defer d.close()
-
-	const total = 20000 // ~6.5 minutes at 20 ms a chunk
 
 	var fed, back atomic.Int64
 	done := make(chan struct{})
@@ -208,20 +211,40 @@ func TestFLACSurvivesALongStream(t *testing.T) {
 		}
 	}()
 
-	select {
-	case <-done:
-		if held := fed.Load() - back.Load(); held > 1 {
-			t.Errorf("%d frames held after %d chunks, want the steady one", held, total)
+	// Stalled, not slow: the decoder is only failed when it stops taking chunks altogether.
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+
+	last, still := int64(-1), 0
+	for {
+		select {
+		case <-done:
+			if held := fed.Load() - back.Load(); held > 1 {
+				t.Errorf("%d frames held after %d chunks, want the steady one", held, total)
+			}
+			return
+
+		case <-tick.C:
+			at := fed.Load()
+			if at != last {
+				last, still = at, 0
+				continue
+			}
+			if still++; still < 15 {
+				continue
+			}
+
+			stacks := make([]byte, 1<<16)
+			stacks = stacks[:runtime.Stack(stacks, true)]
+			t.Fatalf("the decoder took no chunk for %ds, stopped at %d of %d holding %d frames\n\n%s",
+				still, at, total, at-back.Load(), stacks)
 		}
-	case <-time.After(20 * time.Second):
-		t.Fatalf("the decoder stopped taking chunks at %d of %d, holding %d frames",
-			fed.Load(), total, fed.Load()-back.Load())
 	}
 }
 
 // PCM decodes on the call that carried it, so it cannot be placed at another chunk's timestamp.
 func TestPCMRendersWhatWasEncoded(t *testing.T) {
-	_, _, want := encodedStream(t, chunkBlock)
+	_, _, want := encodedStream(t, chunkBlock, streamBlocks)
 
 	d, err := newPCMDecoder(speaker.Bits, speaker.Channels)
 	if err != nil {
