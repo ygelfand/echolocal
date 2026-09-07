@@ -28,6 +28,7 @@ func newPlayCmd() *cobra.Command {
 		secs    float64
 		level   float64
 		silence bool
+		channel string
 	)
 
 	c := &cobra.Command{
@@ -66,7 +67,7 @@ func newPlayCmd() *cobra.Command {
 
 			for done := 0; done < frames; {
 				n := min(playPeriod, frames-done)
-				fill(buf[:n*playChannels*playBits/8], done, freq, level, silence)
+				fill(buf[:n*playChannels*playBits/8], done, freq, level, silence, channel)
 
 				if _, err := p.Write(buf[:n*playChannels*playBits/8]); err != nil {
 					if err == alsa.ErrUnderrun {
@@ -92,12 +93,13 @@ func newPlayCmd() *cobra.Command {
 	c.Flags().Float64Var(&secs, "seconds", 1, "how long to play")
 	c.Flags().Float64Var(&level, "level", 0.2, "amplitude, 0 to 1")
 	c.Flags().BoolVar(&silence, "silence", false, "write zeros instead of a tone")
+	c.Flags().StringVar(&channel, "channel", "both", "which channel carries the tone: left, right or both")
 	return c
 }
 
 // fill writes one period of interleaved stereo, continuing the tone from frame offset so
 // periods join without a click.
-func fill(buf []byte, offset int, freq, level float64, silence bool) {
+func fill(buf []byte, offset int, freq, level float64, silence bool, channel string) {
 	for i := range len(buf) / (playChannels * playBits / 8) {
 		var s int16
 		if !silence {
@@ -105,7 +107,11 @@ func fill(buf []byte, offset int, freq, level float64, silence bool) {
 			s = int16(level * math.MaxInt16 * math.Sin(2*math.Pi*freq*t))
 		}
 		for ch := range playChannels {
-			binary.LittleEndian.PutUint16(buf[(i*playChannels+ch)*2:], uint16(s))
+			v := s
+			if (channel == "left" && ch != 0) || (channel == "right" && ch != 1) {
+				v = 0
+			}
+			binary.LittleEndian.PutUint16(buf[(i*playChannels+ch)*2:], uint16(v))
 		}
 	}
 }

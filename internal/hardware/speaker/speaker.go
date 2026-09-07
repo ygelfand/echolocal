@@ -350,16 +350,31 @@ func (p *Player) fill(buf []byte) {
 	// summed rather than one replacing the other, and a reply still sounds over a room stream.
 	rendered := p.render()
 
+	// The internal speaker is one driver wired to the right channel, so a stereo track would lose
+	// everything panned left. The line-out is not: it gets both channels as they came.
+	mono := p.Output() == OutputSpeaker
+
 	gain := p.Volume()
-	for i := range period * Channels {
-		var s int32
+	for i := 0; i < period*Channels; i += Channels {
+		var l, r int32
 		if i < len(chunk) {
-			s = int32(chunk[i])
+			l = int32(chunk[i])
+		}
+		if i+1 < len(chunk) {
+			r = int32(chunk[i+1])
 		}
 		if i < len(rendered) {
-			s += int32(rendered[i])
+			l += int32(rendered[i])
 		}
-		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(clamp(s))*gain)))
+		if i+1 < len(rendered) {
+			r += int32(rendered[i+1])
+		}
+		if mono {
+			l = (l + r) / 2
+			r = l
+		}
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(clamp(l))*gain)))
+		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(int16(float32(clamp(r))*gain)))
 	}
 }
 
