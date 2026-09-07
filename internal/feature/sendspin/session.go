@@ -82,11 +82,12 @@ func newSession(conn *websocket.Conn, o *out, bg *speaker.Arbiter, name string, 
 	return &session{client: client, clock: ssync.NewClockSync(), out: o, bg: bg, report: report}
 }
 
-// bufferCapacity caps how far ahead the server may send. The spec counts bytes of coded audio, so what
-// it buys in seconds depends on the codec, and it is advertised before one is chosen: 512 KB is about
-// 4 s of FLAC, 38 s of Opus and 2.7 s of 48k PCM. Sized for FLAC, since that is what we ask for, and
-// kept under holdMax so even the Opus case is audio we would still be holding rather than dropping.
-const bufferCapacity = 1 << 19
+// bufferCapacity caps how far ahead the server may send, which is the stall the room can ride out. The
+// spec counts bytes and carries one number for every format, so it is sized for the widest we offer:
+// every codec then gets the same cushion, bounded by the server's 30 s cap rather than by bytes.
+const bufferSeconds = 30
+
+const bufferCapacity = bufferSeconds * speaker.Rate * speaker.Channels * speaker.Bits / 8
 
 // run drives the connection until it closes or ctx ends.
 func (s *session) run(ctx context.Context) error {
@@ -121,7 +122,8 @@ func (s *session) run(ctx context.Context) error {
 			s.cleared()
 
 		case <-s.client.StreamEnd:
-			slog.Info("sendspin stream end", "queued_ms", s.out.queuedMs())
+			late, dropped := s.out.misses()
+			slog.Info("sendspin stream end", "queued_ms", s.out.queuedMs(), "late", late, "dropped", dropped)
 			s.ended()
 
 		case chunk, ok := <-s.client.AudioChunks:
@@ -254,10 +256,13 @@ func (s *session) heard(chunk protocol.AudioChunk) {
 	// lead_ms is when the server wanted this played, against now. We play on arrival instead, so it is
 	// also how far behind the intended point the room is running.
 	if s.chunks++; s.chunks%250 == 0 {
+		late, dropped := s.out.misses()
 		slog.Info("sendspin ahead",
 			"queued_ms", s.out.queuedMs(),
 			"undecoded", len(s.client.AudioChunks),
-			"lead_ms", (chunk.Timestamp-s.clock.ServerMicrosNow())/1000)
+			"lead_ms", (chunk.Timestamp-s.clock.ServerMicrosNow())/1000,
+			"late", late,
+			"dropped", dropped)
 	}
 }
 

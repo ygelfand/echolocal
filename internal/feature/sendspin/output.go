@@ -197,6 +197,8 @@ func (o *out) reset() {
 	o.anchored = false
 }
 
+func (o *out) misses() (late, dropped int64) { return o.late.Load(), o.dropped.Load() }
+
 func (o *out) queuedMs() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
