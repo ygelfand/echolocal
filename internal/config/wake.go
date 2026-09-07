@@ -43,6 +43,10 @@ type WakeWord struct {
 	Tone   Tone   `json:"tone"`
 	Effect string `json:"effect"`
 
+	// ThinkingEffect and ReplyingEffect override what those phases show. Empty leaves them to Effect.
+	ThinkingEffect string `json:"thinking_effect"`
+	ReplyingEffect string `json:"replying_effect"`
+
 	// Delivery is how the reply from this slot's pipeline reaches the device.
 	Delivery Delivery `json:"delivery"`
 
@@ -135,6 +139,14 @@ func (w WakeWriter) Tone(v Tone) error {
 
 func (w WakeWriter) Effect(v string) error {
 	return w.word(func(word *WakeWord) { word.Effect = v })
+}
+
+func (w WakeWriter) ThinkingEffect(v string) error {
+	return w.word(func(word *WakeWord) { word.ThinkingEffect = v })
+}
+
+func (w WakeWriter) ReplyingEffect(v string) error {
+	return w.word(func(word *WakeWord) { word.ReplyingEffect = v })
 }
 
 func (w WakeWriter) Delivery(v Delivery) error {

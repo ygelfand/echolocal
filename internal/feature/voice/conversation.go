@@ -10,6 +10,7 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 	"github.com/ygelfand/go-esphome-device/api"
 
+	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/activity"
 	"github.com/ygelfand/echolocal/internal/feature/feedback"
@@ -576,9 +577,7 @@ func (c *conversation) think() {
 	c.enter(phaseThinking)
 	c.arm(wakeword.MaxThink(c.slot))
 
-	if effect := wakeword.Effect(c.slot); effect != "" {
-		c.claim.PlayReversed(effect, c.ring.Base())
-	}
+	c.showPhase(wakeword.ThinkingEffect(c.slot))
 }
 
 // speak moves to playing the reply. url is empty when it is arriving over the API instead.
@@ -591,9 +590,7 @@ func (c *conversation) speak(url string) {
 	c.enter(phaseReplying)
 	c.reply = reply{url: url}
 
-	if effect := wakeword.Effect(c.slot); effect != "" {
-		c.claim.PlayReversed(effect, c.ring.Base())
-	}
+	c.showPhase(wakeword.ReplyingEffect(c.slot))
 	c.player.Sounding(true)
 
 	// The deadline is left as it was. Text arriving is not the pipeline delivering: it still owes the
@@ -648,6 +645,21 @@ func (c *conversation) idle(why string, how activity.Outcome) {
 
 	if was != phaseIdle {
 		slog.Info("turn ended", "was", was, "slot", c.slot+1, "why", why)
+	}
+}
+
+// showPhase runs a phase's override, or the wake word's own animation reversed when there is none.
+// None is an answer of its own: the ring stays out of that phase.
+func (c *conversation) showPhase(override string) {
+	switch override {
+	case "":
+		if effect := wakeword.Effect(c.slot); effect != "" {
+			c.claim.PlayReversed(effect, c.ring.Base())
+		}
+	case component.EffectNone:
+		c.claim.Clear()
+	default:
+		c.claim.Play(override, c.ring.Base())
 	}
 }
 

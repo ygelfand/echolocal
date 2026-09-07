@@ -45,6 +45,8 @@ type slot struct {
 	threshold *esphome.Number
 	tone      *esphome.Select
 	effect    *esphome.Select
+	thinking  *esphome.Select
+	replying  *esphome.Select
 	delivery  *esphome.Select
 	buffer    *esphome.Number
 	followUp  *esphome.Number
@@ -113,6 +115,22 @@ func newSlot(n int) slot {
 			},
 			Options: append([]string{component.EffectNone}, led.EffectNames()...),
 		},
+		thinking: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("thinking_effect_%d", n+1),
+				Name:     "Thinking effect",
+				Icon:     "mdi:thought-bubble",
+				Category: esphome.CategoryConfig,
+			},
+		},
+		replying: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("replying_effect_%d", n+1),
+				Name:     "Replying effect",
+				Icon:     "mdi:message-text",
+				Category: esphome.CategoryConfig,
+			},
+		},
 		delivery: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("reply_delivery_%d", n+1),
@@ -164,9 +182,10 @@ func newSlot(n int) slot {
 		},
 	}
 
-	// All nine on a page of their own.
+	// All eleven on a page of their own.
 	for _, b := range []*esphome.Base{
-		&s.wake.Base, &s.threshold.Base, &s.tone.Base, &s.effect.Base, &s.delivery.Base,
+		&s.wake.Base, &s.threshold.Base, &s.tone.Base, &s.effect.Base,
+		&s.thinking.Base, &s.replying.Base, &s.delivery.Base,
 		&s.buffer.Base, &s.followUp.Base, &s.maxListen.Base, &s.maxThink.Base,
 	} {
 		b.DeviceID = on
@@ -192,6 +211,10 @@ func newSlot(n int) slot {
 	}
 	component.BindEffect(s.effect, led.EffectNames(), nil,
 		func(v string) error { return config.Set().Wake(n).Effect(v) })
+	component.BindOverride(s.thinking, led.EffectNames(),
+		func(v string) error { return config.Set().Wake(n).ThinkingEffect(v) })
+	component.BindOverride(s.replying, led.EffectNames(),
+		func(v string) error { return config.Set().Wake(n).ReplyingEffect(v) })
 	s.delivery.OnCommand = func(label string) {
 		how, ok := config.ByLabel(deliveries(), label)
 		if !ok {
@@ -241,8 +264,8 @@ func (w *WakeWord) Name() string { return "wake word settings" }
 func (w *WakeWord) Entities() []esphome.Entity {
 	var ents []esphome.Entity
 	for _, s := range w.slots {
-		ents = append(ents, s.wake, s.threshold, s.tone, s.effect, s.delivery, s.buffer, s.followUp,
-			s.maxListen, s.maxThink)
+		ents = append(ents, s.wake, s.threshold, s.tone, s.effect, s.thinking, s.replying,
+			s.delivery, s.buffer, s.followUp, s.maxListen, s.maxThink)
 	}
 	return ents
 }
@@ -255,6 +278,10 @@ func (w *WakeWord) Restore(c config.Config) {
 
 		component.RestoreEffect(s.effect, saved.Effect, nil,
 			func(v string) error { return config.Set().Wake(i).Effect(v) })
+		component.RestoreOverride(s.thinking, saved.ThinkingEffect,
+			func(v string) error { return config.Set().Wake(i).ThinkingEffect(v) })
+		component.RestoreOverride(s.replying, saved.ReplyingEffect,
+			func(v string) error { return config.Set().Wake(i).ReplyingEffect(v) })
 
 		s.delivery.Set(saved.Delivery.Label())
 		s.buffer.Set(float32(saved.Buffer))

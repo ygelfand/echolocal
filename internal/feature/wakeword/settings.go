@@ -19,6 +19,10 @@ func Threshold(slot int) float64 { return saved(slot).Threshold }
 // Chime sounds a detection in whatever the slot is set to.
 func Chime(slot int) { speaker.Sound().Chime(speaker.WakeTone(saved(slot).Tone)) }
 
+// ThinkingEffect and ReplyingEffect are what those phases show, empty to leave them to Effect.
+func ThinkingEffect(slot int) string { return saved(slot).ThinkingEffect }
+func ReplyingEffect(slot int) string { return saved(slot).ReplyingEffect }
+
 // Tones reports whether the slot makes a sound when it fires.
 func Tones(slot int) bool { return saved(slot).Tone != config.ToneNone }
 

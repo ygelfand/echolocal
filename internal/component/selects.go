@@ -105,6 +105,53 @@ func RestoreEffect(sel *esphome.Select, saved string, apply func(string), save f
 	slog.Info("restored", "what", sel.ObjectID, "using", sel.Get())
 }
 
+// EffectDefault leaves a setting to whatever it would have been. It sits above None, which is a
+// choice of its own: an override nobody set and one set to show nothing are different answers.
+const EffectDefault = "Default"
+
+// BindOverride offers the catalogue with Default ahead of None, for a setting that overrides
+// something else. Default is stored empty, so an override nobody touched stays out of the way.
+func BindOverride(sel *esphome.Select, choices []string, save func(string) error) {
+	sel.Options = append([]string{EffectDefault, EffectNone}, choices...)
+
+	sel.OnCommand = func(chosen string) {
+		settled := SettleOverride(sel, chosen)
+		if err := save(settled); err != nil {
+			slog.Error("saving a setting failed", "setting", sel.ObjectID, "err", err)
+		}
+		slog.Info("setting changed", "setting", sel.ObjectID, "using", sel.Get())
+	}
+}
+
+// SettleOverride puts a name on an override select and reports what to store: empty for Default,
+// and the name itself for None or an effect. A name this build does not have settles to Default.
+func SettleOverride(sel *esphome.Select, name string) string {
+	if name == "" {
+		name = EffectDefault
+	}
+	if !slices.Contains(sel.Options, name) {
+		slog.Warn("no such effect, leaving it at the default", "setting", sel.ObjectID, "effect", name)
+		name = EffectDefault
+	}
+
+	sel.Set(name)
+	if name == EffectDefault {
+		return ""
+	}
+	return name
+}
+
+// RestoreOverride puts a saved override back, correcting one this build does not have.
+func RestoreOverride(sel *esphome.Select, saved string, save func(string) error) {
+	settled := SettleOverride(sel, saved)
+	if settled != saved {
+		if err := save(settled); err != nil {
+			slog.Error("saving a corrected setting failed", "setting", sel.ObjectID, "err", err)
+		}
+	}
+	slog.Info("restored", "what", sel.ObjectID, "using", sel.Get())
+}
+
 // ChosenEffect is what a select settled on, empty when it says None.
 func ChosenEffect(sel *esphome.Select) string {
 	if name := sel.Get(); name != EffectNone {
