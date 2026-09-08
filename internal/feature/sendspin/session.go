@@ -648,7 +648,8 @@ func (s *session) told(cmd playerCommand) {
 
 // reportState is the whole of what the room says about itself, sent when something changed and once
 // the clock has settled: the spec has a player stay silent about being available until it can place
-// audio, and has every message carry every field.
+// audio, and has every message carry every field. Tested against Music Assistant 2.11: this is the
+// shape it accepts.
 func (s *session) reportState() {
 	if !s.player() || !s.synced.Load() {
 		return
@@ -660,7 +661,6 @@ func (s *session) reportState() {
 			Muted:              s.muted,
 			RequiredLeadTimeMs: requiredLeadMs,
 			MinBufferMs:        minBufferMs,
-			SupportedCommands:  commands,
 		},
 	}
 	if err := s.c.writeJSON(typeClientState, st); err != nil {

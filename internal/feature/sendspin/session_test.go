@@ -435,8 +435,11 @@ func TestUnpairedServerPlays(t *testing.T) {
 
 	var st clientState
 	srv.expect(typeClientState, &st)
-	if !st.Available || st.Player == nil || st.Player.RequiredLeadTimeMs != requiredLeadMs || len(st.Player.SupportedCommands) != 2 {
+	if !st.Available || st.Player == nil || st.Player.RequiredLeadTimeMs != requiredLeadMs || st.Player.MinBufferMs != minBufferMs {
 		t.Fatalf("state %+v", st)
+	}
+	if len(hello.PlayerSupport.SupportedCommands) != 2 {
+		t.Fatalf("commands %v", hello.PlayerSupport.SupportedCommands)
 	}
 	if !r.toldSecurity(securityUnpaired) {
 		t.Fatalf("security %v", r.security)

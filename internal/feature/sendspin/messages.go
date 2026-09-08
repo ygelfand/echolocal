@@ -159,14 +159,17 @@ type clientState struct {
 
 // playerState carries the delay under both the spec's name and the one Music Assistant still reads.
 // Servers ignore fields they do not know, so the spare one costs nothing.
+//
+// The commands the player accepts are said in client/hello and not repeated here. The spec now has
+// them in both places, but Music Assistant's library rejects a state naming volume or mute and drops
+// the connection over it; the hello is where it reads them from.
 type playerState struct {
-	Volume             int      `json:"volume"`
-	Muted              bool     `json:"muted"`
-	OutputDelayMs      int      `json:"output_delay_ms"`
-	StaticDelayMs      int      `json:"static_delay_ms"`
-	RequiredLeadTimeMs int      `json:"required_lead_time_ms"`
-	MinBufferMs        int      `json:"min_buffer_ms"`
-	SupportedCommands  []string `json:"supported_commands"`
+	Volume             int  `json:"volume"`
+	Muted              bool `json:"muted"`
+	OutputDelayMs      int  `json:"output_delay_ms"`
+	StaticDelayMs      int  `json:"static_delay_ms"`
+	RequiredLeadTimeMs int  `json:"required_lead_time_ms"`
+	MinBufferMs        int  `json:"min_buffer_ms"`
 }
 
 type groupUpdate struct {

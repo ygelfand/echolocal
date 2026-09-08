@@ -156,7 +156,9 @@ best round to the filter. What changed is when it runs and what it gates. It sta
 activate and pauses across a re-handshake. The room does not report itself `available` until the
 filter has converged, as the spec requires, and its `client/state` always carries the full player
 object: volume, mute, the delay under both the spec's name and the one Music Assistant still reads,
-the lead time and buffer the room asks for, and the commands it accepts.
+and the lead time and buffer the room asks for. The commands the room accepts are said in the hello
+only: Music Assistant's library rejects a state that names volume or mute and drops the connection,
+which is how the first install against a real Music Assistant 2.11 failed.
 
 ## Home Assistant entities
 
