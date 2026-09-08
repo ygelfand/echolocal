@@ -75,6 +75,13 @@ page in Home Assistant. The Dot keeps its identity and token, so servers still r
 has to pair again before it is trusted. The next time a paired server connects it will notice the Dot
 no longer holds its key and offer to re-pair.
 
+## Lining rooms up
+
+If one room sounds a touch ahead of or behind another, open that player's settings in Music Assistant
+and adjust its delay. A positive delay makes the room play earlier. Changes apply straight away, and
+the Dot remembers the value across restarts. Adjust in steps of 10 to 20 ms while standing between the
+two speakers; below about 10 ms the ear stops noticing.
+
 ## If something is off
 
 **Music Assistant does not see the Dot.** Check the `Sendspin` switch is on and the `Sendspin state`

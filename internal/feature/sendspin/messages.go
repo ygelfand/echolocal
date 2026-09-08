@@ -160,16 +160,18 @@ type clientState struct {
 // playerState carries the delay under both the spec's name and the one Music Assistant still reads.
 // Servers ignore fields they do not know, so the spare one costs nothing.
 //
-// The commands the player accepts are said in client/hello and not repeated here. The spec now has
-// them in both places, but Music Assistant's library rejects a state naming volume or mute and drops
-// the connection over it; the hello is where it reads them from.
+// SupportedCommands here names only the delay command. The spec now lists every command in both
+// places, but Music Assistant's library rejects a state naming volume or mute and drops the connection
+// over it; the hello is where it reads those from. Naming the delay command here is what makes Music
+// Assistant show its per-player delay setting for this room.
 type playerState struct {
-	Volume             int  `json:"volume"`
-	Muted              bool `json:"muted"`
-	OutputDelayMs      int  `json:"output_delay_ms"`
-	StaticDelayMs      int  `json:"static_delay_ms"`
-	RequiredLeadTimeMs int  `json:"required_lead_time_ms"`
-	MinBufferMs        int  `json:"min_buffer_ms"`
+	Volume             int      `json:"volume"`
+	Muted              bool     `json:"muted"`
+	OutputDelayMs      int      `json:"output_delay_ms"`
+	StaticDelayMs      int      `json:"static_delay_ms"`
+	RequiredLeadTimeMs int      `json:"required_lead_time_ms"`
+	MinBufferMs        int      `json:"min_buffer_ms"`
+	SupportedCommands  []string `json:"supported_commands"`
 }
 
 type groupUpdate struct {
@@ -212,10 +214,24 @@ type serverCommand struct {
 	Player *playerCommand `json:"player,omitempty"`
 }
 
+// playerCommand is one server/command. The delay arrives under the spec's name or the older one.
 type playerCommand struct {
-	Command string `json:"command"`
-	Volume  *int   `json:"volume,omitempty"`
-	Mute    *bool  `json:"mute,omitempty"`
+	Command       string `json:"command"`
+	Volume        *int   `json:"volume,omitempty"`
+	Mute          *bool  `json:"mute,omitempty"`
+	OutputDelayMs *int   `json:"output_delay_ms,omitempty"`
+	StaticDelayMs *int   `json:"static_delay_ms,omitempty"`
+}
+
+// delay is the delay a command carries, whichever name it used.
+func (c playerCommand) delay() (int, bool) {
+	switch {
+	case c.OutputDelayMs != nil:
+		return *c.OutputDelayMs, true
+	case c.StaticDelayMs != nil:
+		return *c.StaticDelayMs, true
+	}
+	return 0, false
 }
 
 type clientGoodbye struct {

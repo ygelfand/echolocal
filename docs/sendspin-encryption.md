@@ -156,9 +156,18 @@ best round to the filter. What changed is when it runs and what it gates. It sta
 activate and pauses across a re-handshake. The room does not report itself `available` until the
 filter has converged, as the spec requires, and its `client/state` always carries the full player
 object: volume, mute, the delay under both the spec's name and the one Music Assistant still reads,
-and the lead time and buffer the room asks for. The commands the room accepts are said in the hello
-only: Music Assistant's library rejects a state that names volume or mute and drops the connection,
-which is how the first install against a real Music Assistant 2.11 failed.
+the lead time and buffer the room asks for, and `set_static_delay` as the one command named there.
+Volume and mute are said in the hello only: Music Assistant's library rejects a state that names them
+and drops the connection, which is how the first install against a real Music Assistant 2.11 failed.
+
+## Output delay
+
+The room accepts the `set_static_delay` command (and the spec's newer name, `set_output_delay`).
+Naming it in `client/state` is what makes Music Assistant show a per-player delay setting for the
+room. The value is kept in the settings file, reported back in every state, and taken off each chunk's
+timestamp so the room plays that much earlier. It is the knob for whatever constant offset remains
+between rooms, set by ear from Music Assistant. Holding rooms together over the length of a track is
+the renderer's drift correction, which is a separate change.
 
 ## Home Assistant entities
 

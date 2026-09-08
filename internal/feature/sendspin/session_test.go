@@ -50,6 +50,9 @@ func startRoom(t *testing.T, unpaired bool) *room {
 	if err := config.Set().Sendspin().UnpairedAccess(unpaired); err != nil {
 		t.Fatal(err)
 	}
+	if err := config.Set().Sendspin().OutputDelayMs(0); err != nil {
+		t.Fatal(err)
+	}
 	tr, err := loadTrust(filepath.Join(t.TempDir(), "sendspin.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -441,6 +444,9 @@ func TestUnpairedServerPlays(t *testing.T) {
 	if len(hello.PlayerSupport.SupportedCommands) != 2 {
 		t.Fatalf("commands %v", hello.PlayerSupport.SupportedCommands)
 	}
+	if len(st.Player.SupportedCommands) != 1 || st.Player.SupportedCommands[0] != cmdSetStaticDelay {
+		t.Fatalf("state commands %v", st.Player.SupportedCommands)
+	}
 	if !r.toldSecurity(securityUnpaired) {
 		t.Fatalf("security %v", r.security)
 	}
@@ -662,5 +668,39 @@ func TestWithdrawingUnpairedAccessSaysSo(t *testing.T) {
 	}
 	if !srv.hungUp() {
 		t.Fatal("room stayed connected")
+	}
+}
+
+func TestDelayCommandIsKeptAndReported(t *testing.T) {
+	r := startRoom(t, true)
+	srv := dial(t, r)
+	if err := srv.handshake(sentinelPSK(), "sn"); err != nil {
+		t.Fatal(err)
+	}
+	srv.send(typeServerHello, serverHello{Name: "Music Assistant"})
+	srv.expect(typeClientHello, nil)
+	srv.send(typeServerActivate, playback())
+	var st clientState
+	srv.expect(typeClientState, &st)
+	if st.Player.OutputDelayMs != 0 {
+		t.Fatalf("delay %d before any command", st.Player.OutputDelayMs)
+	}
+
+	// Music Assistant's name for it, and the spec's.
+	delay := 120
+	srv.send(typeServerCommand, serverCommand{Player: &playerCommand{Command: cmdSetStaticDelay, StaticDelayMs: &delay}})
+	srv.expect(typeClientState, &st)
+	if st.Player.OutputDelayMs != 120 || st.Player.StaticDelayMs != 120 {
+		t.Fatalf("state after command %+v", st.Player)
+	}
+	if got := config.Get().Sendspin.OutputDelayMs; got != 120 {
+		t.Fatalf("saved delay %d", got)
+	}
+
+	tooFar := 9000
+	srv.send(typeServerCommand, serverCommand{Player: &playerCommand{Command: cmdSetOutputDelay, OutputDelayMs: &tooFar}})
+	srv.expect(typeClientState, &st)
+	if st.Player.OutputDelayMs != maxDelayMs {
+		t.Fatalf("delay %d not clamped to %d", st.Player.OutputDelayMs, maxDelayMs)
 	}
 }
