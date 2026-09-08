@@ -1,7 +1,8 @@
 // Package sendspin plays a room's part of a synchronized stream.
 //
-// Wire format and clock filter come from sendspin-go's protocol and sync packages. Everything past the
-// socket is echod's: the listener a server dials in to, the decoders, and the speaker.
+// The clock filter comes from sendspin-go's sync package. Everything else is echod's: the encrypted
+// channel a server dials in to and the pairing that authenticates it (secure.go, conn.go, trust.go,
+// session.go), the decoders, and the speaker. docs/sendspin-encryption.md describes the protocol side.
 package sendspin
 
 import (
@@ -47,6 +48,10 @@ type out struct {
 	frame    uint64
 	at       int64
 
+	// delay is how much earlier than its timestamp a chunk is placed, from the room's output delay
+	// setting, in microseconds.
+	delay int64
+
 	late    atomic.Int64
 	dropped atomic.Int64
 }
@@ -58,12 +63,21 @@ var (
 
 func newOut(p *speaker.Player) *out { return &out{p: p, gain: 1} }
 
-// use points the renderer at this session's clock. One server at a time, so it changes only between
-// sessions.
-func (o *out) use(clock *ssync.ClockSync) {
+// use points the renderer at this session's clock and the room's delay setting. One server at a time,
+// so it changes only between sessions.
+func (o *out) use(clock *ssync.ClockSync, delayMs int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.clock = clock
+	o.delay = int64(delayMs) * 1000
+}
+
+// setDelay changes how much earlier the room plays. Chunks already placed stay where they are, so a
+// stream that is running hears one step of the change where the new placement meets the old.
+func (o *out) setDelay(ms int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.delay = int64(ms) * 1000
 }
 
 // open refuses anything the speaker cannot play, rather than playing it at the wrong speed.
@@ -100,7 +114,9 @@ func (o *out) write(at int64, samples []int16) {
 		return
 	}
 
-	frame := o.frameFor(at)
+	// The delay is taken off the timestamp, as the spec has it: the room plays earlier so that what
+	// is downstream of it sounds on time.
+	frame := o.frameFor(at - o.delay)
 	if frame > o.played && frame-o.played > holdMax {
 		o.dropped.Add(1)
 		return

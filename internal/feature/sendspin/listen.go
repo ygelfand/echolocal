@@ -20,19 +20,24 @@ const Port = 8928
 // listener accepts the servers that dial in, one at a time. The spec ranks competing servers by
 // declared activity; until that is implemented the first to arrive holds the room.
 type listener struct {
-	out *out
-	bg  *speaker.Arbiter
+	out   *out
+	bg    *speaker.Arbiter
+	trust *trust
 
-	// report says what the room is doing, for the diagnostic sensor. Called from the accept goroutine
-	// and from the session, so whatever it writes to has to tolerate that.
-	report func(string)
+	// report and security say what the room is doing, for the diagnostic sensors. Called from the
+	// accept goroutine and from the session, so whatever they write to has to tolerate that.
+	report   func(string)
+	security func(string)
 
-	mu   sync.Mutex
-	busy bool
+	// goodbye is why the room is leaving when the listener is stopped.
+	goodbye func() string
+
+	mu      sync.Mutex
+	current *session
 }
 
-func newListener(o *out, bg *speaker.Arbiter, report func(string)) *listener {
-	return &listener{out: o, bg: bg, report: report}
+func newListener(o *out, bg *speaker.Arbiter, tr *trust, report, security func(string), goodbye func() string) *listener {
+	return &listener{out: o, bg: bg, trust: tr, report: report, security: security, goodbye: goodbye}
 }
 
 // serve holds the port until ctx ends.
@@ -50,12 +55,6 @@ func (l *listener) serve(ctx context.Context, name string) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		if !l.take() {
-			http.Error(w, "already connected", http.StatusConflict)
-			return
-		}
-		defer l.give()
-
 		conn, err := up.Upgrade(w, r, nil)
 		if err != nil {
 			slog.Warn("sendspin upgrade failed", "from", r.RemoteAddr, "err", err)
@@ -63,14 +62,29 @@ func (l *listener) serve(ctx context.Context, name string) error {
 		}
 		defer conn.Close()
 
+		s := newSession(conn, l.trust, l.out, l.bg, name, l.report, l.security, l.goodbye)
+		if !l.take(s) {
+			// The spec has a second server judged by what it declares once the handshake is done. Until
+			// that is built, the room is simply busy, and the socket closing says so.
+			slog.Info("sendspin turning away a second server", "from", r.RemoteAddr)
+			return
+		}
+		defer l.give(s)
+
 		slog.Info("sendspin server connected", "from", r.RemoteAddr)
 		l.report(stateJoined)
 		defer l.report(stateWaiting)
+		defer l.security(securityWaiting)
 
-		s := newSession(conn, l.out, l.bg, name, l.report)
-		if err := s.run(ctx); err != nil {
+		err = s.run(ctx)
+		switch {
+		case errors.Is(err, errPreamble):
+			// Closed without a word, as the spec has it: a server on the old, unencrypted protocol
+			// lands here too, and there is nothing to tell it that it would understand.
+			slog.Warn("sendspin handshake failed", "from", r.RemoteAddr, "err", err)
+		case err != nil:
 			slog.Warn("sendspin session ended", "from", r.RemoteAddr, "err", err)
-		} else {
+		default:
 			slog.Info("sendspin server disconnected", "from", r.RemoteAddr)
 		}
 	})
@@ -91,18 +105,32 @@ func (l *listener) serve(ctx context.Context, name string) error {
 }
 
 // take admits one server and turns away the rest.
-func (l *listener) take() bool {
+func (l *listener) take(s *session) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.busy {
+	if l.current != nil {
 		return false
 	}
-	l.busy = true
+	l.current = s
 	return true
 }
 
-func (l *listener) give() {
+func (l *listener) give(s *session) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.busy = false
+	if l.current == s {
+		l.current = nil
+	}
+}
+
+// unpairedOff is the operator withdrawing unpaired access: a server that relied on it is told to pair
+// and hung up on. A paired server is not relying on it, and stays.
+func (l *listener) unpairedOff() {
+	l.mu.Lock()
+	s := l.current
+	l.mu.Unlock()
+	if s != nil && s.cat() == categorySentinel {
+		slog.Info("sendspin unpaired access withdrawn, leaving", "server", short(s.c.serverID))
+		s.kick(goodbyePairingRequired)
+	}
 }

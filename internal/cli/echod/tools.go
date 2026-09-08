@@ -10,6 +10,6 @@ func newToolsCmd() *cobra.Command {
 			"and for checking a unit after install.",
 	}
 	c.AddCommand(newMicCmd(), newLEDCmd(), newInfoCmd(), newButtonsCmd(), newI2CCmd(), newMuteCmd(),
-		newMixerCmd(), newPlayCmd(), newWakeCmd(), newVoiceCmd(), newMediaCmd(), newEchoCmd())
+		newMixerCmd(), newPlayCmd(), newWakeCmd(), newVoiceCmd(), newMediaCmd(), newEchoCmd(), newSendspinCmd())
 	return c
 }

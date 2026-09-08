@@ -167,3 +167,15 @@ func TestFlushDropsTheAnchor(t *testing.T) {
 		t.Errorf("held %d samples, want none", len(o.pcm))
 	}
 }
+
+// The delay places audio earlier than its timestamp, which is how a room whose sound has further to
+// travel is lined up with the others.
+func TestDelayPlacesAudioEarlier(t *testing.T) {
+	o := anchored(t)
+	o.setDelay(10)
+	o.write(microsFor(4800), tone(48, 7))
+	// 10 ms is 480 frames at 48 kHz: the chunk due at frame 5800 lands at 5320.
+	if o.base != 5320 {
+		t.Fatalf("placed at frame %d, want 5320", o.base)
+	}
+}
