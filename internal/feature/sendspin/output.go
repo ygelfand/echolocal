@@ -23,6 +23,31 @@ import (
 // reaching this means a timestamp we cannot believe rather than a server sending too much.
 const holdMax = 60 * speaker.Rate
 
+// Drift correction. The anchor maps server time to output frames at the nominal rate, but the speaker's
+// clock is not the server's: measured on device, one Dot ran about 200 ppm fast and pulled ahead of
+// another by 12 ms a minute. So every render period the frame being heard is compared with the frame
+// the server clock says should be, the error is smoothed, and one frame is dropped or repeated per
+// period while the smoothed error is outside the band. A frame is 21 us; the spec's own suggestion,
+// and inaudible at the handful per second a real drift needs.
+//
+// driftGain is the smoothing: at 47 periods a second, a time constant of about a second, enough to
+// take the scheduling jitter out of when a period happens to be rendered. driftBand is half a
+// millisecond either side, inside the spec's 1 ms floor with room for the noise that remains.
+//
+// An error past snapBand is not drift but a misplaced anchor, most often a period's worth of phase
+// between the write counter and the card at the moment the stream started, or an underrun that moved
+// the counter on without playing anything. That is put right in one step of silence or one skip, which
+// the spec allows on a start, and the fine correction takes it from there.
+//
+// tailFrames is the hardware tail in frames: the write counter is that far ahead of what is heard, and
+// the anchor was laid in terms of what is heard.
+const (
+	driftGain  = 0.02
+	driftBand  = speaker.Rate / 2000
+	snapBand   = speaker.Rate / 100
+	tailFrames = int64(speaker.HardwareTail * speaker.Rate / time.Second)
+)
+
 // out places this room's audio by output frame index. Arrival order cannot line two rooms up: a burst
 // of jitter on one of them shifts it against the other for good, because nothing says where the audio
 // was meant to go. The server's timestamps say, so they decide.
@@ -42,10 +67,20 @@ type out struct {
 	pcm    []int16
 
 	// The frame that carries server time at. Fixed once per stream: recomputing it per chunk would
-	// feed the sampling jitter of "what is playing now" straight back into where audio lands.
+	// feed the sampling jitter of "what is playing now" straight back into where audio lands. Drift
+	// correction nudges frame by whole frames instead, in step with the audio it moves.
 	anchored bool
 	frame    uint64
 	at       int64
+
+	// drift is the smoothed error between the frame being heard and the frame the server clock wants,
+	// in frames, positive when the room is playing early. corrected counts frames repeated (positive)
+	// or dropped (negative) to hold it.
+	drift     float64
+	corrected int64
+
+	// now stands in for the clock, so a test can hold the server's time still.
+	now func() int64
 
 	late    atomic.Int64
 	dropped atomic.Int64
@@ -178,9 +213,68 @@ func (o *out) Render(from uint64, buf []int16) {
 	if o.held || !o.ready || from < o.base {
 		return
 	}
+	o.correct(from)
 	for i := range min(len(buf), len(o.pcm)) {
 		buf[i] = scale(o.pcm[i], o.gain)
 	}
+}
+
+// correct holds the room to the server clock. Wants mu, and pcm's head at from.
+func (o *out) correct(from uint64) {
+	if !o.anchored || len(o.pcm) < 2*speaker.Channels {
+		return
+	}
+	now := o.now
+	if now == nil {
+		if o.clock == nil {
+			return
+		}
+		now = o.clock.ServerMicrosNow
+	}
+
+	// The frame the server clock says should be heard now, against the one that is: the frame being
+	// rendered less the tail it has yet to travel.
+	want := int64(o.frame) + (now()-o.at)*speaker.Rate/1e6
+	o.drift += (float64(int64(from)-tailFrames-want) - o.drift) * driftGain
+
+	switch {
+	case o.drift > snapBand:
+		n := int(o.drift)
+		o.pcm = append(make([]int16, n*speaker.Channels), o.pcm...)
+		o.frame += uint64(n)
+		o.corrected += int64(n)
+		o.drift = 0
+		slog.Info("sendspin snapped later", "ms", n*1000/speaker.Rate)
+	case o.drift < -snapBand:
+		n := min(int(-o.drift), len(o.pcm)/speaker.Channels-1)
+		o.pcm = append(o.pcm[:0], o.pcm[n*speaker.Channels:]...)
+		o.frame -= uint64(n)
+		o.corrected -= int64(n)
+		o.drift = 0
+		slog.Info("sendspin snapped earlier", "ms", n*1000/speaker.Rate)
+	case o.drift > driftBand:
+		// Early: say the first frame twice, and move the anchor with it so what arrives next lands in
+		// step with what is already queued.
+		o.pcm = append(o.pcm, o.pcm[:speaker.Channels]...)
+		copy(o.pcm[speaker.Channels:], o.pcm[:len(o.pcm)-speaker.Channels])
+		o.frame++
+		o.drift--
+		o.corrected++
+	case o.drift < -driftBand:
+		// Late: skip the first frame.
+		n := copy(o.pcm, o.pcm[speaker.Channels:])
+		o.pcm = o.pcm[:n]
+		o.frame--
+		o.drift++
+		o.corrected--
+	}
+}
+
+// drifting reports the smoothed error in frames and the frames corrected so far, for the log.
+func (o *out) drifting() (drift float64, corrected int64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.drift, o.corrected
 }
 
 // flush drops what has not been heard yet, and the anchor with it: what comes next is a new timeline.
@@ -195,6 +289,7 @@ func (o *out) reset() {
 	o.pcm = o.pcm[:0]
 	o.base = 0
 	o.anchored = false
+	o.drift = 0
 }
 
 func (o *out) misses() (late, dropped int64) { return o.late.Load(), o.dropped.Load() }

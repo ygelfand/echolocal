@@ -257,12 +257,15 @@ func (s *session) heard(chunk protocol.AudioChunk) {
 	// also how far behind the intended point the room is running.
 	if s.chunks++; s.chunks%250 == 0 {
 		late, dropped := s.out.misses()
+		drift, corrected := s.out.drifting()
 		slog.Info("sendspin ahead",
 			"queued_ms", s.out.queuedMs(),
 			"undecoded", len(s.client.AudioChunks),
 			"lead_ms", (chunk.Timestamp-s.clock.ServerMicrosNow())/1000,
 			"late", late,
-			"dropped", dropped)
+			"dropped", dropped,
+			"drift_ms", drift*1000/speaker.Rate,
+			"corrected", corrected)
 	}
 }
 
