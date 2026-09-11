@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -25,7 +24,8 @@ const downloadTimeout = 10 * time.Minute
 // rather than racing it onto the same file.
 var installing sync.Mutex
 
-// Install replaces this binary with the one the manifest describes and asks for a restart.
+// Install replaces this binary with the one the manifest describes for this architecture and asks for
+// a restart.
 //
 // Nothing is written to /system until the download has been fetched whole and its hash checked. What
 // this replaces is kept as echod.prev, which is what the boot hook restores if the new one never gets
@@ -41,14 +41,18 @@ func Install(ctx context.Context, m Manifest, progress func(float32)) error {
 	if err := m.Valid(); err != nil {
 		return err
 	}
+	b, err := m.For(arch)
+	if err != nil {
+		return err
+	}
 
 	staged := filepath.Join(layout.StateDir, "echod.incoming")
 	defer os.Remove(staged)
 
-	if err := download(ctx, m, staged, progress); err != nil {
+	if err := download(ctx, b, staged, progress); err != nil {
 		return err
 	}
-	if err := room(m.Size); err != nil {
+	if err := room(b.Size); err != nil {
 		return err
 	}
 	return swap(staged, m.Version)
@@ -57,22 +61,22 @@ func Install(ctx context.Context, m Manifest, progress func(float32)) error {
 // download fetches the binary and proves it before it is allowed near /system. The hash is taken as the
 // bytes go past rather than by reading the file back, so nothing has to hold sixteen megabytes in memory
 // on a device with half a gigabyte.
-func download(ctx context.Context, m Manifest, to string, progress func(float32)) error {
+func download(ctx context.Context, b Binary, to string, progress func(float32)) error {
 	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.URL, nil)
 	if err != nil {
 		return err
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("update: fetching %s: %w", m.URL, err)
+		return fmt.Errorf("update: fetching %s: %w", b.URL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("update: fetching %s: %s", m.URL, resp.Status)
+		return fmt.Errorf("update: fetching %s: %s", b.URL, resp.Status)
 	}
 
 	f, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
@@ -83,20 +87,20 @@ func download(ctx context.Context, m Manifest, to string, progress func(float32)
 
 	sum := sha256.New()
 	written, err := io.Copy(io.MultiWriter(f, sum), &counter{
-		from: resp.Body, size: m.Size, report: progress,
+		from: resp.Body, size: b.Size, report: progress,
 	})
 	if err != nil {
-		return fmt.Errorf("update: downloading %s: %w", m.Version, err)
+		return fmt.Errorf("update: downloading %s: %w", b.URL, err)
 	}
 	if err := f.Sync(); err != nil {
 		return err
 	}
 
-	if written != m.Size {
-		return fmt.Errorf("update: %d bytes, offered as %d", written, m.Size)
+	if written != b.Size {
+		return fmt.Errorf("update: %d bytes, offered as %d", written, b.Size)
 	}
-	if got := hex.EncodeToString(sum.Sum(nil)); got != m.SHA256 {
-		return fmt.Errorf("update: hash %s, offered as %s", got, m.SHA256)
+	if got := hex.EncodeToString(sum.Sum(nil)); got != b.SHA256 {
+		return fmt.Errorf("update: hash %s, offered as %s", got, b.SHA256)
 	}
 	return nil
 }
@@ -129,8 +133,10 @@ func swap(staged, version string) error {
 		return err
 	}
 
-	if out, err := exec.Command("chcon", layout.OurLabel, layout.Binary).CombinedOutput(); err != nil {
-		slog.Warn("labelling the new binary failed", "err", err, "output", string(out))
+	// The label decides whether init will start the service at all, and which firmware this is decides
+	// what it has to be. prev kept its own through the rename, so the answer is already on the device.
+	if err := copyLabel(prev, layout.Binary); err != nil {
+		slog.Warn("labelling the new binary failed", "err", err)
 	}
 	slog.Warn("update installed, restarting into it", "version", version, "previous", prev)
 	return nil

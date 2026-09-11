@@ -10,6 +10,7 @@ package update
 import (
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/layout"
@@ -21,12 +22,43 @@ var (
 	prev = layout.PrevBinary
 	old  = layout.OldBinary
 
-	mount = "/system"
+	mount = mountHolding(layout.Binary)
 
 	// writable is the remount, kept as a variable so a test can run everything around it somewhere it
 	// is already allowed to write.
 	writable = remount
 )
+
+// mountHolding is what has to be made writable to replace a binary at this path. Which filesystem
+// that is depends on the firmware: Fire OS 5 mounts the system partition at /system, Fire OS 6 runs
+// it as the root filesystem, and devices in the field are on both.
+func mountHolding(path string) string {
+	mounts, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return "/"
+	}
+	return mountIn(string(mounts), path)
+}
+
+// mountIn is the longest mountpoint in /proc/mounts that contains path.
+func mountIn(mounts, path string) string {
+	at := "/"
+	for line := range strings.SplitSeq(mounts, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		// A prefix only counts when it ends at a separator, or /sys would claim /system/app.
+		point := fields[1]
+		if point == path || strings.HasPrefix(path, strings.TrimSuffix(point, "/")+"/") {
+			if len(point) > len(at) {
+				at = point
+			}
+		}
+	}
+	return at
+}
 
 // wanted carries a request to restart into whatever is supervising the process, which is the only
 // thing that can unwind the hardware cleanly. Buffered and dropped when full: two requests are one
@@ -45,6 +77,11 @@ func Restart(why string) {
 
 // Wanted is how the supervisor hears about it.
 func Wanted() <-chan string { return wanted }
+
+// Remount makes the system partition writable, or puts it back. Nothing on the device can express the
+// second from a shell — the kernel names the root filesystem's source /dev/root and there is no such
+// node — and `adb remount` only does the first, so an installer needs this to undo itself.
+func Remount(rw bool) error { return writable(rw) }
 
 // OnTrial reports whether an update is waiting to be believed.
 func OnTrial() bool {

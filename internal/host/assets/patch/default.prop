@@ -1,0 +1,23 @@
+#
+# ADDITIONAL_DEFAULT_PROPERTIES
+#
+ro.mtk_key_manager_kb_path=1
+ro.adb.secure=0
+ro.oem_unlock_supported=1
+persist.service.acm.enable=0
+debug.sf.nobootanimation=1
+ro.secure=0
+security.perf_harden=1
+ro.allow.mock.location=0
+ro.debuggable=1
+debug.atrace.tags.enableflags=0
+persist.sys.usb.config=mtp,adb
+ro.mount.fs=EXT4
+camera.disable_zsl_mode=1
+#
+# BOOTIMAGE_BUILD_PROPERTIES
+#
+ro.bootimage.build.date=Sat Aug 1 23:01:43 UTC 2026
+ro.bootimage.build.date.utc=1785625303
+ro.bootimage.build.fingerprint=Amazon/biscuit_puffin/biscuit_puffin:6.0/NS6574/7623N:user/amz-p,release-keys
+

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/ygelfand/echolocal/internal/host/bootimg"
 	"github.com/ygelfand/echolocal/internal/host/device"
 	"github.com/ygelfand/echolocal/internal/host/installer"
 )
@@ -39,7 +38,7 @@ func approveFlash(ctx context.Context, out io.Writer, d *device.Device, state in
 
 	fmt.Fprintf(out, "\n%s\n", styleTitle.Render("This will overwrite the boot partition"))
 	fmt.Fprintf(out, "  device     %s (%s)\n", d.Serial(), state.Summary)
-	fmt.Fprintf(out, "  partition  %s\n", bootimg.Partition)
+	fmt.Fprintf(out, "  partition  %s\n", state.Partition)
 	fmt.Fprintf(out, "  image      %s\n", image)
 	fmt.Fprintf(out, "%s\n", styleDetail.Render("  Going back means reflashing a stock boot image by hand."))
 

@@ -2,7 +2,4 @@
 
 package assets
 
-var (
-	echod     []byte
-	bootImage []byte
-)
+var echod []byte

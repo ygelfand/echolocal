@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -84,10 +85,20 @@ const (
 	StateRecovery = "recovery"
 )
 
+// ErrUnreachable is a device an install cannot open. Whether adb lists it unauthorized or does not
+// list it at all is the same problem seen after a different number of reboots, and the way out of
+// both is the same.
+var ErrUnreachable = errors.New("no device adb can drive")
+
 // List returns the devices adb can actually talk to. Offline and unauthorized entries are skipped:
 // they show up in adb's listing but every command against them fails.
-func List() ([]Info, error) {
-	serials, err := listing(StateOnline)
+func List() ([]Info, error) { return list(StateOnline) }
+
+// ListAny is List including devices in recovery, which an install can carry on from.
+func ListAny() ([]Info, error) { return list(StateOnline, StateRecovery) }
+
+func list(states ...string) ([]Info, error) {
+	serials, err := listing(states...)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +111,16 @@ func List() ([]Info, error) {
 		out = append(out, Info{Serial: serial, Model: model, Product: product})
 	}
 	return out, nil
+}
+
+// InRecovery reports whether adb lists this device in recovery right now, which decides whether an
+// install still has to get it there.
+func (d *Device) InRecovery() (bool, error) {
+	serials, err := listing(StateRecovery)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(serials, d.serial), nil
 }
 
 // listing is the serials in any of the given states. `adb devices` reports one per line as
@@ -157,7 +178,7 @@ func attach(serial string, states ...string) (*Device, error) {
 
 	switch {
 	case len(serials) == 0:
-		return nil, errors.New("device: no device connected; check the USB cable and `adb devices`")
+		return nil, ErrUnreachable
 	case serial != "":
 		for _, s := range serials {
 			if s == serial {
@@ -197,6 +218,16 @@ func (d *Device) Reboot(target string) error {
 		args = append(args, target)
 	}
 	_, err := d.run(context.Background(), args...)
+	return err
+}
+
+// Remount makes the system partition writable.
+//
+// adbd does this rather than the shell because the kernel mounted the root filesystem itself and named
+// its source /dev/root, which has no device node. mount(8) resolves that name and fails on it either
+// way; mount(2) with an empty source never needs it, and adbd is what makes that call.
+func (d *Device) Remount() error {
+	_, err := d.run(context.Background(), "remount")
 	return err
 }
 

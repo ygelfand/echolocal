@@ -52,6 +52,8 @@ func newWifiCmd() *cobra.Command {
 // ensureWifi verifies the connection and configures one when there is none. Both the wifi command and
 // the end of an install come through here, so a device gets the same treatment either way.
 func ensureWifi(ctx context.Context, out io.Writer, d *device.Device, ssid, password string, wps bool) error {
+	given := ssid != ""
+
 	// What the device is now decides what to offer. One already on a network is left alone unless the
 	// flags say otherwise.
 	if ssid == "" && !wps {
@@ -86,8 +88,9 @@ func ensureWifi(ctx context.Context, out io.Writer, d *device.Device, ssid, pass
 		}
 
 		fmt.Fprintf(out, "%s %v\n", styleFail.Render("✗"), err)
-		if ssid != "" {
-			// Nothing keeps a network that never connected: it would be retried on every boot.
+
+		// One that associated is kept: the passphrase was right and what failed came after it.
+		if ssid != "" && !state.Associated() {
 			if err := wifi.Remove(d, ssid); err != nil {
 				return err
 			}
@@ -97,7 +100,13 @@ func ensureWifi(ctx context.Context, out io.Writer, d *device.Device, ssid, pass
 		if err != nil || !again {
 			return err
 		}
-		ssid, password, wps = "", "", false
+
+		// A name that came from a flag is kept: it may be a hidden network, which a scan cannot offer,
+		// so asking again would only fail the same way. One that was picked from a scan is asked again.
+		if !given {
+			ssid, password = "", ""
+		}
+		wps = false
 	}
 }
 

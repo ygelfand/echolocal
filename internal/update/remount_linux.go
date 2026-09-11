@@ -3,6 +3,7 @@ package update
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"syscall"
@@ -43,6 +44,10 @@ func remount(rw bool) error {
 // allowWrites clears the block device's read-only flag, which the kernel checks before any ro->rw
 // remount and answers with EACCES. Some devices carry it on /system; `mount` clears it and a bare
 // mount(2) does not. It does not survive a reboot.
+//
+// Where the kernel mounted the root filesystem itself it names the source /dev/root, for which there
+// is no node to open. Nothing can be cleared through a name like that, and nothing needs to be: the
+// remount is what matters and it is tried either way.
 func allowWrites() error {
 	dev, err := backing(mount)
 	if err != nil {
@@ -51,7 +56,8 @@ func allowWrites() error {
 
 	f, err := os.OpenFile(dev, os.O_RDONLY|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return fmt.Errorf("update: opening %s: %w", dev, err)
+		slog.Warn("leaving the read-only flag alone", "device", dev, "err", err)
+		return nil
 	}
 	defer f.Close()
 

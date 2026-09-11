@@ -5,55 +5,30 @@ import (
 	"testing"
 )
 
-// Both answers are consulted because they can disagree, and the disagreement is the case that matters:
-// an image asking for permissive on a kernel that is enforcing leaves echod unable to open its socket,
-// which reads as a bug in echod rather than a device that needs reflashing.
-func TestPermissiveNeedsBothAnswers(t *testing.T) {
-	for _, tc := range []struct {
-		asked, enforcing string
-		want             bool
-	}{
-		{"permissive", "Permissive", true},
-		{"permissive", "", true},
-		{"permissive", "Enforcing", false},
-		{"permissive", "enforcing", false},
-		{"enforce", "Permissive", false},
-		{"enforce", "Enforcing", false},
-		{"", "", false},
-	} {
-		if got := permissiveFrom(tc.asked, tc.enforcing); got != tc.want {
-			t.Errorf("permissiveFrom(%q, %q) = %t, want %t", tc.asked, tc.enforcing, got, tc.want)
-		}
-	}
-}
-
 // Everything that writes is skipped on a device that is ready, which is what makes the stage safe to
-// re-run. Root alone is not ready, and permissive alone is not either.
-func TestReadyNeedsRootAndPermissive(t *testing.T) {
+// re-run. Recovery is never ready: its root says nothing about the installed system.
+func TestReadyNeedsRootAndPermissiveOutsideRecovery(t *testing.T) {
 	for _, tc := range []struct {
-		rooted, permissive, want bool
+		rooted, permissive, recovery, want bool
 	}{
-		{true, true, true},
-		{true, false, false},
-		{false, true, false},
-		{false, false, false},
+		{true, true, false, true},
+		{true, true, true, false},
+		{true, false, false, false},
+		{false, true, false, false},
+		{false, false, false, false},
+		{false, false, true, false},
 	} {
-		s := state{rooted: tc.rooted, permissive: tc.permissive}
+		s := state{rooted: tc.rooted, permissive: tc.permissive, recovery: tc.recovery}
 		if got := s.ready(); got != tc.want {
-			t.Errorf("ready(root=%t permissive=%t) = %t, want %t",
-				tc.rooted, tc.permissive, got, tc.want)
+			t.Errorf("ready(root=%t permissive=%t recovery=%t) = %t, want %t",
+				tc.rooted, tc.permissive, tc.recovery, got, tc.want)
 		}
 	}
 }
 
 func TestStateSaysWhatItFound(t *testing.T) {
-	s := state{rooted: false, permissive: false, enforcing: "Enforcing"}
-
-	said := s.String()
-	for _, want := range []string{"root=false", "enforcing"} {
-		if !strings.Contains(said, want) {
-			t.Errorf("%q does not mention %q", said, want)
-		}
+	if said := (state{rooted: false}).String(); !strings.Contains(said, "root=false") {
+		t.Errorf("%q does not say whether it found root", said)
 	}
 }
 
@@ -70,15 +45,15 @@ func TestWritingStepsSkipWhenReady(t *testing.T) {
 		t.Error("skipped with no reason given")
 	}
 
-	r.state = state{rooted: false, permissive: false}
+	r.state = state{rooted: false}
 	if _, skip := r.done(); skip {
-		t.Error("a device with neither root nor permissive is skipping the write")
+		t.Error("a device without root is skipping the write")
 	}
 }
 
 // checkApproval is the last gate: nothing is written without someone having said so.
 func TestNothingIsWrittenWithoutApproval(t *testing.T) {
-	r := &run{cfg: Config{}, state: state{rooted: false, permissive: false}}
+	r := &run{cfg: Config{}, state: state{rooted: false}}
 
 	if _, _, err := checkApproval(r); err == nil {
 		t.Fatal("unapproved write was allowed")

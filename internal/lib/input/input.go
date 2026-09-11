@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -23,7 +24,7 @@ const (
 // with the tail padded back out to the timeval's alignment. evdev rejects a read shorter than one
 // whole event with EINVAL rather than returning a truncated one, so this has to be right.
 const (
-	longSize  = 8
+	longSize  = strconv.IntSize / 8
 	eventSize = 2*longSize + 8
 
 	evType  = 2 * longSize
@@ -112,12 +113,20 @@ func (d *Device) Read() (Event, error) {
 		return Event{}, err
 	}
 	return Event{
-		Sec:   binary.LittleEndian.Uint64(buf[0:]),
-		Usec:  binary.LittleEndian.Uint64(buf[longSize:]),
+		Sec:   word(buf[0:]),
+		Usec:  word(buf[longSize:]),
 		Type:  binary.LittleEndian.Uint16(buf[evType:]),
 		Code:  binary.LittleEndian.Uint16(buf[evCode:]),
 		Value: int32(binary.LittleEndian.Uint32(buf[evValue:])),
 	}, nil
+}
+
+// word reads a kernel long, which is what the timestamp is made of.
+func word(b []byte) uint64 {
+	if longSize == 4 {
+		return uint64(binary.LittleEndian.Uint32(b))
+	}
+	return binary.LittleEndian.Uint64(b)
 }
 
 func (d *Device) Close() error { return d.f.Close() }

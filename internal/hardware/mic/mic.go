@@ -218,6 +218,7 @@ func (s *Source) open() error {
 	s.pcm = pcm
 	s.devMu.Unlock()
 
+	routeInputs()
 	applyGain(config.Get().Microphone.Gain)
 	return nil
 }

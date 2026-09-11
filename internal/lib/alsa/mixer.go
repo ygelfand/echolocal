@@ -210,8 +210,10 @@ func valueWidth(typ uint32) int {
 		return 4 // unsigned int item[128]
 	case TypeBytes:
 		return 1 // unsigned char data[512]
+	case TypeInteger64:
+		return 8 // long long value64[64], which is 8 on either ABI
 	}
-	return longSize // long value[128], and long long for TypeInteger64
+	return longSize // long value[128]
 }
 
 // Set writes the same value to every channel of a control.

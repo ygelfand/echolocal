@@ -53,10 +53,10 @@ func newInstallCmd() *cobra.Command {
 		Short: "Install echod on a connected Echo Dot",
 		Long: "Installs echod into /system/app/echod and hands it Amazon's ledcontroller service,\n" +
 			"so init starts and supervises it. Safe to re-run.\n\n" +
-			"Begins by checking that the device has root and a permissive kernel, without which\n" +
-			"there is no root adbd and no way for echod to open its socket. A device that has both\n" +
-			"is left alone; one that does not has EchoLocal's boot image written from recovery,\n" +
-			"which needs TWRP as the recovery partition.",
+			"Begins by checking that the device has root, without which there is no root adbd and\n" +
+			"nothing below it can run. A device that has it is left alone; one that does not has\n" +
+			"EchoLocal's boot image written from recovery, which needs TWRP as the recovery\n" +
+			"partition.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
@@ -71,8 +71,7 @@ func newInstallCmd() *cobra.Command {
 			cfg := installer.Config{ZeroPSK: zeroPSK}
 
 			// The image is only resolved when it is going to be written. A device that already has root
-			// and a permissive kernel needs none, so a build that ships no payload can still install to
-			// one.
+			// needs none, so a build that ships no payload can still install to one.
 			state, err := installer.Probe(d)
 			if err != nil {
 				return err
@@ -89,9 +88,9 @@ func newInstallCmd() *cobra.Command {
 			// The boot image first, and on its own: until it is written there is no root adbd, and
 			// everything below needs one — reading the device's own name included.
 			// Named for what it always does rather than for what it sometimes does: most runs find a
-			// device that already has root and a permissive kernel and write nothing at all.
+			// device that already has root and write nothing at all.
 			if err := render(cmd.Context(), out, "Verifying device boot status",
-				"✓ device has root and a permissive kernel",
+				"✓ device has root",
 				func(report installer.Reporter) error {
 					return installer.FlashBoot(cmd.Context(), d, cfg, report)
 				}); err != nil {
@@ -160,30 +159,6 @@ func newInstallCmd() *cobra.Command {
 	c.Flags().BoolVar(&noReboot, "no-reboot", false, "finish without rebooting, and without asking")
 	c.MarkFlagsMutuallyExclusive("reboot", "no-reboot")
 	nameFlag(c, &name)
-	return c
-}
-
-func newUninstallCmd() *cobra.Command {
-	var serial string
-
-	c := &cobra.Command{
-		Use:   "uninstall",
-		Short: "Restore Amazon's ledcontroller and remove echod",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			d, err := connect(cmd.Context(), cmd.OutOrStdout(), serial)
-			if err != nil {
-				return err
-			}
-			return render(cmd.Context(), cmd.OutOrStdout(), "Uninstalling EchoLocal",
-				"✓ echod removed, ledcontroller restored",
-				func(report installer.Reporter) error {
-					return installer.Uninstall(cmd.Context(), d, report)
-				})
-		},
-	}
-
-	c.Flags().StringVar(&serial, "serial", "", "device serial, when more than one is connected")
 	return c
 }
 

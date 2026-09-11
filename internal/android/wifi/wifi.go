@@ -91,7 +91,8 @@ func Scan(ctx context.Context, d *device.Device) ([]Network, error) {
 		return nil, err
 	}
 
-	// Results arrive over a few seconds, so the list is read until it stops growing.
+	// Results arrive over a few seconds, so the list is read until it stops growing. An empty read is
+	// a scan still running rather than an answer, so it keeps waiting.
 	var best map[string]Network
 	for range 4 {
 		select {
@@ -104,11 +105,15 @@ func Scan(ctx context.Context, d *device.Device) ([]Network, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		found := parse(out)
-		if len(found) <= len(best) {
+		if len(found) > len(best) {
+			best = found
+			continue
+		}
+		if len(best) > 0 {
 			break
 		}
-		best = found
 	}
 
 	networks := make([]Network, 0, len(best))
@@ -239,9 +244,16 @@ func Join(d *device.Device, ssid, passphrase string) error {
 		}
 	}
 
-	_, err = run(d, "save_config")
-	return err
+	if _, err := run(d, "save_config"); err != nil {
+		return err
+	}
+
+	// An install enables this for every boot after, but nothing has started it on this one.
+	return d.Setprop("ctl.start", dhcpService)
 }
+
+// dhcpService is what gets the device an address once wpa_supplicant associates.
+const dhcpService = "dhcpcd-wlan0"
 
 // WPS joins by push button, for a router that has one: no name to pick and no passphrase to type.
 func WPS(d *device.Device) error {
@@ -259,6 +271,10 @@ type State struct {
 	Address string
 }
 
+// Associated reports whether the supplicant got as far as authenticating, which is what says the
+// passphrase was right. An address is a separate matter.
+func (s State) Associated() bool { return s.State == "COMPLETED" }
+
 // Joined reports whether the device is associated to this network and has an address. An empty ssid
 // accepts any, for a join where the name was never chosen — WPS.
 //
@@ -267,7 +283,7 @@ type State struct {
 // to switch, the supplicant still reports the previous network as connected. Judging on state alone
 // reports success for the network being left.
 func (s State) Joined(ssid string) bool {
-	if s.State != "COMPLETED" || s.Address == "" {
+	if !s.Associated() || s.Address == "" {
 		return false
 	}
 	return ssid == "" || s.SSID == ssid

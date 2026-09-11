@@ -19,15 +19,16 @@ LDFLAGS := -X '$(BUILDVARS).Version=$(VERSION)' \
 
 BUILD_DIR := bin
 ASSET_DIR := internal/host/assets/payload
-BOOT_IMAGE := images/echolocal-boot.img
 
-# echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). Amazon ships a 32-bit userspace but
-# the SoC and kernel are arm64 and /system/lib64 is present, so echod is built 64-bit: the wake word
-# pipeline costs 50ms per 80ms of audio there against 88ms as 32-bit code, which does not fit.
+# echod targets the Echo Dot 2: MT8163, Android 5.1 (API 22). FireOS 5 runs an arm64 kernel; FireOS 6
+# ships a 32-bit kernel on the same hardware, which cannot exec arm64 at all.
 # The ALSA path is pure Go over /dev/snd ioctls, so no cgo and no NDK. Keep it that way unless
 # something genuinely needs C, which is what would make a toolchain image worth having.
-DEVICE_ENV := GOOS=linux GOARCH=arm64 CGO_ENABLED=0
+ARCHES := arm64 arm
+DOT_ARCH ?= arm
+DEVICE_ENV := GOOS=linux GOARCH=$(DOT_ARCH) CGO_ENABLED=0
 DEVICE_LDFLAGS := -s -w $(LDFLAGS)
+DEVICE_BIN := $(BUILD_DIR)/echod-$(DOT_ARCH)
 
 # TAGS passes build tags through to echod, which is how the same device can be measured both ways:
 # `make install-echod TAGS=noasm` builds the portable dot instead of the NEON one.
@@ -59,9 +60,13 @@ build-echoctl: ## Build the host CLI into ./bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echoctl ./cmd/echoctl
 
 .PHONY: build-echod
-build-echod: ## Cross-compile echod for the Echo Dot (static, no cgo; TAGS=noasm for the portable dot)
+build-echod: ## Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot)
 	@mkdir -p $(BUILD_DIR)
-	$(DEVICE_ENV) go build $(DEVICE_TAGS) -ldflags "$(DEVICE_LDFLAGS)" -o $(BUILD_DIR)/echod ./cmd/echod
+	$(DEVICE_ENV) go build $(DEVICE_TAGS) -ldflags "$(DEVICE_LDFLAGS)" -o $(DEVICE_BIN) ./cmd/echod
+
+.PHONY: build-echod-all
+build-echod-all:
+	@for a in $(ARCHES); do $(MAKE) --no-print-directory build-echod DOT_ARCH=$$a; done
 
 .PHONY: run-echoctl
 run-echoctl: ## Run echoctl on the host (make run-echoctl ARGS="tools tone -h")
@@ -73,7 +78,7 @@ run-echod: push-echod ## Push echod and run it (make run-echod ARGS="tools info"
 
 .PHONY: push-echod
 push-echod: build-echod ## Push echod to /data/local/tmp for iteration
-	@$(ADB) push $(BUILD_DIR)/echod $(DEVICE_TMP)/echod >/dev/null
+	@$(ADB) push $(DEVICE_BIN) $(DEVICE_TMP)/echod >/dev/null
 	@$(ADB) shell chmod 755 $(DEVICE_TMP)/echod
 
 .PHONY: test
@@ -115,12 +120,11 @@ check: fmt vet lint test ## Format, vet, lint and test
 ##@ Device (echod)
 
 .PHONY: payload
-payload: build-echod ## Stage echod and the boot image for embedding into echoctl
+payload: ## Stage echod and the boot image for embedding into echoctl
+	@$(MAKE) --no-print-directory build-echod DOT_ARCH=arm
 	@mkdir -p $(ASSET_DIR)
-	cp $(BUILD_DIR)/echod $(ASSET_DIR)/echod
-	cp $(BOOT_IMAGE) $(ASSET_DIR)/boot.img
+	cp $(BUILD_DIR)/echod-arm $(ASSET_DIR)/echod
 	@shasum -a 256 $(ASSET_DIR)/echod | awk '{print $$1}' > $(ASSET_DIR)/echod.sha256
-	@shasum -a 256 $(ASSET_DIR)/boot.img | awk '{print $$1}' > $(ASSET_DIR)/boot.img.sha256
 
 .PHONY: dist
 dist: payload ## Full build: echod, the boot image, then echoctl carrying both
@@ -132,25 +136,26 @@ install-echod: build-echod ## Install echod into /system/app/echod, restarting i
 # This is a manual copy, not an upgrade, so the trial an update may have left open is cleared with it.
 # Otherwise the restart below looks like a binary that took an update and died without committing, and
 # echod reboots the device to put the old one back — taking this install with it.
-	@$(ADB) shell 'setprop ctl.stop ledcontroller; sleep 1; \
-		mount -o remount,rw /system && mkdir -p $(ECHOD_DIR) && \
-		rm -f $(ECHOD_DIR)/echod.prev $(ECHOD_DIR)/echod.old'
-	@$(ADB) push $(BUILD_DIR)/echod $(ECHOD_DIR)/echod >/dev/null
-	@$(ADB) shell 'chmod 755 $(ECHOD_DIR)/echod; mount -o remount,ro /system; \
+	@$(ADB) shell 'setprop ctl.stop ledcontroller; sleep 1'
+	@$(ADB) remount >/dev/null
+	@$(ADB) shell 'mkdir -p $(ECHOD_DIR) && rm -f $(ECHOD_DIR)/echod.prev $(ECHOD_DIR)/echod.old'
+	@$(ADB) push $(DEVICE_BIN) $(ECHOD_DIR)/echod >/dev/null
+	@$(ADB) shell 'chmod 755 $(ECHOD_DIR)/echod; \
 		rm -f $(STATE_DIR)/updating; setprop echolocal.trial ""; setprop echolocal.rolledback ""; \
 		[ -L $(LEDD) ] && setprop ctl.start ledcontroller; ls -lZ $(ECHOD_DIR)/echod'
 
 .PHONY: install-service
 install-service: install-echod ## Take over the ledcontroller service so init starts echod
-	@$(ADB) shell 'mount -o remount,rw /system; \
-		[ -e $(LEDD).orig ] || mv $(LEDD) $(LEDD).orig; \
+	@$(ADB) remount >/dev/null
+	@$(ADB) shell '[ -e $(LEDD).orig ] || mv $(LEDD) $(LEDD).orig; \
 		rm -f $(LEDD); ln -s $(ECHOD_DIR)/echod $(LEDD); \
-		mount -o remount,ro /system; ls -lZ $(LEDD) $(LEDD).orig'
+		ls -lZ $(LEDD) $(LEDD).orig'
 
 .PHONY: uninstall-service
 uninstall-service: ## Restore Amazon's ledcontroller binary and its SELinux label
-	@$(ADB) shell 'mount -o remount,rw /system; rm -f $(LEDD); mv $(LEDD).orig $(LEDD); \
-		chcon $(LEDD_LABEL_ORIG) $(LEDD); mount -o remount,ro /system; ls -lZ $(LEDD)'
+	@$(ADB) remount >/dev/null
+	@$(ADB) shell 'rm -f $(LEDD); mv $(LEDD).orig $(LEDD); \
+		chcon $(LEDD_LABEL_ORIG) $(LEDD); ls -lZ $(LEDD)'
 
 .PHONY: restart-echod
 restart-echod: ## Restart echod through init (ctl.stop then ctl.start)
@@ -182,12 +187,13 @@ FROM ?= $(RELEASES)/download/$(AT)
 PAGE ?= $(RELEASES)/tag/$(AT)
 
 .PHONY: manifest
-manifest: build-echod ## Write the manifest a device fetches to find this build
+manifest: build-echod-all ## Write the manifest a device fetches to find this build
 	@mkdir -p $(BUILD_DIR)
 	go run ./cmd/mkmanifest \
 		-version "$(AT)" \
-		-file $(BUILD_DIR)/echod \
-		-url "$(FROM)/echod" \
+		-from "$(FROM)" \
+		-arm64 $(BUILD_DIR)/echod-arm64 \
+		-arm $(BUILD_DIR)/echod-arm \
 		-title "EchoLocal $(AT)" \
 		-release-url "$(PAGE)" \
 		-out $(BUILD_DIR)/manifest.json
@@ -210,7 +216,7 @@ release-dev: ## Publish this working tree to the dev channel, without pushing an
 	@$(MAKE) --no-print-directory manifest VERSION=$(VERSION) FROM=$(RELEASES)/download/dev PAGE=$(RELEASES)/tag/dev
 	@gh release view dev >/dev/null 2>&1 || \
 		gh release create dev --prerelease --title dev --notes "Rolling build for devices on the dev channel."
-	gh release upload dev dist/echolocal_* $(BUILD_DIR)/echod $(BUILD_DIR)/manifest.json --clobber
+	gh release upload dev dist/echolocal_* $(BUILD_DIR)/echod-arm64 $(BUILD_DIR)/echod-arm $(BUILD_DIR)/manifest.json --clobber
 	@echo "dev channel now serves $(VERSION)"
 
 .PHONY: release

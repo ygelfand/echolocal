@@ -12,39 +12,58 @@ import (
 	"testing"
 )
 
-// release stands in for a published build: a manifest describing a binary, and the binary itself.
-func release(t *testing.T, binary []byte) Manifest {
+// release stands in for a published build: a manifest describing one binary per architecture, and the
+// binaries themselves. Each architecture is served its own bytes, so a test can tell which one was
+// fetched from what arrived.
+func release(t *testing.T, bodies map[string][]byte) Manifest {
 	t.Helper()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/echod", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(binary) })
+	m := Manifest{Version: "0.0.1", Binaries: make(map[string]Binary, len(bodies))}
+
+	for a, body := range bodies {
+		mux.HandleFunc("/echod-"+a, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) })
+		sum := sha256.Sum256(body)
+		m.Binaries[a] = Binary{SHA256: hex.EncodeToString(sum[:]), Size: int64(len(body))}
+	}
+
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	sum := sha256.Sum256(binary)
-	return Manifest{
-		Version: "0.0.1",
-		URL:     srv.URL + "/echod",
-		SHA256:  hex.EncodeToString(sum[:]),
-		Size:    int64(len(binary)),
+	for a, b := range m.Binaries {
+		b.URL = srv.URL + "/echod-" + a
+		m.Binaries[a] = b
 	}
+	return m
+}
+
+// one is the single build of a release that carries nothing else, for the tests about fetching rather
+// than about choosing.
+func one(t *testing.T, body []byte) Binary {
+	t.Helper()
+
+	b, err := release(t, map[string][]byte{arch: body}).For(arch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestDownloadChecksWhatArrived(t *testing.T) {
 	dir := t.TempDir()
-	m := release(t, []byte("a new echod"))
+	b := one(t, []byte("a new echod"))
 
 	for name, tc := range map[string]struct {
-		break_ func(*Manifest)
+		break_ func(*Binary)
 		want   string
 	}{
-		"as offered":   {func(*Manifest) {}, ""},
-		"wrong hash":   {func(m *Manifest) { m.SHA256 = strings.Repeat("a", 64) }, "hash"},
-		"wrong size":   {func(m *Manifest) { m.Size = 4 }, "bytes"},
-		"gone away":    {func(m *Manifest) { m.URL += "/missing" }, "404"},
-		"no such host": {func(m *Manifest) { m.URL = "http://127.0.0.1:1/echod" }, "fetching"},
+		"as offered":   {func(*Binary) {}, ""},
+		"wrong hash":   {func(b *Binary) { b.SHA256 = strings.Repeat("a", 64) }, "hash"},
+		"wrong size":   {func(b *Binary) { b.Size = 4 }, "bytes"},
+		"gone away":    {func(b *Binary) { b.URL += "/missing" }, "404"},
+		"no such host": {func(b *Binary) { b.URL = "http://127.0.0.1:1/echod" }, "fetching"},
 	} {
-		offered := m
+		offered := b
 		tc.break_(&offered)
 
 		to := filepath.Join(dir, name)
@@ -65,11 +84,14 @@ func TestDownloadChecksWhatArrived(t *testing.T) {
 func TestInstallRefusesAManifestItCannotUse(t *testing.T) {
 	somewhere(t)
 
+	good := Binary{URL: "http://example/echod", SHA256: strings.Repeat("a", 64), Size: 1}
+
 	for name, m := range map[string]Manifest{
-		"no version": {URL: "http://example/echod", SHA256: strings.Repeat("a", 64), Size: 1},
-		"no url":     {Version: "0.0.1", SHA256: strings.Repeat("a", 64), Size: 1},
-		"no hash":    {Version: "0.0.1", URL: "http://example/echod", Size: 1},
-		"no size":    {Version: "0.0.1", URL: "http://example/echod", SHA256: strings.Repeat("a", 64)},
+		"no version":  {Binaries: map[string]Binary{arch: good}},
+		"no binaries": {Version: "0.0.1"},
+		"no url":      {Version: "0.0.1", Binaries: map[string]Binary{arch: {SHA256: good.SHA256, Size: 1}}},
+		"no hash":     {Version: "0.0.1", Binaries: map[string]Binary{arch: {URL: good.URL, Size: 1}}},
+		"no size":     {Version: "0.0.1", Binaries: map[string]Binary{arch: {URL: good.URL, SHA256: good.SHA256}}},
 	} {
 		if err := Install(context.Background(), m, nil); err == nil {
 			t.Errorf("%s: installed something unusable", name)
@@ -81,11 +103,11 @@ func TestInstallRefusesAManifestItCannotUse(t *testing.T) {
 // and never run past it.
 func TestProgressReachesTheEnd(t *testing.T) {
 	dir := t.TempDir()
-	m := release(t, []byte(strings.Repeat("x", 64<<10)))
+	b := one(t, []byte(strings.Repeat("x", 64<<10)))
 
 	var last float32
 	var calls int
-	err := download(context.Background(), m, filepath.Join(dir, "echod"), func(at float32) {
+	err := download(context.Background(), b, filepath.Join(dir, "echod"), func(at float32) {
 		calls++
 		if at < last {
 			t.Errorf("progress went backwards: %v then %v", last, at)
@@ -110,10 +132,10 @@ func TestProgressReachesTheEnd(t *testing.T) {
 func TestDownloadWritesWhatItVerified(t *testing.T) {
 	dir := t.TempDir()
 	want := []byte("a new echod")
-	m := release(t, want)
+	b := one(t, want)
 
 	to := filepath.Join(dir, "echod")
-	if err := download(context.Background(), m, to, nil); err != nil {
+	if err := download(context.Background(), b, to, nil); err != nil {
 		t.Fatal(err)
 	}
 

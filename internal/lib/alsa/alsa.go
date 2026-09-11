@@ -15,12 +15,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"syscall"
 	"unsafe"
 )
 
-// longSize is the kernel's unsigned long. These layouts are the 64-bit ABI.
-const longSize = 8
+// longSize is the kernel's unsigned long, which is the word size: 8 on arm64, 4 on a 32-bit kernel.
+// The ioctl numbers below encode the size of the struct they carry, so a wrong answer here is not a
+// subtle bug — the kernel rejects every call.
+const longSize = strconv.IntSize / 8
 
 // struct snd_pcm_hw_params: flags, 8 masks of 32 bytes, 21 intervals of 12, six 32-bit scalars,
 // fifo_size as an unsigned long, reserved[64]. Only fifo_size is word sized, so all the offsets
@@ -123,14 +126,16 @@ func (p *hwParams) interval(param int) uint32 {
 	return binary.LittleEndian.Uint32(p[off:])
 }
 
-// snd_xferi: a signed long, a pointer and an unsigned long, so 24 bytes here.
+// snd_xferi: a signed long, a pointer and an unsigned long. Every member is word sized, so the struct
+// has to be built from word-sized types — Go's int is the kernel's long on both ABIs. Writing result
+// as int64 lays the pointer out four bytes late on a 32-bit kernel, which reads as EFAULT.
 type xferi struct {
-	result int64
+	result int
 	buf    uintptr
 	frames uintptr
 }
 
-const xferiSize = 3 * longSize // 24
+const xferiSize = 3 * longSize
 
 type Config struct {
 	Channels   int

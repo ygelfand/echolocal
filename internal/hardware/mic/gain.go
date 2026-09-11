@@ -24,6 +24,29 @@ const (
 // adcs are the four converters the seven microphones arrive on.
 var adcs = []string{"A", "B", "C", "D"}
 
+// routeInputs points every ADC at the differential input its microphones are wired to.
+func routeInputs() {
+	m, err := alsa.OpenMixer(Card)
+	if err != nil {
+		slog.Error("opening the mixer failed", "err", err)
+		return
+	}
+	defer m.Close()
+
+	for _, adc := range adcs {
+		for name, v := range map[string]uint32{
+			fmt.Sprintf("ADC_%s DIF1_L Input Gain", adc):                          0,
+			fmt.Sprintf("ADC_%s DIF1_R Input Gain", adc):                          0,
+			fmt.Sprintf("ADC_%[1]s Left Ip Select ADC_%[1]s DIF1_L switch", adc):  1,
+			fmt.Sprintf("ADC_%[1]s Right Ip Select ADC_%[1]s DIF1_R switch", adc): 1,
+		} {
+			if err := m.SetInt(name, v); err != nil {
+				slog.Error("routing the microphone input failed", "control", name, "err", err)
+			}
+		}
+	}
+}
+
 // applyGain sets the analog gain on every ADC. A microphone that cannot be turned up is worth a log
 // and nothing more: the array still works, quietly.
 func applyGain(db int) {

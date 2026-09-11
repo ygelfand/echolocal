@@ -29,7 +29,6 @@ func newRoot() *cobra.Command {
 	cobra.OnInitialize(initConfig)
 
 	root.AddCommand(newInstallCmd())
-	root.AddCommand(newUninstallCmd())
 	root.AddCommand(newWifiCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newRestartCmd())

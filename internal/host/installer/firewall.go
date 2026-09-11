@@ -67,25 +67,3 @@ func applyFirewallRule(d *device.Device) error {
 	_, err := d.Shell("iptables -A " + rule)
 	return err
 }
-
-// removeFirewallHook is the uninstall counterpart: delete the file and drop the live rule.
-func removeFirewallHook(r *run) (string, bool, error) {
-	have, err := r.d.Exists(layout.FirewallHook)
-	if err != nil {
-		return "", false, err
-	}
-	if !have {
-		return "nothing to remove", true, nil
-	}
-	if _, err := r.d.Shell("rm -f " + layout.FirewallHook); err != nil {
-		return "", false, err
-	}
-
-	rule := fmt.Sprintf("INPUT -i wlan0 -p tcp --dport %d -j ACCEPT", layout.Port)
-	if _, code, err := r.d.ShellCode("iptables -C " + rule); err == nil && code == 0 {
-		if _, err := r.d.Shell("iptables -D " + rule); err != nil {
-			return "", false, err
-		}
-	}
-	return layout.FirewallHook, false, nil
-}

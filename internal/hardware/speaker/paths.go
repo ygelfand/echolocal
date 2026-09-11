@@ -48,6 +48,8 @@ var speakerEQ = []byte{
 
 var pathSequence = map[Output][]kctl{
 	OutputSpeaker: {
+		{name: "HPL Output Mixer L_DAC Switch", level: 1},
+		{name: "HPR Output Mixer R_DAC Switch", level: 1},
 		{name: "Audio_DacMux_Setting", value: "Off"},
 		{name: "Right Channel Only", value: "On"},
 		{name: driverGain, level: 10},

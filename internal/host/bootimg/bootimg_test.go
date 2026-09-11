@@ -17,11 +17,11 @@ func made(size int64, cmdline string) ([]byte, Image) {
 
 	sum := sha256.Sum256(data)
 	return data, Image{
-		SHA256:   hex.EncodeToString(sum[:]),
-		Size:     size,
-		Cmdline:  "androidboot.selinux=permissive",
-		Firmware: []string{"272.6.8.0"},
-		Device:   "biscuit",
+		SHA256:  hex.EncodeToString(sum[:]),
+		Size:    size,
+		Cmdline: "androidboot.selinux=permissive",
+		Build:   13121734532,
+		Device:  "biscuit_puffin",
 	}
 }
 
@@ -81,36 +81,40 @@ func TestVerifyRefusesAnEnforcingCmdline(t *testing.T) {
 	}
 }
 
-func TestSupports(t *testing.T) {
+// The device is the half that refuses. A build this image was never tested on is installable, since
+// Amazon ships new ones and waiting for a release here would leave them uninstallable.
+func TestSupportsRefusesTheDeviceAndOnlyRemarksOnTheBuild(t *testing.T) {
 	_, img := made(4096, "androidboot.selinux=permissive")
 
 	for _, tc := range []struct {
-		device, build string
-		ok            bool
+		device, build       string
+		ok, sayingSomething bool
 	}{
-		{"biscuit", "272.6.8.0_user_680767620", true},
-		{"biscuit", "272.6.8.0", true},
-		{"biscuit", "272.6.9.0_user_1", false},
-		{"biscuit", "", false},
-		{"tank", "272.6.8.0_user_680767620", false},
+		{"biscuit_puffin", "13121734532", true, false},
+		{"biscuit_puffin", "13121734533", true, true},
+		{"biscuit_puffin", "13121734531", true, false},
+		{"biscuit_puffin", "", true, true},
+		{"biscuit_puffin", "272.6.8.0_user_680767620", true, true},
+		{"biscuit", "13121734532", false, false},
+		{"tank", "13121734532", false, false},
 	} {
-		err := img.Supports(tc.device, tc.build)
+		said, err := img.Supports(tc.device, tc.build)
 		if (err == nil) != tc.ok {
 			t.Errorf("Supports(%q, %q) = %v, want ok=%t", tc.device, tc.build, err, tc.ok)
+		}
+		if err == nil && (said != "") != tc.sayingSomething {
+			t.Errorf("Supports(%q, %q) said %q, want anything=%t", tc.device, tc.build, said, tc.sayingSomething)
 		}
 	}
 }
 
-func TestFirmwareDropsTheBuildIdentifier(t *testing.T) {
-	for build, want := range map[string]string{
-		"272.6.8.0_user_680767620": "272.6.8.0",
-		"272.6.8.0":                "272.6.8.0",
-		"":                         "",
-		"_only_suffix":             "",
-	} {
-		if got := Firmware(build); got != want {
-			t.Errorf("Firmware(%q) = %q, want %q", build, got, want)
-		}
+// A device that names no slot has no partition to write, and "boot" on its own is not one here.
+func TestPartitionIsTheSlot(t *testing.T) {
+	if got := Partition("_b"); got != "boot_b" {
+		t.Errorf("Partition(_b) = %q", got)
+	}
+	if got := Node("_a"); got != ByName+"boot_a" {
+		t.Errorf("Node(_a) = %q", got)
 	}
 }
 
@@ -133,15 +137,12 @@ func TestOursFitsHowItIsWritten(t *testing.T) {
 	if Ours.Size >= PartitionSize {
 		t.Errorf("image is %d bytes and the partition is %d", Ours.Size, PartitionSize)
 	}
-	if !strings.HasSuffix(Partition, "_x") {
-		t.Errorf("target partition is %q: only the _x names mean the same thing to the bootloader and the kernel", Partition)
-	}
 }
 
 // The shipped image is committed, so this always runs: it is what keeps the table and the file from
 // drifting apart, and a missing image means a build that cannot produce a release.
 func TestShippedImageIsWhatWeSayItIs(t *testing.T) {
-	const path = "../../../images/echolocal-boot.img"
+	const path = "../assets/boot.img"
 
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -2,17 +2,17 @@ package update
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"time"
 )
 
 // Manifest is what a release says about itself, and the only thing a device reads to decide there is
-// something newer. It is written by the release build and served beside the binary it describes.
+// something newer. It is written by the release build and served beside the binaries it describes.
 //
 // The device does not compare versions: Home Assistant does that, with a parser that forces the update
 // card permanently on for anything it cannot rank. So Version has to stay something AwesomeVersion can
@@ -23,17 +23,33 @@ type Manifest struct {
 	// running.
 	Version string `json:"version"`
 
-	// URL is the binary. SHA256 and Size are its own, and both are checked before anything is written:
-	// a length that matches proves nothing, and neither proves the file came from us, which is what
-	// signing is for.
+	// URL, SHA256 and Size are the arm64 build. An echod that reads only these is arm64 by
+	// construction, and they are its only route onto a newer build.
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
+
+	// Binaries is keyed by the Go architecture each build targets.
+	Binaries map[string]Binary `json:"binaries"`
 
 	Title      string `json:"title,omitempty"`
 	Notes      string `json:"notes,omitempty"`
 	ReleaseURL string `json:"release_url,omitempty"`
 }
+
+// Binary is one build of a release. SHA256 and Size are both checked before anything is written: a
+// length that matches proves nothing, and neither proves the file came from us, which is what signing
+// is for.
+type Binary struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+}
+
+const flatArch = "arm64"
+
+// arch is a variable so a test can stand somewhere other than the machine it runs on.
+var arch = runtime.GOARCH
 
 // manifestTimeout bounds the fetch. Home Assistant asks for this on connect and after every selection
 // change, so it has to fail quickly rather than hold up a configuration reply.
@@ -44,7 +60,7 @@ const manifestTimeout = 10 * time.Second
 const maxManifest = 64 << 10
 
 // Fetch reads the channel's manifest and checks that it describes something installable. A manifest
-// that arrives without a version or without somewhere to fetch the binary from is a broken release, and
+// that arrives without a version or without somewhere to fetch a binary from is a broken release, and
 // saying so here is better than failing half way through an install.
 func Fetch(ctx context.Context, c Channel) (Manifest, error) {
 	var m Manifest
@@ -74,31 +90,53 @@ func Fetch(ctx context.Context, c Channel) (Manifest, error) {
 	return m, m.Valid()
 }
 
+func (m Manifest) flat() Binary {
+	return Binary{URL: m.URL, SHA256: m.SHA256, Size: m.Size}
+}
+
 // Valid reports whether the manifest describes something installable, which is checked both where one
-// is written and where one is read.
+// is written and where one is read. It does not ask whether this device is served — For does that.
 func (m Manifest) Valid() error {
-	switch {
-	case m.Version == "":
-		return fmt.Errorf("update: the manifest names no version")
-	case m.URL == "":
-		return fmt.Errorf("update: the manifest for %s has no url", m.Version)
-	case len(m.SHA256) != 64:
-		return fmt.Errorf("update: the manifest for %s has no usable sha256", m.Version)
-	case m.Size <= 0:
-		return fmt.Errorf("update: the manifest for %s gives no size", m.Version)
+	if m.Version == "" {
+		return errors.New("update: the manifest names no version")
+	}
+
+	if flat := m.flat(); flat != (Binary{}) {
+		if err := flat.valid(m.Version, flatArch); err != nil {
+			return err
+		}
+	} else if len(m.Binaries) == 0 {
+		return fmt.Errorf("update: the manifest for %s carries no binaries", m.Version)
+	}
+
+	for a, b := range m.Binaries {
+		if err := b.valid(m.Version, a); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// Matches reports whether these bytes are what the manifest described. Size is checked first because a
-// truncated download is the common failure and saying so is more use than a hash mismatch.
-func (m Manifest) Matches(data []byte) error {
-	if int64(len(data)) != m.Size {
-		return fmt.Errorf("update: %d bytes, offered as %d", len(data), m.Size)
-	}
-	sum := sha256.Sum256(data)
-	if got := hex.EncodeToString(sum[:]); got != m.SHA256 {
-		return fmt.Errorf("update: hash %s, offered as %s", got, m.SHA256)
+func (b Binary) valid(version, arch string) error {
+	switch {
+	case b.URL == "":
+		return fmt.Errorf("update: the %s binary for %s has no url", arch, version)
+	case len(b.SHA256) != 64:
+		return fmt.Errorf("update: the %s binary for %s has no usable sha256", arch, version)
+	case b.Size <= 0:
+		return fmt.Errorf("update: the %s binary for %s gives no size", arch, version)
 	}
 	return nil
+}
+
+// For is the build a device of this architecture may install. A manifest carrying only the top-level
+// fields answers for arm64.
+func (m Manifest) For(arch string) (Binary, error) {
+	if b, ok := m.Binaries[arch]; ok {
+		return b, nil
+	}
+	if len(m.Binaries) == 0 && arch == flatArch {
+		return m.flat(), nil
+	}
+	return Binary{}, fmt.Errorf("update: %s carries no %s binary", m.Version, arch)
 }

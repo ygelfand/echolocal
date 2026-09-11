@@ -13,46 +13,52 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ygelfand/echolocal/internal/update"
 )
 
 func main() {
 	var (
-		m    update.Manifest
-		file = flag.String("file", "", "the binary this release ships, hashed and measured")
-		out  = flag.String("out", "", "where to write the manifest, or stdout")
+		m update.Manifest
+
+		from  = flag.String("from", "", "where this release's assets can be fetched from")
+		arm64 = flag.String("arm64", "", "the arm64 build, hashed and measured")
+		arm   = flag.String("arm", "", "the arm build, hashed and measured")
+		out   = flag.String("out", "", "where to write the manifest, or stdout")
 	)
 	flag.StringVar(&m.Version, "version", "", "version as Home Assistant will compare it")
-	flag.StringVar(&m.URL, "url", "", "where the binary can be fetched from")
 	flag.StringVar(&m.Title, "title", "", "title for Home Assistant's update card")
 	flag.StringVar(&m.Notes, "notes", "", "release notes, shown on the card")
 	flag.StringVar(&m.ReleaseURL, "release-url", "", "what the card's link points at")
 	flag.Parse()
 
-	if err := run(m, *file, *out); err != nil {
+	if err := run(m, *from, map[string]string{"arm64": *arm64, "arm": *arm}, *out); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(m update.Manifest, file, out string) error {
-	if m.Version == "" || m.URL == "" || file == "" {
-		return fmt.Errorf("mkmanifest: -version, -url and -file are all required")
+func run(m update.Manifest, from string, builds map[string]string, out string) error {
+	if m.Version == "" || from == "" || builds["arm64"] == "" {
+		return fmt.Errorf("mkmanifest: -version, -from and -arm64 are all required")
 	}
 
-	f, err := os.Open(file)
-	if err != nil {
-		return err
+	m.Binaries = make(map[string]update.Binary, len(builds))
+	for arch, path := range builds {
+		if path == "" {
+			continue
+		}
+		b, err := measure(path)
+		if err != nil {
+			return err
+		}
+		b.URL = from + "/" + filepath.Base(path)
+		m.Binaries[arch] = b
 	}
-	defer f.Close()
 
-	sum := sha256.New()
-	size, err := io.Copy(sum, f)
-	if err != nil {
-		return err
-	}
-	m.Size, m.SHA256 = size, hex.EncodeToString(sum.Sum(nil))
+	arm64 := m.Binaries["arm64"]
+	m.URL, m.SHA256, m.Size = arm64.URL, arm64.SHA256, arm64.Size
 
 	// The same rules the device applies, so a release cannot publish a manifest every device will reject.
 	if err := m.Valid(); err != nil {
@@ -70,4 +76,20 @@ func run(m update.Manifest, file, out string) error {
 		return err
 	}
 	return os.WriteFile(out, encoded, 0o644)
+}
+
+// measure is what a device checks its download against, taken from the file the release will upload.
+func measure(path string) (update.Binary, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return update.Binary{}, err
+	}
+	defer f.Close()
+
+	sum := sha256.New()
+	size, err := io.Copy(sum, f)
+	if err != nil {
+		return update.Binary{}, err
+	}
+	return update.Binary{SHA256: hex.EncodeToString(sum.Sum(nil)), Size: size}, nil
 }

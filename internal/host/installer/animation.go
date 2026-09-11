@@ -70,26 +70,3 @@ func stubScript(r *run, path string) (bool, error) {
 	}
 	return true, r.d.Chcon(layout.OurLabel, path)
 }
-
-// restoreBootAnimation is the uninstall counterpart.
-func restoreBootAnimation(r *run) (string, bool, error) {
-	var done []string
-	for _, path := range layout.AnimationScripts {
-		backup := path + layout.BackupSuffix
-		saved, err := r.d.Exists(backup)
-		if err != nil {
-			return "", false, err
-		}
-		if !saved {
-			continue
-		}
-		if _, err := r.d.Shell(fmt.Sprintf("mv %s %s", backup, path)); err != nil {
-			return "", false, err
-		}
-		done = append(done, path)
-	}
-	if len(done) == 0 {
-		return "nothing to restore", true, nil
-	}
-	return strings.Join(done, ", "), false, nil
-}

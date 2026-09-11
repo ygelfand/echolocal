@@ -1,10 +1,8 @@
 // Package bootimg identifies the boot image echod needs and the devices it may be written to.
 //
-// echod cannot run on a stock boot image. In init's domain, socket creation is denied silently — a
-// dontaudit rule hides the AVC — so the ESPHome listener fails with EACCES, and only permissive
-// fixes it. The image we ship carries androidboot.selinux=permissive on its kernel cmdline, and it
-// also carries an adbd that honours ro.secure=0, which is what makes adb root work afterwards.
-// Amazon's own adbd drops privileges regardless of that property.
+// The image we ship carries androidboot.selinux=permissive on its kernel cmdline, which is what makes
+// a build that honours it permissive. A user build's init compiles that check out, and there the flash
+// stage's patches to the system partition are what do it.
 package bootimg
 
 import (
@@ -12,24 +10,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"slices"
+	"strconv"
 	"strings"
 )
 
-// Partition is the only partition that may be written, and the size it must measure.
-//
-// The name matters more than it looks. On this firmware the amonet bootloader and the kernel disagree
-// about names: to fastboot, boot_a is a 110 MB partition, while to the kernel boot_a is the 16 MB one.
-// Only the _x form means the same partition to both, so that is the only name used here, and the size
-// is asserted before writing in case a name ever resolves somewhere else.
-const (
-	Partition = "boot_a_x"
-	Node      = "/dev/block/bootdevice/by-name/" + Partition
+// ByName is where partitions are named rather than numbered.
+const ByName = "/dev/block/platform/bootdevice/by-name/"
 
-	// PartitionSize is what boot_a_x measures on a biscuit. A resolved node of 115343360 bytes is an
-	// amonet partition and must never be written with a boot image.
-	PartitionSize = 16777216
-)
+// PartitionSize is what a boot slot measures, asserted before writing in case a name ever resolves
+// somewhere else. Writing a boot image into a partition of another size is how a device stops booting.
+const PartitionSize = 16777216
+
+// Partition is the boot slot for a slot suffix, which is ro.boot.slot_suffix: the slot the device is
+// running, and so the one that has to carry the image for the next boot to use it.
+func Partition(slot string) string { return "boot" + slot }
+
+// Node is that partition's device node.
+func Node(slot string) string { return ByName + Partition(slot) }
 
 // Image is the boot image we ship, and what a device has to be for it to fit.
 type Image struct {
@@ -42,13 +39,10 @@ type Image struct {
 	// exists rather than an incidental property.
 	Cmdline string
 
-	// Firmware are the Fire OS versions the image is known good on, matched against the leading
-	// version of ro.build.version.incremental.
-	//
-	// The whole property reads like 272.6.8.0_user_680767620, and only the version in front is worth
-	// comparing: what follows is a build identifier that says nothing about whether this ramdisk
-	// belongs on that system partition, and pinning it would refuse devices for no reason.
-	Firmware []string
+	// Build is ro.build.version.incremental as it read on the firmware this image was tested against.
+	// A device on a later one is said so and carried on with: Amazon ships new builds, and refusing
+	// them would leave every one needing a release here before it could be installed at all.
+	Build int64
 
 	// Device is the ro.product.device it belongs to.
 	Device string
@@ -57,15 +51,13 @@ type Image struct {
 // Ours describes images/echolocal-boot.img.
 //
 // Its ramdisk keeps MTK section headers, so anything unpacking it has to skip the 512-byte ROOTFS
-// header before the gzip. Its sepolicy differs from what is on a stock biscuit, which does not matter
-// while the device runs permissive but does mean this is a separate build rather than a stock image
-// with a patched cmdline: 7621064 of its 7696384 bytes differ from the boot partition it replaces.
+// header before the gzip.
 var Ours = Image{
-	SHA256:   "373727a90314328ede65585103552c2d0e2908ac43a1a596f9650421fa0700ab",
-	Size:     7696384,
-	Cmdline:  "androidboot.selinux=permissive",
-	Firmware: []string{"272.6.8.0"},
-	Device:   "biscuit",
+	SHA256:  "7f12e1522211d2e1adfc0164a5c2381b8819f44099732bf919b12c23e41e7dd1",
+	Size:    9678848,
+	Cmdline: "androidboot.selinux=permissive",
+	Build:   13121734532,
+	Device:  "biscuit_puffin",
 }
 
 // magic is what every Android boot image starts with.
@@ -99,27 +91,24 @@ func (i Image) Verify(from string, data []byte) error {
 	return nil
 }
 
-// Supports reports whether the image belongs on a device. Both the device and the firmware version
-// are checked, because the ramdisk pairs with a particular system partition — the right image on the
-// wrong firmware boots someone else's ramdisk against this system.
+// Supports reports whether the image belongs on a device, and what is worth saying about one it was
+// never tested against. The device is refused outright, since the ramdisk pairs with a particular
+// system partition; a later build is only remarked on.
 //
-// build is ro.build.version.incremental, of which only the leading version is compared.
-func (i Image) Supports(device, build string) error {
+// build is ro.build.version.incremental.
+func (i Image) Supports(device, build string) (string, error) {
 	if device != i.Device {
-		return fmt.Errorf("bootimg: this is a %s image and the device is %q", i.Device, device)
+		return "", fmt.Errorf("bootimg: this is a %s image and the device is %q", i.Device, device)
 	}
-	if firmware := Firmware(build); !slices.Contains(i.Firmware, firmware) {
-		return fmt.Errorf("bootimg: firmware %q is not one this image is known good on (%v)",
-			firmware, i.Firmware)
-	}
-	return nil
-}
 
-// Firmware is the Fire OS version in a ro.build.version.incremental value, without the build
-// identifier that follows it.
-func Firmware(build string) string {
-	version, _, _ := strings.Cut(build, "_")
-	return version
+	on, err := strconv.ParseInt(strings.TrimSpace(build), 10, 64)
+	if err != nil {
+		return fmt.Sprintf("build %q cannot be ranked against the %d this image was tested on", build, i.Build), nil
+	}
+	if on > i.Build {
+		return fmt.Sprintf("build %d is newer than the %d this image was tested on", on, i.Build), nil
+	}
+	return "", nil
 }
 
 // Cmdline is the kernel command line stored in a boot image header.

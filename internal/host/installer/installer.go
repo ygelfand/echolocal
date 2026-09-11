@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ygelfand/echolocal/internal/android/services"
 	"github.com/ygelfand/echolocal/internal/host/device"
 	"github.com/ygelfand/echolocal/internal/layout"
 )
@@ -66,12 +65,13 @@ type step struct {
 
 var steps = []step{
 	{"check device", checkDevice},
-	{"hide Amazon packages", hidePackages},
-	{"gate Amazon init services", gateProps},
 	{"device name", installName},
 	{"encryption key", installKey},
 	{"default wake words", installModels},
+	{"selinux permissive", checkPermissive},
 	{"remount /system rw", remountRW},
+	{"stop and disable Amazon services", deAmazon},
+	{"clear the saved usb config", clearUSBConfig},
 	{"install echod", installBinary},
 	{"back up stock ledcontroller", backupService},
 	{"take over ledcontroller service", takeOverService},
@@ -85,17 +85,6 @@ var steps = []step{
 var restartSteps = []step{
 	{"stop echod", stopService},
 	{"start echod", startService},
-}
-
-var uninstallSteps = []step{
-	{"stop echod", stopService},
-	{"remount /system rw", remountRW},
-	{"close the API port", removeFirewallHook},
-	{"restore the boot animation", restoreBootAnimation},
-	{"restore stock ledcontroller", restoreService},
-	{"remove echod", removeBinary},
-	{"remount /system ro", remountRO},
-	{"start ledcontroller", startStock},
 }
 
 type run struct {
@@ -138,20 +127,12 @@ func FlashBoot(ctx context.Context, d *device.Device, cfg Config, report Reporte
 	return execute(ctx, flashSteps, &run{d: d, cfg: cfg, ctx: ctx}, report)
 }
 
-// Uninstall puts Amazon's ledcontroller back and removes echod.
-func Uninstall(ctx context.Context, d *device.Device, report Reporter) error {
-	return execute(ctx, uninstallSteps, &run{d: d}, report)
-}
-
 // Restart cycles echod through init.
 func Restart(ctx context.Context, d *device.Device, report Reporter) error {
 	return execute(ctx, restartSteps, &run{d: d}, report)
 }
 
 func execute(ctx context.Context, steps []step, r *run, report Reporter) error {
-	// A failure part way through must not leave /system writable.
-	defer func() { _, _ = r.d.Shell("mount -o remount,ro /system") }()
-
 	for i, s := range steps {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -184,16 +165,39 @@ func checkDevice(r *run) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	if sdk != "22" {
-		return "", false, fmt.Errorf("device reports SDK %s, want 22", sdk)
+	// Fire OS 6 is Android 7.1, SDK 25. Fire OS 5 devices are SDK 22 and are not installed to any more:
+	// the image, the partition layout and the binary all differ, and an older release still does it.
+	if sdk != "25" {
+		return "", false, fmt.Errorf("device reports SDK %s, want 25 (Fire OS 6); Fire OS 5 needs echoctl 0.0.6 or earlier", sdk)
 	}
 	model, _ := r.d.Getprop("ro.product.device")
 	return fmt.Sprintf("%s, SDK %s, %s", model, sdk, r.d.Serial()), false, nil
 }
 
+// checkPermissive refuses a device that did not boot permissive. Setting it here would hide a flash
+// that did not take: writing to rootfs needs it, and so does every boot after this one.
+func checkPermissive(r *run) (string, bool, error) {
+	mode, err := r.d.Shell("getenforce")
+	if err != nil {
+		return "", false, err
+	}
+	if mode = strings.TrimSpace(mode); !strings.EqualFold(mode, "permissive") {
+		return "", false, fmt.Errorf("selinux is %s, want permissive", mode)
+	}
+	return mode, false, nil
+}
+
 func remountRW(r *run) (string, bool, error) {
-	_, err := r.d.Shell("mount -o remount,rw /system")
-	return "", false, err
+	return "", false, r.d.Remount()
+}
+
+// remountRO puts the system partition back. adb only remounts one way, and no mount(8) on the device
+// can do it, so this goes through the binary we just installed.
+func remountRO(r *run) (string, bool, error) {
+	// Every invocation of echod brings its components up and says so on stderr, which would land in
+	// the middle of the progress display.
+	out, err := r.d.Shell(layout.Binary + " tools remount ro 2>/dev/null")
+	return strings.TrimSpace(out), false, err
 }
 
 func installBinary(r *run) (string, bool, error) {
@@ -287,45 +291,6 @@ func stopService(r *run) (string, bool, error) {
 	return "", false, fmt.Errorf("service is %q 10s after ctl.stop, want stopped", state)
 }
 
-func remountRO(r *run) (string, bool, error) {
-	_, err := r.d.Shell("mount -o remount,ro /system")
-	return "", false, err
-}
-
-// hidePackages releases the hardware echod needs: Amazon's audio clients keep mediaserver
-// holding the PCM devices, and one of them owns the mute button. It runs before anything
-// touches /system, so a failure here leaves the filesystem untouched.
-func hidePackages(r *run) (string, bool, error) {
-	hid, stopped, err := services.Hide(r.d)
-	if err != nil {
-		return "", false, err
-	}
-	if len(hid) == 0 && len(stopped) == 0 {
-		return fmt.Sprintf("%d already hidden, none running", len(services.Hidden)), true, nil
-	}
-
-	// A package that was running has been stopped, but nothing here stops it from being started again
-	// by whatever asked for it last. A boot with it hidden from the start is the state we are after.
-	r.reboot = true
-	return fmt.Sprintf("hid %d of %d, stopped %d", len(hid), len(services.Hidden), len(stopped)), false, nil
-}
-
-// gateProps stops init from starting the vendor services that hiding a package leaves stranded.
-// The properties persist, so this lands on the next boot rather than now.
-func gateProps(r *run) (string, bool, error) {
-	changed, err := services.Gate(r.d)
-	if err != nil {
-		return "", false, err
-	}
-	if len(changed) == 0 {
-		return fmt.Sprintf("%d already set", len(services.Gated)), true, nil
-	}
-
-	// init reads these when it starts a service, so nothing changes for the services already running.
-	r.reboot = true
-	return fmt.Sprintf("set %d of %d, effective next boot", len(changed), len(services.Gated)), false, nil
-}
-
 // startService hands control back to init and waits for echod to report itself, since
 // ctl.start returns before the process has run. echod publishes its start as an uptime, which
 // only moves forward within a boot, so a changed value means this run rather than the last.
@@ -350,70 +315,4 @@ func startService(r *run) (string, bool, error) {
 
 	state, _ := r.d.Getprop("init.svc." + layout.ServiceName)
 	return "", false, fmt.Errorf("echod did not report a start within 10s (init.svc.%s=%s)", layout.ServiceName, state)
-}
-
-// restoreService refuses to run without the backup: removing our symlink without putting the
-// stock binary back would leave init with a service definition pointing at nothing.
-func restoreService(r *run) (string, bool, error) {
-	have, err := r.d.Exists(layout.Backup)
-	if err != nil {
-		return "", false, err
-	}
-	if !have {
-		link, err := r.d.IsSymlink(layout.Service)
-		if err != nil {
-			return "", false, err
-		}
-		if !link {
-			return "not installed", true, nil
-		}
-		return "", false, fmt.Errorf("%s is missing; restore it before uninstalling", layout.Backup)
-	}
-
-	if _, err := r.d.Shell(fmt.Sprintf("rm -f %s && mv %s %s", layout.Service, layout.Backup, layout.Service)); err != nil {
-		return "", false, err
-	}
-
-	// mv preserves the label, so this confirms rather than fixes.
-	label, err := r.d.Label(layout.Service)
-	if err != nil {
-		return "", false, err
-	}
-	if label != layout.StockLabel {
-		if err := r.d.Chcon(layout.StockLabel, layout.Service); err != nil {
-			return "", false, err
-		}
-		return "relabelled to " + layout.StockLabel, false, nil
-	}
-	return label, false, nil
-}
-
-func removeBinary(r *run) (string, bool, error) {
-	have, err := r.d.Exists(layout.Dir)
-	if err != nil {
-		return "", false, err
-	}
-	if !have {
-		return "nothing to remove", true, nil
-	}
-	_, err = r.d.Shell("rm -rf " + layout.Dir)
-	return layout.Dir, false, err
-}
-
-func startStock(r *run) (string, bool, error) {
-	if err := r.d.Setprop("ctl.start", layout.ServiceName); err != nil {
-		return "", false, err
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		state, err := r.d.Getprop("init.svc." + layout.ServiceName)
-		if err != nil {
-			return "", false, err
-		}
-		if state == "running" {
-			return state, false, nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return "", false, errors.New("stock ledcontroller did not start")
 }
