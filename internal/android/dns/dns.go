@@ -12,13 +12,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/ygelfand/echolocal/internal/android/prop"
 )
 
-var props = []string{"net.dns1", "net.dns2", "net.dns3", "net.dns4"}
+// dhcpcd's hook sets the dhcp ones from the lease. Promoting them to net.dns is the framework's job,
+// and there is no framework here.
+var props = []string{
+	"net.dns1", "net.dns2", "net.dns3", "net.dns4",
+	"dhcp.wlan0.dns1", "dhcp.wlan0.dns2", "dhcp.wlan0.dns3", "dhcp.wlan0.dns4",
+}
 
 const (
 	// timeout bounds one lookup, short enough that a nameserver which is not answering falls through to
@@ -77,9 +83,11 @@ func nameservers() []string {
 
 	var out []string
 	for _, name := range props {
-		if v, err := prop.Get(name); err == nil && v != "" {
-			out = append(out, v)
+		v, err := prop.Get(name)
+		if err != nil || v == "" || slices.Contains(out, v) {
+			continue
 		}
+		out = append(out, v)
 	}
 
 	cached, read = out, time.Now()

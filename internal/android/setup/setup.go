@@ -83,7 +83,18 @@ var Actions = []Action{
 		Reason: "there is no /etc/resolv.conf, so Go's resolver has nowhere to look",
 		Do:     func() error { dns.Use(); return nil },
 	},
+	{
+		Name:   "point the verifier at the platform's root certificates",
+		Reason: "crypto/x509 reads the Android store only in a GOOS=android build, and this one is linux",
+		// SSL_CERT_DIR replaces the directories crypto/x509 scans, never the files it reads, so a device
+		// carrying /etc/ssl/certs/ca-certificates.crt keeps every root it already had.
+		Do: func() error { return os.Setenv("SSL_CERT_DIR", certDirs) },
+	},
 }
+
+// certDirs are the directories a GOOS=android build would have scanned: the platform's roots, and any
+// the user added.
+const certDirs = "/system/etc/security/cacerts:/data/misc/keychain/certs-added"
 
 // Late is applied once Android reports the boot finished, for the services init starts from that
 // and no earlier. A stop sent before then is undone by the start that follows it.

@@ -1,7 +1,7 @@
 // Package mute is the microphone mute: the switch in Home Assistant, the button on top of the
 // device, and what the ring shows while the microphones are cut.
 //
-// The pin is a real cut rather than a software flag, so muted here means the microphones are
+// The cut is real rather than a software flag, so muted here means the microphones are
 // disconnected. Home Assistant asks for a state, the button asks for the other one, and start-up
 // asks for whatever was stored — they move the line differently and then want exactly the same
 // things to follow, so they share settled.
@@ -10,14 +10,15 @@ package mute
 import (
 	"log/slog"
 	"sync"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
-	"github.com/ygelfand/echolocal/internal/hardware/gpio"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
+	"github.com/ygelfand/echolocal/internal/hardware/privacy"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 )
 
@@ -25,7 +26,7 @@ func init() {
 	component.Register(component.Device, Get(), component.Order(30))
 }
 
-// The two levels the mute LED has. The pin is a plain GPIO, so there is nothing between them.
+// The two levels the mute LED has. Neither way of reaching it offers anything between them.
 const (
 	dim    = "Dim"
 	bright = "Bright"
@@ -39,8 +40,8 @@ var mutedColor = led.Color{R: 0xC0, G: 0x00, B: 0x00}
 type Mute struct {
 	sw         *esphome.Switch
 	brightness *esphome.Select
-	line       *gpio.Mute
-	led        *gpio.MuteLED
+	line       privacy.Mute
+	led        privacy.LED
 
 	// ring is the animation to show while the microphones are cut, and claim is where it goes. The
 	// select lives here rather than with the other settings because choosing one has to take effect
@@ -98,10 +99,10 @@ func build() *Mute {
 	m.brightness.OnCommand = m.setBrightness
 
 	var err error
-	if m.line, err = gpio.Microphone(); err != nil {
+	if m.line, err = privacy.Microphone(); err != nil {
 		slog.Error("mute unavailable", "err", err)
 	}
-	if m.led, err = gpio.LED(); err != nil {
+	if m.led, err = privacy.Light(); err != nil {
 		slog.Error("mute LED unavailable", "err", err)
 	}
 
@@ -126,7 +127,7 @@ func (m *Mute) Muted() (bool, error) {
 
 // Restore cuts the microphones if they were cut when the device was last on. The line does not
 // survive a reboot, so what was stored is applied rather than read — and it is the line that
-// decides, so a device whose GPIO cannot be reached comes up live and says so rather than claiming
+// decides, so a device whose mute cannot be reached comes up live and says so rather than claiming
 // to be muted.
 func (m *Mute) Restore(c config.Config) {
 	if m.line == nil {
@@ -166,14 +167,17 @@ func (m *Mute) Set(muted bool) {
 	m.settled(true)
 }
 
-// Toggle is the button on top of the device.
+// Toggle is the button on top of the device. Where the hardware has already acted on the press, the
+// press is only news: what follows is the same either way.
 func (m *Mute) Toggle() {
 	if m.line == nil {
 		return
 	}
-	if _, err := m.line.Toggle(); err != nil {
-		slog.Error("toggling mute failed", "err", err)
-		return
+	if !m.line.HardwareToggles() {
+		if _, err := m.line.Toggle(); err != nil {
+			slog.Error("toggling mute failed", "err", err)
+			return
+		}
 	}
 	m.settled(true)
 }
@@ -195,6 +199,10 @@ func (m *Mute) pressed(e buttons.Event) {
 // settled publishes what the line now reads — not what was asked for, so a line that did not move
 // says so — and shows it on the ring. asked is false at start-up, where nobody asked.
 func (m *Mute) settled(asked bool) {
+	if asked {
+		m.await(m.sw.Get())
+	}
+
 	muted, err := m.line.Get()
 	if err != nil {
 		slog.Error("reading mute state failed", "err", err)
@@ -218,6 +226,21 @@ func (m *Mute) settled(asked bool) {
 		return
 	}
 	speaker.Sound().Chime(speaker.ToneUnmute)
+}
+
+// pollInterval is how often await looks while it waits.
+const pollInterval = 25 * time.Millisecond
+
+// await gives the hardware the time it says it needs to leave from, so what gets published is where
+// the microphones ended up rather than where they were. It returns as soon as they have moved, and
+// gives up quietly: a request that changed nothing is not an error.
+func (m *Mute) await(from bool) {
+	for waited := time.Duration(0); waited < m.line.Lag(); waited += pollInterval {
+		if is, err := m.line.Get(); err != nil || is != from {
+			return
+		}
+		time.Sleep(pollInterval)
+	}
 }
 
 // show puts an animation on the ring for as long as the microphones are cut, or takes it off. Unlike

@@ -5,15 +5,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/hardware/gpio"
+	"github.com/ygelfand/echolocal/internal/hardware/privacy"
 )
 
 func newMuteCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "mute [on|off|toggle]",
 		Short: "Read or set the hardware microphone mute",
-		Long: "Drives MTK pin 87 (gpio444), the line Amazon's firmware uses to cut the mics and\n" +
-			"light the mute button. With no argument, reports the current state.\n\n" +
+		Long: "Cuts the microphones the way this device allows: MTK pin 87 (gpio444) where that line\n" +
+			"is free, and the keypad driver's privacy interface where it is not. With no argument,\n" +
+			"reports the current state.\n\n" +
 			"The cut is physical: muted capture measures below the room noise floor, not merely\n" +
 			"below speech. It needs none of Amazon's services, so it keeps working after\n" +
 			"de-Amazoning — and a muted unit stays recoverable, which it would not be if we\n" +
@@ -22,7 +23,7 @@ func newMuteCmd() *cobra.Command {
 			"can mute can also unmute.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m, err := gpio.NewMute()
+			m, err := privacy.Microphone()
 			if err != nil {
 				return err
 			}
