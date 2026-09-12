@@ -46,6 +46,10 @@ const (
 	driftBand  = speaker.Rate / 2000
 	snapBand   = speaker.Rate / 100
 	tailFrames = int64(speaker.HardwareTail * speaker.Rate / time.Second)
+
+	// maxSnap is the largest correction that can be one, above which the anchor predates a change of
+	// clock rather than having drifted.
+	maxSnap = 2 * speaker.Rate
 )
 
 // out places this room's audio by output frame index. Arrival order cannot line two rooms up: a burst
@@ -78,6 +82,9 @@ type out struct {
 	// or dropped (negative) to hold it.
 	drift     float64
 	corrected int64
+
+	// nextReport is the frame the next correction line is due at, one a second.
+	nextReport uint64
 
 	// now stands in for the clock, so a test can hold the server's time still.
 	now func() int64
@@ -184,7 +191,11 @@ func (o *out) frameFor(at int64) uint64 {
 	o.anchored = true
 	o.played = o.frame
 
-	slog.Info("sendspin anchored", "frame", o.frame, "ahead_ms", ahead.Milliseconds())
+	// Both conversions of the same timestamp: ahead_ms goes through local time, lead_ms stays in the
+	// server's frame, and correct() holds the room to the second. They should agree.
+	slog.Info("sendspin anchored", "frame", o.frame, "ahead_ms", ahead.Milliseconds(),
+		"lead_ms", (at-o.clock.ServerMicrosNow())/1000, "written", o.p.Written(),
+		"quality", o.clock.CheckQuality())
 	return o.frame
 }
 
@@ -229,13 +240,42 @@ func (o *out) correct(from uint64) {
 		if o.clock == nil {
 			return
 		}
+		// Without a sync the clock reads the server's timestamps as local ones, decades out, and every
+		// period would re-anchor against an answer it does not have. Hold what is queued: the anchor is
+		// wrong until a sync lands, and the first correction after one puts it right in a single step.
+		if o.clock.CheckQuality() == ssync.QualityLost {
+			return
+		}
 		now = o.clock.ServerMicrosNow
 	}
 
 	// The frame the server clock says should be heard now, against the one that is: the frame being
 	// rendered less the tail it has yet to travel.
 	want := int64(o.frame) + (now()-o.at)*speaker.Rate/1e6
-	o.drift += (float64(int64(from)-tailFrames-want) - o.drift) * driftGain
+
+	// The loop has the hardware tail in it: frames already handed to the card still play at the old
+	// alignment, so a correction at full gain overshoots and the next one swings back. driftGain is
+	// what damps that, and a snap is bounded by it for the same reason.
+	off := float64(int64(from) - tailFrames - want)
+	o.drift += (off - o.drift) * driftGain
+
+	// What the correction is actually looking at, once a second: off should sit near zero and stay
+	// there. Where it does not, these say whether the room, the anchor or the server clock is moving.
+	if from >= o.nextReport {
+		o.nextReport = from + speaker.Rate
+		slog.Info("sendspin correction", "off_ms", int64(off)*1000/speaker.Rate,
+			"drift_ms", int64(o.drift)*1000/speaker.Rate, "from", from, "want", want,
+			"anchor_frame", o.frame, "corrected", o.corrected,
+			"queued_ms", len(o.pcm)/speaker.Channels*1000/speaker.Rate)
+	}
+
+	// Re-anchor rather than snap: the next chunk lays one against the clock the server is using now.
+	if off > maxSnap || off < -maxSnap {
+		slog.Warn("sendspin re-anchoring", "off_s", int64(off)/speaker.Rate)
+		o.anchored = false
+		o.drift = 0
+		return
+	}
 
 	switch {
 	case o.drift > snapBand:

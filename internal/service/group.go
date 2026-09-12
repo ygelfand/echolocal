@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -121,6 +122,20 @@ func (g *Group) stop(started []*entry, wg *sync.WaitGroup) {
 	}
 }
 
+// run calls a service and turns a panic into an error, so the restart policy covers it. Recovering
+// any further out would take the loop below with it, and the service would be gone for the life of
+// the process rather than restarted.
+func run(ctx context.Context, svc Service) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("recovered from a panic",
+				"in", "service "+svc.Name(), "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return svc.Run(ctx)
+}
+
 // supervise runs one service, restarting it if that is its policy.
 func (g *Group) supervise(ctx context.Context, e *entry) {
 	wait := e.policy.backoff
@@ -129,7 +144,7 @@ func (g *Group) supervise(ctx context.Context, e *entry) {
 		e.set(StateRunning, nil)
 		began := time.Now()
 
-		err := e.svc.Run(ctx)
+		err := run(ctx, e.svc)
 		ran := time.Since(began)
 
 		if ctx.Err() != nil {
