@@ -24,6 +24,9 @@ type Arbiter struct {
 	stack []Producer // the last is the one being heard
 	held  bool       // the driver has stood the background down
 	duck  bool
+	// hold is the producer the hold stood down, so a retake by it during the same hold is not
+	// suspended a second time.
+	hold Producer
 }
 
 // Backgrounds is this driver's arbiter, made on first use. Per driver, not per package: echoctl
@@ -46,6 +49,7 @@ func (a *Arbiter) Took(p Producer) {
 	stood := a.top()
 	a.stack = append(a.stack, p)
 	held, duck := a.held, a.duck
+	hold := a.hold
 	a.mu.Unlock()
 
 	// Already down if the driver holds the lot, and suspending twice would need undoing twice.
@@ -54,7 +58,11 @@ func (a *Arbiter) Took(p Producer) {
 		stood.Suspend()
 	}
 	p.Duck(duck)
-	if held {
+	// The hold stood at most one producer down — the one being heard when it began, or none if the
+	// speaker was silent. A retake by that same producer is already held, so suspending it again would
+	// leave a resume outstanding; anyone else joining mid-hold is stood down here so it cannot play
+	// over the claim.
+	if held && p != hold {
 		p.Suspend()
 	}
 }
@@ -85,6 +93,9 @@ func (a *Arbiter) Suspend() {
 	}
 	a.held = true
 	p := a.top()
+	if p != nil {
+		a.hold = p
+	}
 	a.mu.Unlock()
 
 	if p != nil {
@@ -99,6 +110,7 @@ func (a *Arbiter) Resume() {
 		return
 	}
 	a.held = false
+	a.hold = nil
 	p := a.top()
 	a.mu.Unlock()
 
