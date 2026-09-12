@@ -51,7 +51,11 @@ type Engine struct {
 	// when the last slot using it goes. Both can be up at once, a slot each, and each costs a front
 	// end per frame — so which are running follows what is loaded rather than a setting.
 	backends map[wake.Kind]backend
-	slots    []slot
+
+	// spent is how long each kind of model has taken since the last report, which is what says where
+	// a frame's thirty milliseconds go.
+	spent map[wake.Kind]time.Duration
+	slots []slot
 
 	// Threshold is asked for every score, so a change in Home Assistant takes effect at once. It is
 	// per slot because the models disagree on scale.
@@ -96,7 +100,12 @@ type slot struct {
 
 // New describes an engine. Nothing is built until Start.
 func New(slots int, source *mic.Source) *Engine {
-	return &Engine{backends: map[wake.Kind]backend{}, slots: make([]slot, slots), source: source}
+	return &Engine{
+		backends: map[wake.Kind]backend{},
+		spent:    map[wake.Kind]time.Duration{},
+		slots:    make([]slot, slots),
+		source:   source,
+	}
 }
 
 func (e *Engine) Name() string { return "wake" }
@@ -280,6 +289,14 @@ func (e *Engine) Run(ctx context.Context) error {
 	frames, unlisten := e.source.Listen("wake")
 	defer unlisten()
 
+	// The microphones produce fifty frames a second. Counting what arrives against what scoring costs
+	// says whether frames are being lost because this loop is slow or because it never sees them.
+	var (
+		took, worst time.Duration
+		got         int
+		since       = time.Now()
+	)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -288,7 +305,32 @@ func (e *Engine) Run(ctx context.Context) error {
 			if !ok {
 				return errors.New("wake: the microphones stopped")
 			}
+
+			began := time.Now()
 			e.score(frame, e.source)
+			spent := time.Since(began)
+
+			got++
+			took += spent
+			worst = max(worst, spent)
+
+			if elapsed := time.Since(since); elapsed >= 30*time.Second {
+				e.mu.Lock()
+				by := make([]any, 0, 8)
+				for k, d := range e.spent {
+					by = append(by, string(k)+"_us", d.Microseconds()/int64(max(got, 1)))
+					e.spent[k] = 0
+				}
+				e.mu.Unlock()
+
+				slog.Info("wake frames", append([]any{
+					"per_second", float64(got) / elapsed.Seconds(),
+					"mean_us", took.Microseconds() / int64(max(got, 1)),
+					"worst_ms", worst.Milliseconds(),
+					"busy_pct", int(100 * took.Seconds() / elapsed.Seconds()),
+				}, by...)...)
+				took, worst, got, since = 0, 0, 0, time.Now()
+			}
 		}
 	}
 }
@@ -308,7 +350,10 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 	// frames only advance the front end.
 	heard := make(map[wake.Kind]map[string]float64, len(e.backends))
 	for k, b := range e.backends {
-		if scores, fresh := b.feed(frame); fresh {
+		began := time.Now()
+		scores, fresh := b.feed(frame)
+		e.spent[k] += time.Since(began)
+		if fresh {
 			heard[k] = scores
 		}
 	}
