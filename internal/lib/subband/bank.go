@@ -5,11 +5,12 @@ import "github.com/ygelfand/echolocal/internal/lib/fft"
 // The bank is the standard polyphase pair. Analysis windows the last WindowLen samples with the
 // prototype, folds them onto FFTLen by summing every FFTLen apart, and transforms; synthesis
 // transforms back, spreads the result over WindowLen, windows it again and overlap-adds. Hop is half
-// the transform, so five folds go in and five overlaps come out, and a band can be filtered without
-// its neighbours aliasing into it.
+// the transform, so the folds that go in come back out as overlaps, and a band can be filtered
+// without its neighbours aliasing into it.
 
 // analysis turns one microphone's samples into subbands, Hop samples at a time.
 type analysis struct {
+	g      geometry
 	window []float32
 	fft    *fft.FFT
 
@@ -18,33 +19,35 @@ type analysis struct {
 	fold []complex64
 }
 
-func newAnalysis(window []float32, f *fft.FFT) *analysis {
+func newAnalysis(g geometry, window []float32, f *fft.FFT) *analysis {
 	return &analysis{
+		g:      g,
 		window: window,
 		fft:    f,
-		hist:   make([]float32, WindowLen),
-		fold:   make([]complex64, FFTLen),
+		hist:   make([]float32, g.WindowLen),
+		fold:   make([]complex64, g.FFTLen),
 	}
 }
 
 // push takes Hop new samples and writes the frame's bands into out.
 func (a *analysis) push(samples []float32, out []complex64) {
-	copy(a.hist, a.hist[Hop:])
-	copy(a.hist[WindowLen-Hop:], samples)
+	copy(a.hist, a.hist[a.g.Hop:])
+	copy(a.hist[a.g.WindowLen-a.g.Hop:], samples)
 
 	for i := range a.fold {
 		a.fold[i] = 0
 	}
 	for n, h := range a.window {
-		a.fold[n%FFTLen] += complex(h*a.hist[n], 0)
+		a.fold[n%a.g.FFTLen] += complex(h*a.hist[n], 0)
 	}
 
 	a.fft.Forward(a.fold)
-	copy(out, a.fold[:Bands])
+	copy(out, a.fold[:a.g.Bands])
 }
 
 // synthesis turns subbands back into samples, Hop at a time.
 type synthesis struct {
+	g      geometry
 	window []float32
 	fft    *fft.FFT
 
@@ -53,12 +56,13 @@ type synthesis struct {
 	tail []float32
 }
 
-func newSynthesis(window []float32, f *fft.FFT) *synthesis {
+func newSynthesis(g geometry, window []float32, f *fft.FFT) *synthesis {
 	return &synthesis{
+		g:      g,
 		window: window,
 		fft:    f,
-		spread: make([]complex64, FFTLen),
-		tail:   make([]float32, WindowLen),
+		spread: make([]complex64, g.FFTLen),
+		tail:   make([]float32, g.WindowLen),
 	}
 }
 
@@ -67,21 +71,21 @@ func (s *synthesis) pull(bands []complex64, out []float32) {
 	// The transform is of a real signal, so the upper half is the lower half mirrored and conjugated.
 	// Band 0 and the Nyquist band have no partner.
 	s.spread[0] = complex(real(bands[0]), 0)
-	for k := 1; k < Bands; k++ {
+	for k := 1; k < s.g.Bands; k++ {
 		s.spread[k] = bands[k]
-		s.spread[FFTLen-k] = fft.Conj(bands[k])
+		s.spread[s.g.FFTLen-k] = fft.Conj(bands[k])
 	}
-	s.spread[Bands] = 0
+	s.spread[s.g.Bands] = 0
 
 	s.fft.Inverse(s.spread)
 
 	// Overlap-add the windowed period, then hand back the oldest Hop samples.
 	for n, h := range s.window {
-		s.tail[n] += h * real(s.spread[n%FFTLen])
+		s.tail[n] += h * real(s.spread[n%s.g.FFTLen])
 	}
-	copy(out, s.tail[:Hop])
-	copy(s.tail, s.tail[Hop:])
-	for i := WindowLen - Hop; i < WindowLen; i++ {
+	copy(out, s.tail[:s.g.Hop])
+	copy(s.tail, s.tail[s.g.Hop:])
+	for i := s.g.WindowLen - s.g.Hop; i < s.g.WindowLen; i++ {
 		s.tail[i] = 0
 	}
 }
@@ -94,17 +98,17 @@ func (s *synthesis) pull(bands []complex64, out []float32) {
 // fold weighted by the window again, summed over every position the frames land on. A prototype
 // designed for this reconstructs exactly, which means each position gives the same answer and the
 // average below is that answer.
-func bankGain(window []float32) float32 {
-	var folded [FFTLen]float32
+func bankGain(g geometry, window []float32) float32 {
+	folded := make([]float32, g.FFTLen)
 	for n, h := range window {
-		folded[n%FFTLen] += h
+		folded[n%g.FFTLen] += h
 	}
 
 	var sum float32
-	for start := range Hop {
-		for n := start; n < WindowLen; n += Hop {
-			sum += window[n] * folded[n%FFTLen]
+	for start := range g.Hop {
+		for n := start; n < g.WindowLen; n += g.Hop {
+			sum += window[n] * folded[n%g.FFTLen]
 		}
 	}
-	return sum / Hop
+	return sum / float32(g.Hop)
 }

@@ -15,6 +15,9 @@ const (
 	micSpacing   = 60 * math.Pi / 180
 	speedOfSound = 343.0
 	centerMic    = 6
+
+	// The array has seven microphones whatever a firmware chooses to beamform over.
+	arrayMics = 7
 )
 
 // planeWave is what the array hears from a source far enough away that the wavefront is flat: the
@@ -32,7 +35,7 @@ func planeWave(bearing float64, samples int) [][]int16 {
 		phase[i] = rand.Float64() * 2 * math.Pi
 	}
 
-	out := make([][]int16, Inputs)
+	out := make([][]int16, arrayMics)
 	for m := range out {
 		out[m] = make([]int16, samples)
 
@@ -91,8 +94,8 @@ func TestVendorBeamsPointSomewhere(t *testing.T) {
 	for _, j := range pointing {
 		seen[j] = true
 	}
-	if len(seen) != Beams {
-		t.Errorf("%d of %d beams ever won; the weights are not steering", len(seen), Beams)
+	if len(seen) != w.Beams() {
+		t.Errorf("%d of %d beams ever won; the weights are not steering", len(seen), w.Beams())
 	}
 
 }

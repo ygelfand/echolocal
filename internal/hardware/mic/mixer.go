@@ -49,7 +49,8 @@ var mixes = sync.OnceValue(func() []mix {
 		slog.Error("vendor beamformer unavailable", "err", err)
 		return out
 	}
-	slog.Info("vendor beamformer available", "bands", subband.Bands, "beams", subband.Beams)
+	slog.Info("vendor beamformer available", "tuning", w.Name(),
+		"bands", w.Bands(), "beams", w.Beams(), "mics", w.Inputs())
 	return append(out, mix{config.MixBeamformer, func() Mixer { return w.New() }})
 })
 

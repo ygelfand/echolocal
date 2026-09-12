@@ -9,11 +9,10 @@ import (
 )
 
 // The vendor's coefficients are not ours to ship, so the tests that use them run against a copy
-// pulled off a device:
+// pulled off a device. Which set is there decides which front end gets exercised:
 //
-//	adb pull /vendor/etc/audio-algorithms/coefs_FBF.cfg /tmp/coefs
-//	adb pull /vendor/etc/audio-algorithms/coefs_FilterBank_640.cfg /tmp/coefs
-//	ECHOLOCAL_VENDOR_DIR=/tmp/coefs go test ./internal/subband/ -run Vendor -v
+//	adb pull /vendor/etc/audio-algorithms /tmp/coefs
+//	ECHOLOCAL_VENDOR_DIR=/tmp/coefs go test ./internal/lib/subband/ -run Vendor -v
 func vendorWeights(t *testing.T) *Weights {
 	t.Helper()
 	dir := os.Getenv("ECHOLOCAL_VENDOR_DIR")
@@ -25,6 +24,8 @@ func vendorWeights(t *testing.T) *Weights {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+	t.Logf("loaded %s: %d bands, %d beams, %d of the array's microphones",
+		w.Name(), w.Bands(), w.Beams(), w.Inputs())
 	return w
 }
 
@@ -33,18 +34,19 @@ func vendorWeights(t *testing.T) *Weights {
 // the check that says our bank is their bank.
 func TestVendorWindowReconstructs(t *testing.T) {
 	w := vendorWeights(t)
+	g := w.g
 
 	var least, most float32 = math.MaxFloat32, 0
-	var folded [FFTLen]float32
+	folded := make([]float32, g.FFTLen)
 	for n, h := range w.window {
-		folded[n%FFTLen] += h
+		folded[n%g.FFTLen] += h
 	}
-	for start := range Hop {
-		var g float32
-		for n := start; n < WindowLen; n += Hop {
-			g += w.window[n] * folded[n%FFTLen]
+	for start := range g.Hop {
+		var gain float32
+		for n := start; n < g.WindowLen; n += g.Hop {
+			gain += w.window[n] * folded[n%g.FFTLen]
 		}
-		least, most = min(least, g), max(most, g)
+		least, most = min(least, gain), max(most, gain)
 	}
 	t.Logf("gain %.6f..%.6f, spread %.2f%%", least, most, 100*(most-least)/most)
 
@@ -52,28 +54,28 @@ func TestVendorWindowReconstructs(t *testing.T) {
 		t.Errorf("reconstruction gain varies by %.1f%% across the hop, so the fold is wrong", 100*spread)
 	}
 
-	f := fft.New(FFTLen)
-	a := newAnalysis(w.window, f)
-	s := newSynthesis(w.window, f)
-	scale := 1 / bankGain(w.window)
+	f := fft.New(g.FFTLen)
+	a := newAnalysis(g, w.window, f)
+	s := newSynthesis(g, w.window, f)
+	scale := 1 / bankGain(g, w.window)
 
 	const frames = 60
-	in := make([]float32, frames*Hop)
+	in := make([]float32, frames*g.Hop)
 	for i := range in {
 		tt := float64(i) / 16000
 		in[i] = float32(0.4*math.Sin(2*math.Pi*440*tt) + 0.3*math.Sin(2*math.Pi*1900*tt))
 	}
 
 	out := make([]float32, len(in))
-	bands := make([]complex64, Bands)
-	for k := 0; k*Hop < len(in); k++ {
-		a.push(in[k*Hop:(k+1)*Hop], bands)
-		s.pull(bands, out[k*Hop:(k+1)*Hop])
+	bands := make([]complex64, g.Bands)
+	for k := 0; k*g.Hop < len(in); k++ {
+		a.push(in[k*g.Hop:(k+1)*g.Hop], bands)
+		s.pull(bands, out[k*g.Hop:(k+1)*g.Hop])
 	}
 
-	const delay = WindowLen - Hop
+	delay := g.WindowLen - g.Hop
 	var worst float64
-	for i := delay + Hop; i < len(in); i++ {
+	for i := delay + g.Hop; i < len(in); i++ {
 		worst = max(worst, math.Abs(float64(out[i]*scale-in[i-delay])))
 	}
 	t.Logf("worst reconstruction error %.5f of a peak of 0.7", worst)
