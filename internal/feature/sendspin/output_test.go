@@ -235,7 +235,7 @@ func TestDriftCorrectionSkipsFramesWhenLate(t *testing.T) {
 		o.Render(heard, frames(1))
 	}
 
-	if o.corrected > -(late - 2*driftBand) || o.corrected < -late {
+	if o.corrected > -(late-2*driftBand) || o.corrected < -late {
 		t.Fatalf("corrected %d frames, want most of %d", o.corrected, -late)
 	}
 	if int64(o.frame) != 1000+o.corrected {
