@@ -185,7 +185,7 @@ func (o *out) frameFor(at int64) uint64 {
 	// Frame Written() is going to the card now and is heard a hardware tail later, so this is where
 	// the server's intended moment falls. The tail is a constant and the same on every Dot, so what it
 	// costs in absolute accuracy it does not cost in lining rooms up.
-	ahead := o.clock.ServerToLocalTime(at).Sub(time.Now()) - speaker.HardwareTail
+	ahead := time.Until(o.clock.ServerToLocalTime(at)) - speaker.HardwareTail
 	o.frame = o.p.Written() + uint64(max(0, ahead.Seconds()*speaker.Rate))
 	o.at = at
 	o.anchored = true

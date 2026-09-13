@@ -23,7 +23,7 @@ func TestPCMUnpacksSignedLittleEndian(t *testing.T) {
 		{"32-bit", 32, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F}, []int16{0, 32767}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			d, err := newPCMDecoder(c.depth, 2)
+			d, err := newPCMDecoder(c.depth)
 			if err != nil {
 				t.Fatalf("newPCMDecoder: %v", err)
 			}
@@ -47,7 +47,7 @@ func TestPCMUnpacksSignedLittleEndian(t *testing.T) {
 // A short read is a bug somewhere upstream, and playing it as if it were whole samples shifts every
 // channel afterwards — so it has to be refused rather than rounded down.
 func TestPCMRefusesAPartialSample(t *testing.T) {
-	d, _ := newPCMDecoder(24, 2)
+	d, _ := newPCMDecoder(24)
 	if _, err := d.decode([]byte{0x01, 0x02}); err == nil {
 		t.Error("two bytes were accepted as a 24-bit sample")
 	}
@@ -61,7 +61,7 @@ func TestNoDecoderForAnUnknownCodec(t *testing.T) {
 	if _, err := decoderFor("flac", 48000, 2, 16, nil); err == nil {
 		t.Error("flac was accepted with no codec header")
 	}
-	if _, err := newPCMDecoder(8, 2); err == nil {
+	if _, err := newPCMDecoder(8); err == nil {
 		t.Error("8-bit pcm was accepted")
 	}
 }
@@ -69,7 +69,7 @@ func TestNoDecoderForAnUnknownCodec(t *testing.T) {
 // The buffer is reused between chunks, so a shorter chunk after a longer one must not leave the tail
 // of the previous one visible.
 func TestTheReusedBufferIsCutToLength(t *testing.T) {
-	d, _ := newPCMDecoder(16, 2)
+	d, _ := newPCMDecoder(16)
 
 	if got, _ := d.decode([]byte{1, 0, 2, 0, 3, 0, 4, 0}); len(got) != 4 {
 		t.Fatalf("first chunk: got %d samples, want 4", len(got))

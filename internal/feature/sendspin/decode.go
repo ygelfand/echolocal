@@ -24,7 +24,7 @@ func decoderFor(codec string, sampleRate, channels, bitDepth int, header []byte)
 	case "opus":
 		return newOpusDecoder(sampleRate, channels)
 	case "pcm":
-		return newPCMDecoder(bitDepth, channels)
+		return newPCMDecoder(bitDepth)
 	}
 	return nil, fmt.Errorf("sendspin: no decoder for %q", codec)
 }
@@ -63,7 +63,8 @@ type pcmDecoder struct {
 	out   []int16
 }
 
-func newPCMDecoder(bitDepth, channels int) (decoder, error) {
+// Samples arrive interleaved and stay that way, so the channel count does not come into it.
+func newPCMDecoder(bitDepth int) (decoder, error) {
 	switch bitDepth {
 	case 16:
 		return &pcmDecoder{bytes: 2}, nil

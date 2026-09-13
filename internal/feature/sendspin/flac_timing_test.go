@@ -245,7 +245,7 @@ func TestFLACSurvivesALongStream(t *testing.T) {
 func TestPCMRendersWhatWasEncoded(t *testing.T) {
 	_, _, want := encodedStream(t, chunkBlock, streamBlocks)
 
-	d, err := newPCMDecoder(speaker.Bits, speaker.Channels)
+	d, err := newPCMDecoder(speaker.Bits)
 	if err != nil {
 		t.Fatalf("newPCMDecoder: %v", err)
 	}
