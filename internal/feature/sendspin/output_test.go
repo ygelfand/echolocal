@@ -196,14 +196,17 @@ func listening(t *testing.T) *out {
 func TestDriftCorrectionRepeatsFramesWhenEarly(t *testing.T) {
 	o := listening(t)
 
-	// The server clock says frame 900 is due where the card is hearing 1000: a hundred frames early.
-	o.now = func() int64 { return microsFor(-100) }
-	for range 400 {
+	// The server clock says a frame well outside the deadband is due where the card is hearing 1000.
+	// Sized against the band rather than fixed, so that the band can be retuned without rewriting what
+	// this is asking: correct until the two are inside it, and no further.
+	early := int64(4 * driftBand)
+	o.now = func() int64 { return microsFor(-early) }
+	for range 8 * driftBand {
 		o.Render(heard, frames(1))
 	}
 
-	if o.corrected < 60 || o.corrected > 100 {
-		t.Fatalf("corrected %d frames, want most of 100", o.corrected)
+	if o.corrected < early-2*driftBand || o.corrected > early {
+		t.Fatalf("corrected %d frames, want most of %d", o.corrected, early)
 	}
 	if int64(o.frame) != 1000+o.corrected {
 		t.Fatalf("anchor frame %d did not move with the %d frames repeated", o.frame, o.corrected)
@@ -226,13 +229,14 @@ func TestDriftCorrectionRepeatsFramesWhenEarly(t *testing.T) {
 func TestDriftCorrectionSkipsFramesWhenLate(t *testing.T) {
 	o := listening(t)
 
-	o.now = func() int64 { return microsFor(100) }
-	for range 400 {
+	late := int64(4 * driftBand)
+	o.now = func() int64 { return microsFor(late) }
+	for range 8 * driftBand {
 		o.Render(heard, frames(1))
 	}
 
-	if o.corrected > -60 || o.corrected < -100 {
-		t.Fatalf("corrected %d frames, want most of -100", o.corrected)
+	if o.corrected > -(late - 2*driftBand) || o.corrected < -late {
+		t.Fatalf("corrected %d frames, want most of %d", o.corrected, -late)
 	}
 	if int64(o.frame) != 1000+o.corrected {
 		t.Fatalf("anchor frame %d did not move with the %d frames skipped", o.frame, -o.corrected)
@@ -250,7 +254,9 @@ func TestDriftCorrectionSnapsLargeErrors(t *testing.T) {
 	for range 800 {
 		o.Render(heard, frames(1))
 	}
-	if o.corrected < 2350 || o.corrected > 2450 {
+	// The snap takes out the bulk of it and the fine correction walks the rest in, stopping once it is
+	// inside the band, so what is left over is the band's width rather than nothing.
+	if o.corrected < 2400-2*driftBand || o.corrected > 2400+driftBand {
 		t.Fatalf("corrected %d frames, want about 2400", o.corrected)
 	}
 	if o.pcm[0] != 0 || o.pcm[100*speaker.Channels] != 0 {

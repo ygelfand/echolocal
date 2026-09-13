@@ -91,6 +91,7 @@ var registered = []string{
 	"sendspin",
 	"sendspin_state",
 	"speaker",
+	"speaker_eq",
 	"stop_word_sensitivity",
 	"test_playback",
 	"thinking_effect_1",

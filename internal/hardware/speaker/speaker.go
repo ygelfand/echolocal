@@ -85,6 +85,9 @@ type Player struct {
 	stale  atomic.Bool
 	mono   []float32
 
+	// fed is whether the last block had anything in it, and belongs to the write loop alone.
+	fed bool
+
 	// underruns is the card running out while we were away. Write blocks against the whole ring, so
 	// each one means the loop was starved for as long as the ring is deep.
 	underruns atomic.Uint64
@@ -380,8 +383,15 @@ func (p *Player) fill(buf []byte) {
 	// everything panned left. The line-out is not: it gets both channels as they came.
 	mono := p.Output() == OutputSpeaker
 
+	// The write loop runs whether or not anything is playing, since the amplifier hisses when nothing
+	// drives the DAC, and tuning silence costs what tuning music costs. The block after the audio stops
+	// still goes through: that is the filter's own length, and it holds the tail.
+	fed := take > 0 || len(rendered) > 0
+	drain := fed || p.fed
+	p.fed = fed
+
 	// The tuning is for the driver, so the line-out is left with what it was sent.
-	tuned := mono && p.chain != nil && p.on.Load()
+	tuned := mono && p.chain != nil && p.on.Load() && drain
 
 	gain := p.Volume()
 	for i, j := 0, 0; i < period*Channels; i, j = i+Channels, j+1 {

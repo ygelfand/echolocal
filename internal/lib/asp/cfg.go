@@ -44,11 +44,11 @@ func readFloats(path string, want int) ([]float32, error) {
 
 // mbcl is the compressor and limiter's settings, named as the file names them.
 type mbcl struct {
-	Bypass          bool      `json:"Bypass"`
-	PreFilterBypass bool      `json:"PreFilterBypass"`
-	InVol           float64   `json:"inVol"`
-	NumBands        int       `json:"NumBands"`
-	Crossovers      []float64 `json:"FilterBank FC"`
+	Bypass          bool       `json:"Bypass"`
+	PreFilterBypass bool       `json:"PreFilterBypass"`
+	InVol           float64    `json:"inVol"`
+	NumBands        int        `json:"NumBands"`
+	Crossovers      []float64  `json:"FilterBank FC"`
 	Bands           []mbclBand `json:"Bands Definition"`
 	Full            mbclLimit  `json:"Full-band limiter"`
 }
@@ -124,7 +124,7 @@ func stripComments(b []byte) []byte {
 
 		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
 			i += 2
-			for i+1 < len(b) && !(b[i] == '*' && b[i+1] == '/') {
+			for i+1 < len(b) && (b[i] != '*' || b[i+1] != '/') {
 				i++
 			}
 			i = min(i+2, len(b))

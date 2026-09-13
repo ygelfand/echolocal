@@ -31,8 +31,10 @@ const holdMax = 60 * speaker.Rate
 // and inaudible at the handful per second a real drift needs.
 //
 // driftGain is the smoothing: at 47 periods a second, a time constant of about a second, enough to
-// take the scheduling jitter out of when a period happens to be rendered. driftBand is half a
-// millisecond either side, inside the spec's 1 ms floor with room for the noise that remains.
+// take the scheduling jitter out of when a period happens to be rendered. driftBand is 2 ms either
+// side, which is what that jitter leaves: off carries several milliseconds of it, and a second of
+// smoothing brings the residual down to the order of one. A band inside that residual corrects
+// against the noise instead of the drift, and spends most of its corrections undoing the last ones.
 //
 // An error past snapBand is not drift but a misplaced anchor, most often a period's worth of phase
 // between the write counter and the card at the moment the stream started, or an underrun that moved
@@ -43,7 +45,7 @@ const holdMax = 60 * speaker.Rate
 // the anchor was laid in terms of what is heard.
 const (
 	driftGain  = 0.02
-	driftBand  = speaker.Rate / 2000
+	driftBand  = speaker.Rate / 500
 	snapBand   = speaker.Rate / 100
 	tailFrames = int64(speaker.HardwareTail * speaker.Rate / time.Second)
 

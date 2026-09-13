@@ -26,6 +26,11 @@ type mbclState struct {
 // bandState is one band's compressor and limiter, sharing one gain so that the two never fight: the
 // compressor asks for a reduction, the limiter asks for whatever more it takes to stay under its
 // threshold, and the sum is what the gain moves toward.
+//
+// The gain is carried in dB and converted per sample. Both ways of making that cheaper have been
+// tried on the device and both are audible: holding the target across a run of samples dulls the
+// bands with a fast release, and carrying the gain linearly so it is only a multiply adds noise.
+// A quieter compressor is worth more here than a cheaper one.
 type bandState struct {
 	compThreshDB  float64
 	compRatio     float64
