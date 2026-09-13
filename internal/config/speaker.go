@@ -1,9 +1,11 @@
 package config
 
-// Speaker is how loud the device is and how voice is stretched to the playback rate.
+// Speaker is how loud the device is, how voice is stretched to the playback rate, and whether the
+// driver's tuning is applied.
 type Speaker struct {
 	Volume     int        `json:"volume"`
 	Resampling Resampling `json:"resampling"`
+	ASP        bool       `json:"asp"`
 }
 
 const (
@@ -15,10 +17,13 @@ const (
 	DefaultVolume = VolumeSteps / 2
 
 	DefaultResampling = ResampleSinc
+
+	// DefaultASP applies the driver's tuning, which is what the vendor's firmware does.
+	DefaultASP = true
 )
 
 func defaultSpeaker() Speaker {
-	return Speaker{Volume: DefaultVolume, Resampling: DefaultResampling}
+	return Speaker{Volume: DefaultVolume, Resampling: DefaultResampling, ASP: DefaultASP}
 }
 
 type SpeakerWriter struct{ st *Store }
@@ -29,6 +34,10 @@ func (w SpeakerWriter) Volume(v int) error {
 
 func (w SpeakerWriter) Resampling(v Resampling) error {
 	return w.st.Update(func(c *Config) { c.Speaker.Resampling = v })
+}
+
+func (w SpeakerWriter) ASP(v bool) error {
+	return w.st.Update(func(c *Config) { c.Speaker.ASP = v })
 }
 
 // Resampling is how the 16 kHz voice a pipeline sends is stretched to the 48 kHz the codec takes.

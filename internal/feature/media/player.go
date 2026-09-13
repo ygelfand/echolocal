@@ -48,6 +48,9 @@ type Player struct {
 	onTurn     *esphome.Select
 	duck       *esphome.Number
 
+	// asp is the driver's tuning: on applies it, off sends the signal as it came.
+	asp *esphome.Switch
+
 	// layers are sounds the device makes on its own, for as long as they are left set. More than one,
 	// because a bed with a texture over it — crickets under wind — is worth having and the native API
 	// has no entity that holds more than one value.
@@ -123,11 +126,19 @@ func build() *Player {
 			Min: -40, Max: -3, Step: 1, Unit: "dB",
 			Mode: esphome.NumberBox,
 		},
+		asp: &esphome.Switch{
+			Base: esphome.Base{
+				ObjectID: "speaker_eq",
+				Name:     "Speaker EQ",
+				Icon:     "mdi:equalizer",
+				Category: esphome.CategoryConfig,
+			},
+		},
 	}
 	p.layers = noiseLayers()
 
 	// The player itself stays on the device: it is what people reach for. These are how it behaves.
-	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base}
+	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base, &p.asp.Base}
 	for _, sel := range p.layers {
 		bases = append(bases, &sel.Base)
 	}
@@ -138,6 +149,16 @@ func build() *Player {
 	p.mp.OnCommand = p.command
 	component.Bind(p.resampling, speaker.Resamplings(), speaker.Get().SetResampling,
 		config.Set().Speaker().Resampling)
+
+	// The speaker settles this: a device whose tuning would not load stays off however it is set.
+	p.asp.OnCommand = func(want bool) {
+		settled := speaker.Get().SetASP(want)
+		p.asp.Set(settled)
+		if err := config.Set().Speaker().ASP(settled); err != nil {
+			slog.Error("saving a setting failed", "setting", p.asp.ObjectID, "err", err)
+		}
+		slog.Info("setting changed", "setting", p.asp.ObjectID, "using", settled, "asked", want)
+	}
 
 	// Nothing to apply: the stream reads the setting when a turn begins, so changing it takes effect on
 	// the next one rather than in the middle of this one.
@@ -193,7 +214,7 @@ func build() *Player {
 func (p *Player) Name() string { return "media player" }
 
 func (p *Player) Entities() []esphome.Entity {
-	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck}
+	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck, p.asp}
 	for _, sel := range p.layers {
 		out = append(out, sel)
 	}
@@ -212,6 +233,10 @@ func (p *Player) Restore(c config.Config) {
 
 	p.duck.Set(float32(c.Media.DuckDB))
 	slog.Info("restored", "what", p.duck.ObjectID, "using", c.Media.DuckDB)
+
+	settled := speaker.Get().SetASP(c.Speaker.ASP)
+	p.asp.Set(settled)
+	slog.Info("restored", "what", p.asp.ObjectID, "using", settled, "asked", c.Speaker.ASP)
 }
 
 // onTurns is what music may do about a turn.

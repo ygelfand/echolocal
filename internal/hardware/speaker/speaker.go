@@ -15,6 +15,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/lib/alsa"
+	"github.com/ygelfand/echolocal/internal/lib/asp"
 	"github.com/ygelfand/echolocal/internal/lib/hook"
 	"github.com/ygelfand/echolocal/internal/lib/safe"
 	"github.com/ygelfand/echolocal/internal/service"
@@ -28,6 +29,9 @@ const (
 
 	period  = 1024
 	periods = 4
+
+	// full is int16 full scale, which is what the tuning's thresholds are in dB of.
+	full = 32768
 
 	// codecSettle is how long the codec sits powered and idle before the amplifier is enabled,
 	// measured from the vendor HAL doing the same thing on a route change.
@@ -72,6 +76,15 @@ type Player struct {
 	resampling config.Resampling
 	splices    atomic.Uint64
 
+	// tuning is the vendor's driver tuning, loaded once, and chain is it applied to this stream. Both
+	// are nil on a device whose tuning we could not read, which plays untuned rather than not at all.
+	// on gates it; the chain is only ever touched by the write loop.
+	tuning *asp.Tuning
+	chain  *asp.Chain
+	on     atomic.Bool
+	stale  atomic.Bool
+	mono   []float32
+
 	// underruns is the card running out while we were away. Write blocks against the whole ring, so
 	// each one means the loop was starved for as long as the ring is deep.
 	underruns atomic.Uint64
@@ -115,6 +128,19 @@ func New() *Player {
 	p := &Player{out: DetectOutput()}
 	p.voice, p.resampling = NewResampler(config.ResampleSinc)
 	p.SetVolume(VolumeSteps)
+	p.on.Store(config.DefaultASP)
+
+	t, err := asp.Load(asp.VendorDir)
+	if err != nil {
+		slog.Error("the driver tuning is not available, playing untuned", "err", err)
+		return p
+	}
+	c, err := t.Chain(period)
+	if err != nil {
+		slog.Error("the driver tuning will not run, playing untuned", "err", err)
+		return p
+	}
+	p.tuning, p.chain, p.mono = t, c, make([]float32, period)
 	return p
 }
 
@@ -354,8 +380,11 @@ func (p *Player) fill(buf []byte) {
 	// everything panned left. The line-out is not: it gets both channels as they came.
 	mono := p.Output() == OutputSpeaker
 
+	// The tuning is for the driver, so the line-out is left with what it was sent.
+	tuned := mono && p.chain != nil && p.on.Load()
+
 	gain := p.Volume()
-	for i := 0; i < period*Channels; i += Channels {
+	for i, j := 0, 0; i < period*Channels; i, j = i+Channels, j+1 {
 		var l, r int32
 		if i < len(chunk) {
 			l = int32(chunk[i])
@@ -373,8 +402,29 @@ func (p *Player) fill(buf []byte) {
 			l = (l + r) / 2
 			r = l
 		}
+		if tuned {
+			p.mono[j] = float32(clamp(l)) / full
+			continue
+		}
 		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(clamp(l))*gain)))
 		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(int16(float32(clamp(r))*gain)))
+	}
+	if !tuned {
+		return
+	}
+
+	// Resetting belongs to whoever processes, so a toggle only says that the history is no longer
+	// about what is playing.
+	if p.stale.Swap(false) {
+		p.chain.Reset()
+	}
+
+	// The tuning holds its own ceiling below full scale, so what comes back only has to be scaled.
+	p.chain.Process(p.mono)
+	for i, j := 0, 0; i < period*Channels; i, j = i+Channels, j+1 {
+		s := int16(p.mono[j] * full * gain)
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
+		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(s))
 	}
 }
 
@@ -466,6 +516,20 @@ func (p *Player) SetResampling(r config.Resampling) config.Resampling {
 	p.voice, p.resampling = NewResampler(r)
 	return p.resampling
 }
+
+// SetASP turns the driver tuning on or off and reports what it settled on, which is off on a device
+// whose tuning never loaded.
+func (p *Player) SetASP(on bool) bool {
+	on = on && p.chain != nil
+	if on && !p.on.Load() {
+		p.stale.Store(true)
+	}
+	p.on.Store(on)
+	return on
+}
+
+// ASP reports whether the driver tuning is being applied.
+func (p *Player) ASP() bool { return p.on.Load() }
 
 // Resampling is the one in use.
 func (p *Player) Resampling() config.Resampling {
