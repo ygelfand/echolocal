@@ -142,9 +142,9 @@ func TestFLACLagDoesNotVary(t *testing.T) {
 	}
 }
 
-// The parser has not finished a frame when decode polls for it, so every frame surfaces one chunk late
-// and is placed at that chunk's timestamp.
-func TestFLACPlaysABlockBehindTheChunkThatCarriedIt(t *testing.T) {
+// decode waits for the parser to finish with the chunk, so a chunk hands back its own frame and the
+// audio is placed at that chunk's timestamp. Nothing is held back at either end of the stream.
+func TestFLACPlaysTheFrameTheChunkCarried(t *testing.T) {
 	header, chunks, want := encodedStream(t, chunkBlock, streamBlocks)
 
 	d, err := newFLACDecoder(header)
@@ -164,14 +164,13 @@ func TestFLACPlaysABlockBehindTheChunkThatCarriedIt(t *testing.T) {
 		}
 	}
 
-	// Nothing was placed at the anchor: the first block's frame did not come back until chunk 2.
-	if o.base != 1000+chunkBlock {
-		t.Fatalf("audio starts at frame %d, want %d", o.base, 1000+chunkBlock)
+	// The first chunk's frame came back on that chunk, so audio starts at the anchor.
+	if o.base != 1000 {
+		t.Fatalf("audio starts at frame %d, want %d", o.base, 1000)
 	}
 
-	// The last chunk's frame is still in the parser, so a block goes missing off the end too.
-	played := (streamBlocks - 1) * chunkBlock
-	got := rendered(o, 1000+chunkBlock, played)
+	played := streamBlocks * chunkBlock
+	got := rendered(o, 1000, played)
 
 	if at := firstWrong(got, want[:played*speaker.Channels]); at >= 0 {
 		t.Errorf("output frame %d is %d, want %d", at/speaker.Channels, got[at], want[at])
