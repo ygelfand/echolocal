@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -312,12 +313,16 @@ func checkPartition(r *run) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	size := strings.TrimSpace(raw)
-	if size != fmt.Sprint(bootimg.PartitionSize) {
-		return "", false, fmt.Errorf("%s resolves to %s of %s bytes, want %d: refusing to write",
-			target, node, size, bootimg.PartitionSize)
+	size, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil {
+		return "", false, fmt.Errorf("%s resolves to %s, whose size reads as %q: refusing to write",
+			target, node, strings.TrimSpace(raw))
 	}
-	return fmt.Sprintf("%s → %s, %s bytes", target, node, size), false, nil
+	if !bootimg.KnownPartition(size) {
+		return "", false, fmt.Errorf("%s resolves to %s of %d bytes, want one of %v: refusing to write",
+			target, node, size, bootimg.PartitionSizes)
+	}
+	return fmt.Sprintf("%s → %s, %d bytes", target, node, size), false, nil
 }
 
 // partition is the slot to write, refusing a device that names none: "boot" on its own is not a

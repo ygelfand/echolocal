@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -17,9 +18,17 @@ import (
 // ByName is where partitions are named rather than numbered.
 const ByName = "/dev/block/platform/bootdevice/by-name/"
 
-// PartitionSize is what a boot slot measures, asserted before writing in case a name ever resolves
+// PartitionSizes are what a boot slot measures, asserted before writing in case a name ever resolves
 // somewhere else. Writing a boot image into a partition of another size is how a device stops booting.
-const PartitionSize = 16777216
+//
+// There are two layouts. A device that took the FireOS 6 OTA was repartitioned: its boot slots are the
+// 110 MB pair at the end of the eMMC, and the original 16 MB pair is still there renamed to boot_a_x
+// and boot_b_x. A device unlocked before that OTA never took it, since amonet's decoys are what stop
+// one applying, so it keeps the 16 MB pair as its boot slots.
+var PartitionSizes = []int64{16777216, 115343360}
+
+// KnownPartition reports whether a boot slot of this size is one we will write.
+func KnownPartition(size int64) bool { return slices.Contains(PartitionSizes, size) }
 
 // Partition is the boot slot for a slot suffix, which is ro.boot.slot_suffix: the slot the device is
 // running, and so the one that has to carry the image for the next boot to use it.

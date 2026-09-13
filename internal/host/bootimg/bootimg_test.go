@@ -134,8 +134,10 @@ func TestOursFitsHowItIsWritten(t *testing.T) {
 	if Ours.Size%512 != 0 {
 		t.Errorf("image size %d is not a multiple of 512", Ours.Size)
 	}
-	if Ours.Size >= PartitionSize {
-		t.Errorf("image is %d bytes and the partition is %d", Ours.Size, PartitionSize)
+	for _, size := range PartitionSizes {
+		if Ours.Size >= size {
+			t.Errorf("image is %d bytes and the partition is %d", Ours.Size, size)
+		}
 	}
 }
 
