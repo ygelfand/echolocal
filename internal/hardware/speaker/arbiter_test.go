@@ -216,3 +216,55 @@ func TestStartingTwiceLeavesOneEntry(t *testing.T) {
 		t.Error("a duplicate entry outlived the producer that finished")
 	}
 }
+
+// The media player is one producer that replaces its own track, so every noise or media switch is the
+// same stream taking the speaker again. When that happens while the driver holds it, the hold already
+// stood the stream down once — standing it down again leaves a resume outstanding, and it waits on a
+// gate nobody opens: playing on paper, silent in the room, until the process restarts.
+func TestAResumingTrackRetakingTheSpeakerIsNotHeldTwice(t *testing.T) {
+	a := &Arbiter{}
+	track := &producer{}
+	a.Took(track)
+
+	a.Suspend()
+	if !track.held() {
+		t.Fatal("the track ignored the driver taking the speaker")
+	}
+
+	// A track change mid-claim: the stream re-joins as itself.
+	a.Took(track)
+	if !track.held() {
+		t.Error("a track must stay stood down while the speaker is held")
+	}
+
+	a.Resume()
+	if track.held() {
+		t.Errorf("the track never came back: %d suspends, %d resumes", track.suspends, track.resumes)
+	}
+}
+
+// A sound that ends during the hold and starts again before it is over is still the producer the
+// hold stood down: stopping the noise to start another one under a claim must not leave it waiting
+// on a second suspend that one resume cannot answer.
+func TestARetakeAfterGivingBackDuringAHoldIsNotHeldTwice(t *testing.T) {
+	a := &Arbiter{}
+	track := &producer{}
+	a.Took(track)
+
+	a.Suspend()
+	if !track.held() {
+		t.Fatal("the track ignored the driver taking the speaker")
+	}
+
+	// A stop mid-claim, then a new sound before the claim ends.
+	a.Gave(track)
+	a.Took(track)
+	if !track.held() {
+		t.Error("a track must stay stood down while the speaker is held")
+	}
+
+	a.Resume()
+	if track.held() {
+		t.Errorf("the track never came back: %d suspends, %d resumes", track.suspends, track.resumes)
+	}
+}
