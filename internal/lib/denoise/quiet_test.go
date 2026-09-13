@@ -16,8 +16,9 @@ func TestVeryQuietAudioDoesNotDeafenTheFilter(t *testing.T) {
 		out := make([]float64, f.Hop())
 		rng := rand.New(rand.NewSource(1))
 
-		// Twenty minutes of a near-silent room.
-		for k := 0; k < 60000; k++ {
+		// Thirty seconds of a near-silent room. The estimate reaches the band it holds within the first
+		// second and wanders inside it from then on.
+		for k := 0; k < 3000; k++ {
 			for i := range in {
 				in[i] = math.Round(lsb * rng.NormFloat64())
 			}
@@ -45,6 +46,9 @@ func TestVeryQuietAudioDoesNotDeafenTheFilter(t *testing.T) {
 		}
 
 		t.Logf("room at %5.1f lsb rms: %d non-finite, speech afterwards peaks at %6d", lsb, bad, loudest)
+		if bad > 0 {
+			t.Errorf("room at %.1f lsb left %d non-finite values in the estimate", lsb, bad)
+		}
 		if loudest == 0 {
 			t.Errorf("room at %.1f lsb deafened the filter", lsb)
 		}
