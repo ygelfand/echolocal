@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 )
 
@@ -114,4 +116,95 @@ func TestHeaderRefusesAnOversizedChunk(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted a chunk of a gigabyte")
 	}
+}
+
+// A claim stands the stream down; if it is stopped before the claim ends and nothing restarts until
+// after, the stale suspend count must not linger to gate the next track. This is what stopping the
+// noise during an announcement followed by a new layer selection does, and it used to leave the
+// player with a count that no resume would ever answer.
+func TestStoppingDuringAHoldDoesNotWedgeTheNextStart(t *testing.T) {
+	spk := speaker.New()
+	d := speaker.NewDriver(spk)
+	s := NewStream(d, spk, func() {})
+
+	s.start(&track{item: "noise"})
+	s.bg.Suspend()
+	if s.holds != 1 {
+		t.Fatalf("the claim did not stand the stream down: holds %d", s.holds)
+	}
+
+	// The sound is stopped before the claim ends.
+	s.Stop()
+	if s.holds != 0 {
+		t.Errorf("stopping under the claim left a count of %d behind", s.holds)
+	}
+	s.bg.Resume()
+
+	// A new sound after the claim starts clean, not gated by the stale remainder.
+	s.start(&track{item: "again"})
+	if s.holds != 0 {
+		t.Errorf("the new track started into a gate nobody opens: holds %d", s.holds)
+	}
+	s.Stop()
+}
+
+// Stopping under a claim and starting again before it ends has to stand the new track down once, or
+// it would play over the claim. The stop releases everything and takes the stream out of the stack,
+// so the retake is held afresh for the still-running claim and released when it ends.
+func TestARetakeAfterStoppingDuringAHoldIsStoodDownAgain(t *testing.T) {
+	spk := speaker.New()
+	d := speaker.NewDriver(spk)
+	s := NewStream(d, spk, func() {})
+
+	s.start(&track{item: "noise"})
+	s.bg.Suspend()
+	if s.holds != 1 {
+		t.Fatalf("the claim did not stand the stream down: holds %d", s.holds)
+	}
+
+	// Stop, then a fresh sound before the claim ends.
+	s.Stop()
+	s.start(&track{item: "again"})
+	if s.holds != 1 {
+		t.Errorf("the retake was not stood down for the claim: holds %d", s.holds)
+	}
+
+	s.bg.Resume()
+	if s.holds != 0 {
+		t.Errorf("the claim never released it: holds %d", s.holds)
+	}
+	s.Stop()
+}
+
+// A turn in OnTurnPause mode stands the stream down once, and a track change under the same turn
+// must not stand it down a second time: Duck is redelivered on the retake, but one resume at the
+// turn's end is all there is to answer it with. It used to leave the count behind, silent until the
+// next stop.
+func TestATrackChangeUnderAPausingTurnIsNotPausedTwice(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "config.json"))
+	if err := config.Set().Media().OnTurn(config.OnTurnPause); err != nil {
+		t.Fatal(err)
+	}
+
+	spk := speaker.New()
+	d := speaker.NewDriver(spk)
+	s := NewStream(d, spk, func() {})
+
+	s.start(&track{item: "noise"})
+	s.bg.Duck(true)
+	if s.holds != 1 {
+		t.Fatalf("the pausing turn did not stand the stream down once: holds %d", s.holds)
+	}
+
+	// A track change under the same turn.
+	s.start(&track{item: "again"})
+	if s.holds != 1 {
+		t.Errorf("the track change stood the stream down a second time: holds %d", s.holds)
+	}
+
+	s.bg.Duck(false)
+	if s.holds != 0 {
+		t.Errorf("the turn never released it: holds %d", s.holds)
+	}
+	s.Stop()
 }
