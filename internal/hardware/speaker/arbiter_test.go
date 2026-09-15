@@ -27,6 +27,14 @@ func (p *producer) Resume() {
 	p.resumes++
 }
 
+// leave is a producer stopping: the media stream resets its own hold count when it gives the
+// speaker up, so a stopped producer carries nothing into its next start.
+func (p *producer) leave() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.suspends, p.resumes = 0, 0
+}
+
 func (p *producer) Duck(on bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -244,8 +252,8 @@ func TestAResumingTrackRetakingTheSpeakerIsNotHeldTwice(t *testing.T) {
 }
 
 // A sound that ends during the hold and starts again before it is over is still the producer the
-// hold stood down: stopping the noise to start another one under a claim must not leave it waiting
-// on a second suspend that one resume cannot answer.
+// hold stood down: the stream reset its own count when it gave up, and the arbiter must forget the
+// claim's identity with it, or the retake is skipped as "already held" and plays over the claim.
 func TestARetakeAfterGivingBackDuringAHoldIsNotHeldTwice(t *testing.T) {
 	a := &Arbiter{}
 	track := &producer{}
@@ -258,6 +266,7 @@ func TestARetakeAfterGivingBackDuringAHoldIsNotHeldTwice(t *testing.T) {
 
 	// A stop mid-claim, then a new sound before the claim ends.
 	a.Gave(track)
+	track.leave()
 	a.Took(track)
 	if !track.held() {
 		t.Error("a track must stay stood down while the speaker is held")
