@@ -287,6 +287,10 @@ func (m *Stream) Unpause() {
 }
 
 // Stop ends the track. There is nothing to come back to afterwards.
+//
+// Staying would strand the count: a claim or a handover may have stood the stream down, and nobody
+// is going to resume a producer that is no longer there. A zero count is what a future start needs,
+// or the gate it opens at 0..1 is already shut by the stale remainder and nobody closes it.
 func (m *Stream) Stop() {
 	if m == nil {
 		return
@@ -295,6 +299,7 @@ func (m *Stream) Stop() {
 	m.mu.Lock()
 	t := m.track
 	m.track, m.paused, m.rewind = nil, false, nil
+	m.holds = 0
 	m.unblock()
 	m.mu.Unlock()
 
@@ -427,6 +432,7 @@ func (m *Stream) finished(t *track) {
 		return
 	}
 	m.track, m.paused, m.rewind = nil, false, nil
+	m.holds = 0
 	m.unblock()
 	m.mu.Unlock()
 

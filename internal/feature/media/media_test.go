@@ -115,3 +115,61 @@ func TestHeaderRefusesAnOversizedChunk(t *testing.T) {
 		t.Fatal("accepted a chunk of a gigabyte")
 	}
 }
+
+// A claim stands the stream down; if it is stopped before the claim ends and nothing restarts until
+// after, the stale suspend count must not linger to gate the next track. This is what stopping the
+// noise during an announcement followed by a new layer selection does, and it used to leave the
+// player with a count that no resume would ever answer.
+func TestStoppingDuringAHoldDoesNotWedgeTheNextStart(t *testing.T) {
+	spk := speaker.New()
+	d := speaker.NewDriver(spk)
+	s := NewStream(d, spk, func() {})
+
+	s.start(&track{item: "noise"})
+	s.bg.Suspend()
+	if s.holds != 1 {
+		t.Fatalf("the claim did not stand the stream down: holds %d", s.holds)
+	}
+
+	// The sound is stopped before the claim ends.
+	s.Stop()
+	if s.holds != 0 {
+		t.Errorf("stopping under the claim left a count of %d behind", s.holds)
+	}
+	s.bg.Resume()
+
+	// A new sound after the claim starts clean, not gated by the stale remainder.
+	s.start(&track{item: "again"})
+	if s.holds != 0 {
+		t.Errorf("the new track started into a gate nobody opens: holds %d", s.holds)
+	}
+	s.Stop()
+}
+
+// Stopping under a claim and starting again before it ends has to stand the new track down once, or
+// it would play over the claim. The stop resets the count and clears the claim's identity, so the
+// retake must be held afresh and released when the claim ends.
+func TestARetakeAfterStoppingDuringAHoldIsStoodDownAgain(t *testing.T) {
+	spk := speaker.New()
+	d := speaker.NewDriver(spk)
+	s := NewStream(d, spk, func() {})
+
+	s.start(&track{item: "noise"})
+	s.bg.Suspend()
+	if s.holds != 1 {
+		t.Fatalf("the claim did not stand the stream down: holds %d", s.holds)
+	}
+
+	// Stop, then a fresh sound before the claim ends.
+	s.Stop()
+	s.start(&track{item: "again"})
+	if s.holds != 1 {
+		t.Errorf("the retake was not stood down for the claim: holds %d", s.holds)
+	}
+
+	s.bg.Resume()
+	if s.holds != 0 {
+		t.Errorf("the claim never released it: holds %d", s.holds)
+	}
+	s.Stop()
+}

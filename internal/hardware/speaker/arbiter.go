@@ -74,6 +74,12 @@ func (a *Arbiter) Gave(p Producer) {
 	a.drop(p)
 	now := a.top()
 	held := a.held
+	// If the producer the hold stood down leaves mid-claim (a stop, say), its suspend goes with it —
+	// the stream resets its own count on the way out — so a retake before the claim ends has to be
+	// held again rather than skipped as the producer the claim already stood down.
+	if p == a.hold {
+		a.hold = nil
+	}
 	a.mu.Unlock()
 
 	if now == nil || now == was || held {
