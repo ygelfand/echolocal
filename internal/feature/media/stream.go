@@ -121,10 +121,16 @@ func (m *Stream) Duck(on bool) {
 	if on {
 		if config.Get().Media.OnTurn == config.OnTurnPause {
 			m.mu.Lock()
+			held := m.duckHeld
 			m.duckHeld = true
 			m.mu.Unlock()
 
-			m.Suspend()
+			// The turn stands the stream down once, and a track change re-fires this on the retake:
+			// that is the same keeping again, not a second one. Stop and finished clear duckHeld, so
+			// something that starts afresh under the turn is stood down for it anew.
+			if !held {
+				m.Suspend()
+			}
 			return
 		}
 
@@ -287,6 +293,10 @@ func (m *Stream) Unpause() {
 }
 
 // Stop ends the track. There is nothing to come back to afterwards.
+//
+// Staying would strand the count: a claim or a handover may have stood the stream down, and nobody
+// is going to resume a producer that is no longer there. A zero count is what a future start needs,
+// or the gate it opens at 0..1 is already shut by the stale remainder and nobody closes it.
 func (m *Stream) Stop() {
 	if m == nil {
 		return
@@ -295,6 +305,8 @@ func (m *Stream) Stop() {
 	m.mu.Lock()
 	t := m.track
 	m.track, m.paused, m.rewind = nil, false, nil
+	m.holds = 0
+	m.duckHeld = false
 	m.unblock()
 	m.mu.Unlock()
 
@@ -427,6 +439,8 @@ func (m *Stream) finished(t *track) {
 		return
 	}
 	m.track, m.paused, m.rewind = nil, false, nil
+	m.holds = 0
+	m.duckHeld = false
 	m.unblock()
 	m.mu.Unlock()
 

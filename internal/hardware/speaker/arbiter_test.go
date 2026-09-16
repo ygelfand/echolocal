@@ -268,3 +268,66 @@ func TestARetakeAfterGivingBackDuringAHoldIsNotHeldTwice(t *testing.T) {
 		t.Errorf("the track never came back: %d suspends, %d resumes", track.suspends, track.resumes)
 	}
 }
+
+// A claim and a handover can stand different producers down at the same time — the media stream by
+// someone taking over, sendspin by the claim itself. A single "this is the one the hold stood down"
+// identity cannot say which of the two a retake answered for the stream, so the stream taking the
+// speaker again mid-claim was stood down a second time, leaving a resume nobody would ever answer:
+// playing on paper, silent in the room, until the process restarts.
+func TestTwoProducersUnderOneHoldNeverDoubleSuspend(t *testing.T) {
+	a := &Arbiter{}
+	stream, spin := &producer{}, &producer{}
+
+	a.Took(stream)
+	a.Took(spin)
+	if !stream.held() {
+		t.Fatal("the stream kept playing under spin")
+	}
+
+	a.Suspend()
+	if !spin.held() {
+		t.Fatal("spin ignored the driver taking the speaker")
+	}
+
+	// A stream switch mid-claim: it re-joins as itself, still stood down from the handover.
+	a.Took(stream)
+	if stream.suspends != stream.resumes+1 {
+		t.Fatalf("the retake stood the stream down twice: %d suspends, %d resumes", stream.suspends, stream.resumes)
+	}
+
+	a.Resume()
+	if stream.suspends != stream.resumes {
+		t.Errorf("the claim never released the stream: %d suspends, %d resumes", stream.suspends, stream.resumes)
+	}
+	if !spin.held() {
+		t.Error("spin came back while it was the claim's shadow")
+	}
+
+	// The stream gives up; spin surfaces and its shadow is answered.
+	a.Gave(stream)
+	if spin.suspends != spin.resumes {
+		t.Errorf("spin's shadow was never answered: %d suspends, %d resumes", spin.suspends, spin.resumes)
+	}
+}
+
+// A claim that starts while the speaker is silent has nobody to stand down; a producer that starts
+// under it is stood down once for the claim, and one resume at the end brings it back.
+func TestAJoinAfterASilentHoldIsStoodDownOnce(t *testing.T) {
+	a := &Arbiter{}
+	track := &producer{}
+
+	a.Suspend()
+	if a.Playing() != nil {
+		t.Fatal("a claim against a silent speaker spawned a producer")
+	}
+
+	a.Took(track)
+	if !track.held() {
+		t.Error("a track that started under the claim began playing")
+	}
+
+	a.Resume()
+	if track.held() {
+		t.Errorf("the track never came back: %d suspends, %d resumes", track.suspends, track.resumes)
+	}
+}
