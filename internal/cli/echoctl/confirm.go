@@ -38,6 +38,9 @@ func approveFlash(ctx context.Context, out io.Writer, d *device.Device, state in
 
 	fmt.Fprintf(out, "\n%s\n", styleTitle.Render("This will overwrite the boot partition"))
 	fmt.Fprintf(out, "  device     %s (%s)\n", d.Serial(), state.Summary)
+	if state.Device != "" {
+		fmt.Fprintf(out, "  codename   %s\n", state.Device)
+	}
 	fmt.Fprintf(out, "  partition  %s\n", state.Partition)
 	fmt.Fprintf(out, "  image      %s\n", image)
 	fmt.Fprintf(out, "%s\n", styleDetail.Render("  Going back means reflashing a stock boot image by hand."))

@@ -2,10 +2,12 @@ package asp
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ygelfand/echolocal/internal/lib/fft"
@@ -111,11 +113,12 @@ func cmagf(c complex64) float64 {
 // Whatever the compressor does above it, the chain is the last thing before the DAC and nothing may
 // leave it above full scale.
 func TestFullBandLimiterHoldsCeiling(t *testing.T) {
-	tuning := &Tuning{taps: unitTaps(), mbcl: testMBCL()}
-	c, err := tuning.Chain(512)
+	tuning := &Tuning{taps: [][]float32{unitTaps()}, mbcl: testMBCL()}
+	chains, err := tuning.Chains(512)
 	if err != nil {
 		t.Fatal(err)
 	}
+	c := chains[0]
 
 	r := rand.New(rand.NewSource(2))
 	ceil := math.Pow(10, testMBCL().Full.LimThresh/20)
@@ -136,11 +139,12 @@ func TestFullBandLimiterHoldsCeiling(t *testing.T) {
 // The band below 115 Hz is compressed 20:1 from -50 dB, which is what keeps the tuning's bass boost
 // off the driver. A change that quietly stopped doing that would not be audible until something broke.
 func TestLowBandIsHeldDown(t *testing.T) {
-	tuning := &Tuning{taps: unitTaps(), mbcl: testMBCL()}
-	c, err := tuning.Chain(512)
+	tuning := &Tuning{taps: [][]float32{unitTaps()}, mbcl: testMBCL()}
+	chains, err := tuning.Chains(512)
 	if err != nil {
 		t.Fatal(err)
 	}
+	c := chains[0]
 
 	var peak float64
 	for b := range 60 {
@@ -201,13 +205,14 @@ func vendorTuning(t *testing.T) *Tuning {
 
 // The shape of the filter is the whole point of loading it, so this states the shape we measured off
 // a stock device: a large lift through the low mids and a cut across the presence region. A tuning
-// that does not look like this is not the one we think we are applying.
+// that does not look like this is not the one we think we are applying. The lowest-volume bucket is
+// the one the compressor keeps in shape at the quietest end, which is what we measure here.
 func TestVendorFilterHasTheShapeWeMeasured(t *testing.T) {
 	v := vendorTuning(t)
 
 	const n = 8192
 	spec := make([]complex64, n)
-	for i, c := range v.taps {
+	for i, c := range v.taps[0] {
 		spec[i] = complex(c, 0)
 	}
 	fft.New(n).Forward(spec)
@@ -255,20 +260,117 @@ func TestVendorMBCLIsTheOneWeBuiltFor(t *testing.T) {
 		t.Errorf("the low band compresses %g:1 from %g dB, which will not hold the bass boost",
 			b.CompRatio, b.CompThresh)
 	}
-	if _, err := v.Chain(1024); err != nil {
+	if _, err := v.Chains(1024); err != nil {
 		t.Errorf("the real tuning does not build a chain: %v", err)
 	}
 }
 
 func TestLoadRejectsAWrongLengthFilter(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, eqFiles[0].name), []byte("1.0,\n2.0,\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "EQ_50.cfg"), []byte("1.0,\n2.0,\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(dir); err == nil {
 		t.Fatal("a two-tap filter loaded as if it were the tuning")
 	}
 }
+
+// radar skips EQ_90 because its 80-100% transition is a single bucket; the loader has to accept
+// whatever's on disk and not insist on a 10% step from 50 to 100.
+func TestLoadSkipsMissingBucketsRadarStyle(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"EQ_30.cfg", "EQ_40.cfg", "EQ_50.cfg", "EQ_60.cfg", "EQ_70.cfg", "EQ_80.cfg", "EQ_100.cfg"} {
+		body := make([]float32, 1024)
+		body[0] = 1
+		var b strings.Builder
+		for i, v := range body {
+			fmt.Fprintf(&b, "%g", v)
+			if i != len(body)-1 {
+				b.WriteString(",\n")
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "MBCL.cfg"), []byte(validMBCL), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tuning, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(tuning.buckets); got != 7 {
+		t.Errorf("radar ships 7 buckets, Load found %d", got)
+	}
+	for _, want := range []struct {
+		volume float64
+		bucket int
+	}{
+		{0.30, 0}, {0.40, 1}, {0.50, 2}, {0.60, 3},
+		{0.70, 4}, {0.80, 5}, {0.85, 6}, {0.95, 6},
+	} {
+		if got := tuning.BucketFor(want.volume); got != want.bucket {
+			t.Errorf("BucketFor(%.2f) = %d, want %d", want.volume, got, want.bucket)
+		}
+	}
+}
+
+// radar's MBCL ships with non-zero comp_inVol and lim_inVol on the upper bands. The previous
+// loader rejected any non-zero value, which silently kept radar's chain at nil. The compressor
+// and limiter now apply those gains.
+func TestMBCLAcceptsNonZeroBandInputGain(t *testing.T) {
+	dir := t.TempDir()
+	var body strings.Builder
+	for i := 0; i < 1024; i++ {
+		if i > 0 {
+			body.WriteString(",\n")
+		}
+		body.WriteString("1.0")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "EQ_50.cfg"), []byte(body.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mbcl := `{
+		"Bypass": false,
+		"PreFilterBypass": true,
+		"inVol": 0,
+		"NumBands": 4,
+		"FilterBank FC": [115, 500, 7500],
+		"Bands Definition": [
+			{"comp_inVol": 0,  "comp_ratio": 20, "comp_thresh": -50, "comp_gainMin": -40, "lim_inVol": 0,  "lim_thresh": -8, "lim_release": 200},
+			{"comp_inVol": 6,  "comp_ratio": 1,  "comp_thresh": 99,  "comp_gainMin": 0,   "lim_inVol": 0,  "lim_thresh": -10, "lim_release": 200},
+			{"comp_inVol": 0,  "comp_ratio": 1,  "comp_thresh": 0,   "comp_gainMin": 0,   "lim_inVol": -6, "lim_thresh": -10, "lim_release": 200},
+			{"comp_inVol": 0,  "comp_ratio": 1,  "comp_thresh": 0,   "comp_gainMin": 0,   "lim_inVol": 0,  "lim_thresh": -10, "lim_release": 200}
+		],
+		"Full-band limiter": {"lim_inVol": 0, "lim_thresh": -10, "lim_release": 200}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "MBCL.cfg"), []byte(mbcl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tuning, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tuning.Chains(64); err != nil {
+		t.Errorf("the loader used to reject non-zero band input gain: %v", err)
+	}
+}
+
+const validMBCL = `{
+	"Bypass": false,
+	"PreFilterBypass": true,
+	"inVol": 0,
+	"NumBands": 4,
+	"FilterBank FC": [115, 500, 7500],
+	"Bands Definition": [
+		{"comp_inVol": 0, "comp_ratio": 1, "comp_thresh": 0, "comp_gainMin": 0, "lim_inVol": 0, "lim_thresh": -10, "lim_release": 200},
+		{"comp_inVol": 0, "comp_ratio": 1, "comp_thresh": 0, "comp_gainMin": 0, "lim_inVol": 0, "lim_thresh": -10, "lim_release": 200},
+		{"comp_inVol": 0, "comp_ratio": 1, "comp_thresh": 0, "comp_gainMin": 0, "lim_inVol": 0, "lim_thresh": -10, "lim_release": 200},
+		{"comp_inVol": 0, "comp_ratio": 1, "comp_thresh": 0, "comp_gainMin": 0, "lim_inVol": 0, "lim_thresh": -10, "lim_release": 200}
+	],
+	"Full-band limiter": {"lim_inVol": 0, "lim_thresh": -10, "lim_release": 200}
+}`
 
 func TestStripComments(t *testing.T) {
 	in := []byte(`{

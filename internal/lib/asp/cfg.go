@@ -9,8 +9,10 @@ import (
 	"strings"
 )
 
-// readFloats parses a coefficient file, one float per line with a trailing comma, and insists on the
-// count it should hold: a file of the wrong length is a different tuning.
+// readFloats parses a coefficient file, one float per line with a trailing comma. A want of zero
+// accepts any length and returns the parsed count, which is how Load learns a tuning's tap count
+// from the first EQ file; a want of N insists on exactly N coefficients and is used to verify the
+// remaining buckets share the same filter length.
 func readFloats(path string, want int) ([]float32, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -36,7 +38,7 @@ func readFloats(path string, want int) ([]float32, error) {
 	if err := s.Err(); err != nil {
 		return nil, err
 	}
-	if len(out) != want {
+	if want > 0 && len(out) != want {
 		return nil, fmt.Errorf("%s: %d coefficients, expected %d", path, len(out), want)
 	}
 	return out, nil

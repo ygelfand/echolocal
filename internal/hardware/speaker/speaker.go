@@ -49,8 +49,13 @@ const (
 	Card           = 0
 	PlaybackDevice = 23
 
-	// AmpSwitch gates the speaker.
+	// AmpSwitch gates the external speaker amplifier (the headphone jack on biscuit, the
+	// ext jack on radar).
 	AmpSwitch = "Ext_Speaker_Amp_Switch"
+
+	// SpeakerAmpSwitch gates the internal speaker driver, a separate signal on radar that
+	// biscuit does not expose. Writes to it on biscuit fail and continue without aborting.
+	SpeakerAmpSwitch = "Speaker_Amp_Switch"
 )
 
 // Player owns the speaker: one playback stream held open for the life of the process, with the
@@ -76,11 +81,12 @@ type Player struct {
 	resampling config.Resampling
 	splices    atomic.Uint64
 
-	// tuning is the vendor's driver tuning, loaded once, and chain is it applied to this stream. Both
-	// are nil on a device whose tuning we could not read, which plays untuned rather than not at all.
-	// on gates it; the chain is only ever touched by the write loop.
+	// tuning is the vendor's driver tuning, loaded once, and chains is one per EQ bucket — the
+	// vendor tunes filter shape per volume band, not just gain, so a single chain is wrong above
+	// the lowest band. nil on a device whose tuning we could not read, which plays untuned rather
+	// than not at all. on gates it; the chains are only ever touched by the write loop.
 	tuning *asp.Tuning
-	chain  *asp.Chain
+	chains []*asp.Chain
 	on     atomic.Bool
 	stale  atomic.Bool
 	mono   []float32
@@ -138,12 +144,12 @@ func New() *Player {
 		slog.Error("the driver tuning is not available, playing untuned", "err", err)
 		return p
 	}
-	c, err := t.Chain(period)
+	c, err := t.Chains(period)
 	if err != nil {
 		slog.Error("the driver tuning will not run, playing untuned", "err", err)
 		return p
 	}
-	p.tuning, p.chain, p.mono = t, c, make([]float32, period)
+	p.tuning, p.chains, p.mono = t, c, make([]float32, period)
 	return p
 }
 
@@ -212,7 +218,10 @@ func (p *Player) route() {
 	p.apply(pathSequence[p.out])
 }
 
-// amp switches the speaker amplifier.
+// amp switches the speaker amplifier(s). Radar exposes both an internal driver (SpeakerAmpSwitch)
+// and an external jack amp (AmpSwitch); biscuit only has the external one, where the internal and
+// jack share a single gate. Writing both keeps the path sequence the only place that names them,
+// and a missing control on either device logs and continues rather than aborts.
 func (p *Player) amp(on bool) {
 	p.pathMu.Lock()
 	defer p.pathMu.Unlock()
@@ -224,7 +233,10 @@ func (p *Player) amp(on bool) {
 	if on {
 		value = "On"
 	}
-	p.apply([]kctl{{name: AmpSwitch, value: value}})
+	p.apply([]kctl{
+		{name: SpeakerAmpSwitch, value: value},
+		{name: AmpSwitch, value: value},
+	})
 }
 
 // Output reports which output the player is driving.
@@ -391,14 +403,17 @@ func (p *Player) fill(buf []byte) {
 	p.fed = fed
 
 	// The tuning is for the driver, so the line-out is left with what it was sent.
-	tuned := mono && p.chain != nil && p.on.Load() && drain
+	tuned := mono && p.chains != nil && p.on.Load() && drain
 
-	// The vendor's volume is two halves: the gain its EQ bucket carries, in front of the tuning, and
-	// the curve's attenuation after it. Without this half the tuning runs at its quietest calibration
-	// however far up the dial it is.
-	makeup := float32(1)
-	if tuned {
-		makeup = float32(p.tuning.Makeup(float64(p.step.Load()) / VolumeSteps))
+	// The chain is chosen by the current volume: each EQ bucket has its own filter shape, not just
+	// its own gain, and using the wrong one sounds like a different EQ.
+	var chain *asp.Chain
+	if len(p.chains) > 0 {
+		bucket := p.tuning.BucketFor(float64(p.step.Load()) / VolumeSteps)
+		if bucket >= len(p.chains) {
+			bucket = len(p.chains) - 1
+		}
+		chain = p.chains[bucket]
 	}
 
 	gain := p.Volume()
@@ -421,7 +436,7 @@ func (p *Player) fill(buf []byte) {
 			r = l
 		}
 		if tuned {
-			p.mono[j] = float32(clamp(l)) / full * makeup
+			p.mono[j] = float32(clamp(l)) / full
 			continue
 		}
 		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(clamp(l))*gain)))
@@ -432,14 +447,17 @@ func (p *Player) fill(buf []byte) {
 	}
 
 	// Resetting belongs to whoever processes, so a toggle only says that the history is no longer
-	// about what is playing.
+	// about what is playing. Every chain has independent history, and the next pass may pick a
+	// different one.
 	if p.stale.Swap(false) {
-		p.chain.Reset()
+		for _, c := range p.chains {
+			c.Reset()
+		}
 	}
 
 	// Volume attenuates what the tuning produced. It cannot go in front of it: the limiter holds a
 	// fixed ceiling, so anything turned down before it is pulled straight back up to the same level.
-	p.chain.Process(p.mono)
+	chain.Process(p.mono)
 	for i, j := 0, 0; i < period*Channels; i, j = i+Channels, j+1 {
 		s := int16(p.mono[j] * full * gain)
 		binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
@@ -539,7 +557,7 @@ func (p *Player) SetResampling(r config.Resampling) config.Resampling {
 // SetASP turns the driver tuning on or off and reports what it settled on, which is off on a device
 // whose tuning never loaded.
 func (p *Player) SetASP(on bool) bool {
-	on = on && p.chain != nil
+	on = on && p.chains != nil
 	if on && !p.on.Load() {
 		p.stale.Store(true)
 	}

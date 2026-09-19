@@ -270,6 +270,27 @@ func (m *Mixer) SetBytes(name string, data []byte) error {
 	return m.SetAll(c, values)
 }
 
+// GetBytes reads a byte-typed control, by name. A byte control returns its count as a single
+// byte stream with no padding between values.
+func (m *Mixer) GetBytes(name string) ([]byte, error) {
+	c, err := m.Find(name)
+	if err != nil {
+		return nil, err
+	}
+	if c.Type != TypeBytes {
+		return nil, fmt.Errorf("alsa: %q is not a byte control", name)
+	}
+	v, err := m.Get(c)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, len(v))
+	for i, x := range v {
+		out[i] = byte(x)
+	}
+	return out, nil
+}
+
 // SetEnum picks an enumerated control's item by name.
 func (m *Mixer) SetEnum(name, item string) error {
 	c, err := m.Find(name)

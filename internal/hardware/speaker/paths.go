@@ -27,6 +27,13 @@ type kctl struct {
 
 var initSequence = []kctl{
 	{name: AmpSwitch, value: "Off"},
+	{name: SpeakerAmpSwitch, value: "Off"},
+	// MFP Gpio Mute is the analog amplifier gate on radar's TLV320AIC3204. It defaults to
+	// "On" (MFP2 driven high, amp disabled) so the device does not reboot if the codec
+	// ever enables output without a defined path. Setting it "Off" drives MFP2 low and
+	// turns the external speaker amplifier on. Safe on biscuit — the control does not
+	// exist there, and apply() logs and continues on missing controls.
+	{name: mfpGpioMute, value: "Off"},
 	{name: "Audio_DacMux_Setting", value: "On"},
 	{name: "Ignore Ramp Up", value: "Off"},
 	{name: driverGain, level: 0},
@@ -48,6 +55,11 @@ var speakerEQ = []byte{
 
 var pathSequence = map[Output][]kctl{
 	OutputSpeaker: {
+		// Reaffirm the amp gate on every path switch — the kernel may re-mute MFP2 on close.
+		{name: SpeakerAmpSwitch, value: "On"},
+		{name: mfpGpioMute, value: "Off"},
+		{name: AmpSwitch, value: "On"},
+		{name: "Headphone_Speaker_Mux", value: "Speaker"},
 		{name: "HPL Output Mixer L_DAC Switch", level: 1},
 		{name: "HPR Output Mixer R_DAC Switch", level: 1},
 		{name: "Audio_DacMux_Setting", value: "Off"},
@@ -55,6 +67,10 @@ var pathSequence = map[Output][]kctl{
 		{name: driverGain, level: 6},
 	},
 	OutputHeadphone: {
+		{name: SpeakerAmpSwitch, value: "Off"},
+		{name: mfpGpioMute, value: "Off"},
+		{name: AmpSwitch, value: "On"},
+		{name: "Headphone_Speaker_Mux", value: "Headphone"},
 		{name: "Ignore Ramp Up", value: "On"},
 		{name: driverGain, level: 11},
 		{name: "Audio_DacMux_Setting", value: "On"},
@@ -67,9 +83,18 @@ var headphoneOff = []kctl{
 	{name: "Audio_DacMux_Setting", value: "Off"},
 	{name: "Right Channel Only", value: "On"},
 	{name: "Ignore Ramp Up", value: "Off"},
+	{name: AmpSwitch, value: "Off"},
+	{name: "Headphone_Speaker_Mux", value: "Speaker"},
+	{name: SpeakerAmpSwitch, value: "On"},
+	{name: mfpGpioMute, value: "Off"},
 }
 
 const driverGain = "HP Driver Gain Volume"
+
+// mfpGpioMute is the analog amplifier gate on radar's TLV320AIC3204 codec, exposed as an ALSA
+// mixer control by the in-tree driver. "On" drives MFP2 high (amp disabled); "Off" drives it
+// low (amp enabled). The control does not exist on biscuit's path, so apply() logs and skips.
+const mfpGpioMute = "MFP Gpio Mute"
 
 // jackState is the kernel's headphone jack switch: 1 while something is plugged in.
 const jackState = "/sys/class/switch/h2w/state"

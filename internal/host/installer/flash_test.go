@@ -3,6 +3,8 @@ package installer
 import (
 	"strings"
 	"testing"
+
+	"github.com/ygelfand/echolocal/internal/host/bootimg"
 )
 
 // Everything that writes is skipped on a device that is ready, which is what makes the stage safe to
@@ -73,11 +75,37 @@ func TestNothingIsWrittenWithoutApproval(t *testing.T) {
 	}
 }
 
-// A stage with nothing to write refuses rather than writing whatever it was handed.
+// A stage with nothing to write refuses rather than writing whatever it was handed. The state here
+// is for biscuit — a device with a shipped image — so the empty cfg.BootImage is the only thing
+// under test.
 func TestCheckImageRefusesAnEmptyOne(t *testing.T) {
-	r := &run{state: state{device: "biscuit", build: "272.6.8.0_user_680767620"}}
+	r := &run{state: state{device: "biscuit_puffin", image: bootimg.Ours["biscuit_puffin"], build: "272.6.8.0_user_680767620"}}
 
 	if _, _, err := checkImage(r); err == nil {
 		t.Error("accepted an empty image")
+	}
+}
+
+// A device whose entry is a placeholder (no SHA256 filled in) is refused at the same gate, with a
+// message pointing the user at --boot-image. This simulates a future device added to bootimg.Ours
+// without a corresponding assets/<device>.img yet.
+func TestCheckImageRefusesADeviceWithNoShippedImage(t *testing.T) {
+	// Build a placeholder image in-memory: same shape as a real one but with an empty SHA256.
+	placeholder := bootimg.Image{
+		SHA256:  "",
+		Size:    0,
+		Cmdline: "androidboot.selinux=permissive",
+		Device:  "future_puffin",
+	}
+	r := &run{
+		cfg: Config{
+			BootImage:     []byte("anything"),
+			BootImageFrom: "supplied",
+		},
+		state: state{device: "future_puffin", image: placeholder, build: "1"},
+	}
+
+	if _, _, err := checkImage(r); err == nil {
+		t.Error("accepted a placeholder image")
 	}
 }

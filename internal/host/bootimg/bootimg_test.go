@@ -130,27 +130,71 @@ func TestCmdline(t *testing.T) {
 
 // The partition is written with dd in fixed blocks, and the count comes from the image size, so a size
 // that is not a whole number of blocks would read back short and fail a write that was fine.
+// Every shipped image is checked, so a release with an oddly-sized binary fails the build instead of
+// bricking the device it lands on.
 func TestOursFitsHowItIsWritten(t *testing.T) {
-	if Ours.Size%512 != 0 {
-		t.Errorf("image size %d is not a multiple of 512", Ours.Size)
-	}
-	for _, size := range PartitionSizes {
-		if Ours.Size >= size {
-			t.Errorf("image is %d bytes and the partition is %d", Ours.Size, size)
+	for device, img := range Ours {
+		if !img.Shipped() {
+			continue
+		}
+		if img.Size%512 != 0 {
+			t.Errorf("%s: image size %d is not a multiple of 512", device, img.Size)
+		}
+		for _, size := range PartitionSizes {
+			if img.Size >= size {
+				t.Errorf("%s: image is %d bytes and the partition is %d", device, img.Size, size)
+			}
 		}
 	}
 }
 
-// The shipped image is committed, so this always runs: it is what keeps the table and the file from
-// drifting apart, and a missing image means a build that cannot produce a release.
+// The shipped images are committed, so this always runs: it is what keeps the table and the files
+// from drifting apart, and a missing image means a build that cannot produce a release for that
+// device.
 func TestShippedImageIsWhatWeSayItIs(t *testing.T) {
-	const path = "../assets/boot.img"
+	const dir = "../assets"
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading the shipped image: %v", err)
+	cases := []struct {
+		device, file string
+	}{
+		{"biscuit_puffin", "boot.img"},
+		{"radar_puffin", "boot-radar.img"},
 	}
-	if err := Ours.Verify(path, data); err != nil {
-		t.Error(err)
+
+	for _, c := range cases {
+		t.Run(c.device, func(t *testing.T) {
+			img, ok := Ours[c.device]
+			if !ok {
+				t.Skipf("no entry for %s", c.device)
+			}
+			if !img.Shipped() {
+				t.Skipf("%s is a placeholder", c.device)
+			}
+
+			data, err := os.ReadFile(dir + "/" + c.file)
+			if err != nil {
+				t.Fatalf("reading the shipped image: %v", err)
+			}
+			if err := img.Verify(c.file, data); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+// For returns the right image for a known codename and an error for one we have not heard of. An
+// empty codename is its own error: the caller almost certainly has not talked to the device.
+func TestForReturnsTheRightImage(t *testing.T) {
+	if _, err := For("biscuit_puffin"); err != nil {
+		t.Errorf("biscuit_puffin: %v", err)
+	}
+	if _, err := For("radar_puffin"); err != nil {
+		t.Errorf("radar_puffin: %v", err)
+	}
+	if _, err := For(""); err == nil {
+		t.Error("empty codename accepted")
+	}
+	if _, err := For("tank"); err == nil {
+		t.Error("unknown codename accepted")
 	}
 }
