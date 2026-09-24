@@ -121,10 +121,10 @@ func formats() []audioFormat {
 	}
 }
 
-// audioFormat mirrors the protocol's, so the list above reads without the import.
+// audioFormat is one supported_formats entry, as the hello carries it.
 type audioFormat struct {
-	Codec      string
-	Channels   int
-	SampleRate int
-	BitDepth   int
+	Codec      string `json:"codec"`
+	Channels   int    `json:"channels"`
+	SampleRate int    `json:"sample_rate"`
+	BitDepth   int    `json:"bit_depth"`
 }

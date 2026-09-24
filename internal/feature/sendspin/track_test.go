@@ -3,16 +3,14 @@ package sendspin
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
 // Decoded rather than built: absent and null are the same nil pointer in Go, and only the decoder
 // records which of the two arrived.
-func decode(t *testing.T, raw string) *protocol.MetadataState {
+func decode(t *testing.T, raw string) *metadataState {
 	t.Helper()
 
-	var m protocol.MetadataState
+	var m metadataState
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		t.Fatalf("decoding %s: %v", raw, err)
 	}

@@ -24,6 +24,12 @@ room-reactive behavior, and a color picker per segment. The ring can follow the 
 **Speaker.** A native Home Assistant `media_player` — play any media Home Assistant can hand it.
 Music can duck under a wake word, and resumes. Also supports white-noise generation.
 
+**Sendspin.** The Dot is a [Sendspin](https://github.com/Sendspin/spec) player, so
+[Music Assistant](https://www.music-assistant.io/) can stream to it in sync with the rest of the house,
+with the track showing in Home Assistant and the media player's controls reaching the group. The
+connection is encrypted end to end and the Dot can be paired with Music Assistant using the pairing
+token it shows in Home Assistant. See [the pairing guide](guides/pairing-with-music-assistant.md).
+
 **Bluetooth proxy.** BLE advertisements forwarded to Home Assistant, so the Dot extends your
 Bluetooth and can be used in integrations like [bermuda](https://github.com/agittins/bermuda).
 While the proxy is enabled, the Dot also advertises as an iBeacon with UUID
