@@ -2,7 +2,6 @@ package media
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +13,9 @@ import (
 )
 
 // Formats is what Home Assistant is asked to convert to. It runs the conversion through ffmpeg, so
-// asking for plain WAV means no decoder here: strip the header and the rest is samples.
+// asking for plain WAV means the converted track needs no decoding here: strip the header and the
+// rest is samples. The announce path still decodes whatever the TTS engine hands over (see decode),
+// because Home Assistant serves that in the engine's own container rather than converting it.
 //
 // Music gets the codec's own rate and both channels, so nothing is resampled and nothing is thrown
 // away. Announcements stay at the pipeline's rate: they are one voice, and the bandwidth would buy
@@ -54,43 +55,5 @@ func Fetch(ctx context.Context, url string) ([]int16, error) {
 	if err != nil {
 		return nil, err
 	}
-	return monoPCM(body)
-}
-
-// monoPCM takes 16-bit samples out of a RIFF/WAVE body, walking the chunks rather than assuming a
-// 44-byte header: a converted file can carry extra chunks before the data.
-//
-// Sizes are handled as uint64. A 32-bit int cannot hold a large RIFF size, and a chunk claiming
-// one turns negative, which slips past a bounds check and panics on the slice.
-func monoPCM(body []byte) ([]int16, error) {
-	if len(body) < 12 || string(body[0:4]) != "RIFF" || string(body[8:12]) != "WAVE" {
-		return nil, fmt.Errorf("not a WAVE file: %d bytes", len(body))
-	}
-
-	total := uint64(len(body))
-	for off := uint64(12); off+8 <= total; {
-		id := string(body[off : off+4])
-		size := uint64(binary.LittleEndian.Uint32(body[off+4 : off+8]))
-		off += 8
-
-		end := off + size
-		if end > total {
-			end = total
-		}
-
-		if id == "data" {
-			pcm := body[off:end]
-			samples := make([]int16, len(pcm)/2)
-			for i := range samples {
-				samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*2:]))
-			}
-			return samples, nil
-		}
-
-		off = end
-		if size%2 == 1 {
-			off++
-		}
-	}
-	return nil, fmt.Errorf("no data chunk in %d bytes", total)
+	return decode(body)
 }
