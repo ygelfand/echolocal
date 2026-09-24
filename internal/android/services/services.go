@@ -67,6 +67,11 @@ var Disabled = []string{
 	"perfmonitord",
 	"perfrecoveryd",
 
+	// Time. sntpd carried its own server list and never wrote the hardware clock; securetime asked a
+	// TEE this device does not have, every few seconds. echod's clock component does the job.
+	"sntpd",
+	"securetime",
+
 	"factory-reset",
 	"avahi-daemon",
 	"neo-coordinator",
