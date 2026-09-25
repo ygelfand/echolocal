@@ -314,7 +314,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			took += spent
 			worst = max(worst, spent)
 
-			if elapsed := time.Since(since); elapsed >= 30*time.Second {
+			if elapsed := time.Since(since); elapsed >= statsEvery {
 				e.mu.Lock()
 				by := make([]any, 0, 8)
 				for k, d := range e.spent {
@@ -334,6 +334,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// statsEvery is how often the frame statistics are logged. They are a health check rather than a
+// trace: once every five minutes says whether the loop is keeping up, and a day of them is a page
+// rather than a buffer's worth.
+const statsEvery = 5 * time.Minute
 
 // score feeds one frame and acts on what came back. The lock is held across the whole of it: an
 // engine is shared with whatever Use installs next, and it is not safe to swap a wake word out from

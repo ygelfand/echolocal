@@ -52,6 +52,9 @@ const (
 	// maxSnap is the largest correction that can be one, above which the anchor predates a change of
 	// clock rather than having drifted.
 	maxSnap = 2 * speaker.Rate
+
+	// reportEvery is the seconds between correction log lines while a stream plays.
+	reportEvery = 30
 )
 
 // out places this room's audio by output frame index. Arrival order cannot line two rooms up: a burst
@@ -85,7 +88,7 @@ type out struct {
 	drift     float64
 	corrected int64
 
-	// nextReport is the frame the next correction line is due at, one a second.
+	// nextReport is the frame the next correction line is due at.
 	nextReport uint64
 
 	// now stands in for the clock, so a test can hold the server's time still.
@@ -261,10 +264,12 @@ func (o *out) correct(from uint64) {
 	off := float64(int64(from) - tailFrames - want)
 	o.drift += (off - o.drift) * driftGain
 
-	// What the correction is actually looking at, once a second: off should sit near zero and stay
-	// there. Where it does not, these say whether the room, the anchor or the server clock is moving.
+	// What the correction is actually looking at: off should sit near zero and stay there. Where it
+	// does not, these say whether the room, the anchor or the server clock is moving. Every half
+	// minute rather than every second: a track is a few lines, not a few hundred, and the drift the
+	// numbers describe moves over minutes.
 	if from >= o.nextReport {
-		o.nextReport = from + speaker.Rate
+		o.nextReport = from + reportEvery*speaker.Rate
 		slog.Info("sendspin correction", "off_ms", int64(off)*1000/speaker.Rate,
 			"drift_ms", int64(o.drift)*1000/speaker.Rate, "from", from, "want", want,
 			"anchor_frame", o.frame, "corrected", o.corrected,
