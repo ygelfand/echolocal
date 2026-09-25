@@ -57,17 +57,60 @@ type Image struct {
 	Device string
 }
 
-// Ours describes images/echolocal-boot.img.
+// Ours describes the boot images we ship, one per supported device. The right one for a device is
+// looked up with For(ro.product.device); an unsupported device gets an error and the user is told
+// to pass --boot-image with a build of their own.
 //
 // Its ramdisk keeps MTK section headers, so anything unpacking it has to skip the 512-byte ROOTFS
 // header before the gzip.
-var Ours = Image{
-	SHA256:  "7f12e1522211d2e1adfc0164a5c2381b8819f44099732bf919b12c23e41e7dd1",
-	Size:    9678848,
-	Cmdline: "androidboot.selinux=permissive",
-	Build:   13121734532,
-	Device:  "biscuit_puffin",
+var Ours = map[string]Image{
+	"biscuit_puffin": {
+		SHA256:  "7f12e1522211d2e1adfc0164a5c2381b8819f44099732bf919b12c23e41e7dd1",
+		Size:    9678848,
+		Cmdline: "androidboot.selinux=permissive",
+		Build:   13121734532,
+		Device:  "biscuit_puffin",
+	},
+
+	// radar image is the stock FireOS 6 boot partition from a radar_puffin device, trimmed of
+	// trailing zero padding and with androidboot.selinux=permissive appended to the kernel
+	// cmdline. Built with `mkbootimg`.
+	"radar_puffin": {
+		SHA256:  "d43e09549323d86c4bd20d88f1efd37642122ed8b5ee740f338ab95978936451",
+		Size:    9762304,
+		Cmdline: "androidboot.selinux=permissive",
+		Build:   0,
+		Device:  "radar_puffin",
+	},
 }
+
+// For returns the shipped image for a device codename, or an error naming the codename if none is
+// known. An image with an empty SHA256 is a placeholder: its existence in the map says the codename
+// is recognised, and Verify refuses it as not-shipped so the user gets a clear next step.
+func For(device string) (Image, error) {
+	if device == "" {
+		return Image{}, fmt.Errorf("bootimg: no ro.product.device reported; pass --boot-image to override")
+	}
+	if img, ok := Ours[device]; ok {
+		return img, nil
+	}
+	return Image{}, fmt.Errorf("bootimg: no shipped image for device %q (supported: %s); pass --boot-image to override",
+		device, supportedDevices())
+}
+
+// supportedDevices lists the keys of Ours in a stable order for error messages.
+func supportedDevices() string {
+	keys := make([]string, 0, len(Ours))
+	for k := range Ours {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, ", ")
+}
+
+// Shipped reports whether For would return an image whose hash is filled in, rather than a
+// placeholder. A device with a placeholder can still be installed against with --boot-image.
+func (i Image) Shipped() bool { return i.SHA256 != "" }
 
 // magic is what every Android boot image starts with.
 var magic = []byte("ANDROID!")
