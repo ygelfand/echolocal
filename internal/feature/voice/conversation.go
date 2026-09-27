@@ -31,6 +31,65 @@ import (
 // only the first is served.
 const errDuplicate = "duplicate_wake_up_detected"
 
+// errNoText is Home Assistant saying the audio held no words: a wake word the room did not mean, or
+// one nobody followed with anything.
+const errNoText = "stt-no-text-recognized"
+
+// ending is what a turn that ran out of time does.
+type ending int
+
+const (
+	// endTrouble is the trouble tone: something failed.
+	endTrouble ending = iota
+
+	// endQuiet ends the turn without a sound: nobody was talking to the device.
+	endQuiet
+
+	// endSend stops listening and hands Home Assistant what it has, as the talk ending would have.
+	endSend
+)
+
+func (e ending) String() string {
+	switch e {
+	case endQuiet:
+		return "quiet"
+	case endSend:
+		return "send"
+	}
+	return "trouble"
+}
+
+// onTimeout is how a turn that ran out of time ends. A follow-up nobody answered ends quietly, as it
+// always has. Running out while listening is otherwise only a failure when Home Assistant stopped
+// answering: if it reported speech, it was there and listening, and the talk simply never ended - a
+// television or a video that said the wake word and kept on talking - so the slot's setting decides.
+// Thinking that runs out is always a failure.
+func onTimeout(u config.Unended, p phase, followUp, speech bool) ending {
+	if p != phaseListening {
+		return endTrouble
+	}
+	if followUp {
+		return endQuiet
+	}
+	if !speech {
+		return endTrouble
+	}
+	switch u {
+	case config.UnendedQuiet:
+		return endQuiet
+	case config.UnendedSend:
+		return endSend
+	}
+	return endTrouble
+}
+
+// quietError says an error means nobody was talking to the device rather than something breaking: Home
+// Assistant finding no words, on a slot that does not want the trouble tone for talk it did not mean.
+// Under Send, Home Assistant has already had its say and found nothing.
+func quietError(u config.Unended, code string) bool {
+	return code == errNoText && (u == config.UnendedQuiet || u == config.UnendedSend)
+}
+
 // yieldFlash is how long the ring says the turn went elsewhere. Long enough to be seen by somebody
 // looking at the wrong device, short enough not to compete with the one that is answering.
 const yieldFlash = 900 * time.Millisecond
@@ -147,6 +206,10 @@ type conversation struct {
 	// followUp says this turn was opened without a wake word, so hearing nothing is a normal ending
 	// rather than Home Assistant having gone away.
 	followUp bool
+
+	// speech says Home Assistant has reported speech in this turn, so it is there and listening:
+	// running out of time then means the talk never ended, not that Home Assistant went away.
+	speech bool
 
 	// turn measures the one that is open and reports it when it closes. Nil while idle, and every
 	// method on it tolerates that, so the phases do not each have to check.
@@ -304,6 +367,9 @@ func (c *conversation) handle(e event) {
 		c.start(nextTurn{slot: e.slot})
 
 	case evSpeaking:
+		if c.phase == phaseListening {
+			c.speech = true
+		}
 		if c.followUp && c.phase == phaseListening {
 			c.arm(wakeword.MaxListen(c.slot))
 		}
@@ -421,6 +487,15 @@ func (c *conversation) handle(e event) {
 			return
 		}
 
+		// No words in the audio: the room did not mean it, and on a slot that says so the trouble tone
+		// would say otherwise.
+		if quietError(wakeword.Unended(c.slot), e.code) {
+			slog.Info("no words heard", "slot", c.slot+1, "message", e.msg)
+			c.clearPending()
+			c.idle("no words heard", activity.Cancelled)
+			return
+		}
+
 		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
 		c.clearPending()
 		c.idle("failed", activity.Failed)
@@ -446,12 +521,22 @@ func (c *conversation) handle(e event) {
 	case evTimeout:
 		c.clearPending()
 
-		// Nobody spoke into a turn nobody asked for, which is how a follow-up is meant to end. Every
-		// other timeout is something failing: listening means Home Assistant stopped answering,
-		// thinking means its pipeline is slower than the slot allows for.
-		if c.followUp && c.phase == phaseListening {
-			slog.Info("nothing followed", "slot", c.slot+1)
-			c.idle("nothing said", activity.Cancelled)
+		// Nobody spoke into a turn nobody asked for, which is how a follow-up is meant to end, and talk
+		// that never ended ends the way the slot says. Every other timeout is something failing:
+		// listening means Home Assistant stopped answering, thinking means its pipeline is slower than
+		// the slot allows for.
+		switch onTimeout(wakeword.Unended(c.slot), c.phase, c.followUp, c.speech) {
+		case endQuiet:
+			why := "nothing said"
+			if !c.followUp {
+				why = "talk never ended"
+			}
+			slog.Info(why, "slot", c.slot+1)
+			c.idle(why, activity.Cancelled)
+			return
+		case endSend:
+			slog.Info("talk never ended, sending what was heard", "slot", c.slot+1)
+			c.think()
 			return
 		}
 
@@ -524,6 +609,7 @@ func (c *conversation) start(n nextTurn) {
 
 	c.slot = slot
 	c.followUp = n.followUp
+	c.speech = false
 
 	// Before the chime, and before Home Assistant is told anything. Ducking is what the room hears
 	// first, and it has a second of queued music to get through, so every step it waits behind is a

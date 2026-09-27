@@ -12,6 +12,7 @@ package wakeword
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	esphome "github.com/ygelfand/go-esphome-device"
@@ -52,6 +53,7 @@ type slot struct {
 	followUp  *esphome.Number
 	maxListen *esphome.Number
 	maxThink  *esphome.Number
+	unended   *esphome.Select
 }
 
 var (
@@ -180,13 +182,21 @@ func newSlot(n int) slot {
 			Min: 5, Max: 300, Step: 5, Unit: "s",
 			Mode: esphome.NumberBox,
 		},
+		unended: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("talk_timeout_%d", n+1),
+				Name:     "When talk doesn't end",
+				Icon:     "mdi:timer-alert-outline",
+				Category: esphome.CategoryConfig,
+			},
+		},
 	}
 
-	// All eleven on a page of their own.
+	// All twelve on a page of their own.
 	for _, b := range []*esphome.Base{
 		&s.wake.Base, &s.threshold.Base, &s.tone.Base, &s.effect.Base,
 		&s.thinking.Base, &s.replying.Base, &s.delivery.Base,
-		&s.buffer.Base, &s.followUp.Base, &s.maxListen.Base, &s.maxThink.Base,
+		&s.buffer.Base, &s.followUp.Base, &s.maxListen.Base, &s.maxThink.Base, &s.unended.Base,
 	} {
 		b.DeviceID = on
 	}
@@ -251,6 +261,8 @@ func newSlot(n int) slot {
 			slog.Error("saving the thinking limit failed", "slot", n+1, "err", err)
 		}
 	}
+	component.Bind(s.unended, unendeds(), settleUnended,
+		func(v config.Unended) error { return config.Set().Wake(n).Unended(v) })
 	return s
 }
 
@@ -259,13 +271,27 @@ func deliveries() []config.Delivery {
 	return []config.Delivery{config.DeliveryWhole, config.DeliveryStream}
 }
 
+// unendeds is how a turn can end when its talk never stopped, in the order they are offered.
+func unendeds() []config.Unended {
+	return []config.Unended{config.UnendedAlert, config.UnendedQuiet, config.UnendedSend}
+}
+
+// settleUnended takes a value this build does not offer as the default, and so a slot saved before
+// the setting existed, which has none.
+func settleUnended(u config.Unended) config.Unended {
+	if slices.Contains(unendeds(), u) {
+		return u
+	}
+	return config.DefaultUnended
+}
+
 func (w *WakeWord) Name() string { return "wake word settings" }
 
 func (w *WakeWord) Entities() []esphome.Entity {
 	var ents []esphome.Entity
 	for _, s := range w.slots {
 		ents = append(ents, s.wake, s.threshold, s.tone, s.effect, s.thinking, s.replying,
-			s.delivery, s.buffer, s.followUp, s.maxListen, s.maxThink)
+			s.delivery, s.buffer, s.followUp, s.maxListen, s.maxThink, s.unended)
 	}
 	return ents
 }
@@ -288,6 +314,7 @@ func (w *WakeWord) Restore(c config.Config) {
 		s.followUp.Set(float32(saved.FollowUp))
 		s.maxListen.Set(float32(saved.MaxListen))
 		s.maxThink.Set(float32(saved.MaxThink))
+		component.Restore(s.unended, saved.Unended, settleUnended)
 	}
 	slog.Info("restored", "what", "wake word settings", "slots", len(w.slots))
 }

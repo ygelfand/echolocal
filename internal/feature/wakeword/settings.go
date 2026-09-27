@@ -54,6 +54,10 @@ func MaxThink(slot int) time.Duration {
 	return time.Duration(saved(slot).MaxThink) * time.Second
 }
 
+// Unended is how a turn from the slot ends when its talk never stopped. A value this build does not
+// offer, or none, is the default.
+func Unended(slot int) config.Unended { return settleUnended(saved(slot).Unended) }
+
 // Effect is the animation a slot plays, empty when it is turned off. The conversation runs it: this
 // only says which one, because which one is a setting.
 func Effect(slot int) string {
