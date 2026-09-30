@@ -60,6 +60,10 @@ type state struct {
 	// slot is ro.boot.slot_suffix, which names the half of an A/B device that is running and so the
 	// one to write.
 	slot string
+
+	// image is the boot image that fits this device. It is filled in by probe() once ro.product.device
+	// is known, and is what the rest of the stage compares against.
+	image bootimg.Image
 }
 
 // ready judges the installed system, which a device in recovery is not running: what probe reads there
@@ -82,12 +86,15 @@ type BootState struct {
 
 	// Partition is what the question is about, which is the slot the device is running.
 	Partition string
+
+	// Device is the value of ro.product.device, used by the caller to pick the right boot image.
+	Device string
 }
 
 // Probe reports what a device is without changing anything.
 func Probe(d *device.Device) (BootState, error) {
 	s, err := probe(d)
-	return BootState{Ready: s.ready(), Summary: s.String(), Partition: bootimg.Partition(s.slot)}, err
+	return BootState{Ready: s.ready(), Summary: s.String(), Partition: bootimg.Partition(s.slot), Device: s.device}, err
 }
 
 // probe reads the device's state. It runs before the flash and again after, so the two can never
@@ -111,6 +118,11 @@ func probe(d *device.Device) (state, error) {
 	if s.rooted, err = d.IsRoot(); err != nil {
 		return s, err
 	}
+
+	// Look up the boot image for this device once, so the rest of the stage never has to ask. A
+	// unknown codename is only an error when the stage is actually about to write — that is
+	// checkImage's job — so a device that has nothing to do is not refused on it.
+	s.image, _ = bootimg.For(s.device)
 
 	s.enforcing, _ = d.Shell("getenforce")
 	s.permissive = !strings.EqualFold(strings.TrimSpace(s.enforcing), "enforcing")
@@ -140,10 +152,14 @@ func checkImage(r *run) (string, bool, error) {
 	if len(r.cfg.BootImage) == 0 {
 		return "", false, errors.New("no boot image given")
 	}
-	if err := bootimg.Ours.Verify(r.cfg.BootImageFrom, r.cfg.BootImage); err != nil {
+	if !r.state.image.Shipped() {
+		return "", false, fmt.Errorf("no shipped boot image for device %q (build %s); build or supply one with --boot-image",
+			r.state.device, r.state.build)
+	}
+	if err := r.state.image.Verify(r.cfg.BootImageFrom, r.cfg.BootImage); err != nil {
 		return "", false, err
 	}
-	detail := fmt.Sprintf("%s, %d bytes, %s", r.cfg.BootImageFrom, bootimg.Ours.Size, bootimg.Ours.SHA256[:12])
+	detail := fmt.Sprintf("%s, %d bytes, %s", r.cfg.BootImageFrom, r.state.image.Size, r.state.image.SHA256[:12])
 
 	// getprop in recovery describes the recovery image, which is somebody else's build: it names neither
 	// the hardware nor the system this ramdisk pairs with, so there is nothing to compare against.
@@ -151,7 +167,7 @@ func checkImage(r *run) (string, bool, error) {
 		return detail, false, nil
 	}
 
-	untested, err := bootimg.Ours.Supports(r.state.device, r.state.build)
+	untested, err := r.state.image.Supports(r.state.device, r.state.build)
 	if err != nil {
 		return "", false, err
 	}
@@ -213,14 +229,14 @@ func (r *run) stage() error {
 		if err != nil && try == stageTries-1 {
 			return err
 		}
-		if staged == bootimg.Ours.SHA256 {
+		if staged == r.state.image.SHA256 {
 			return nil
 		}
 		tries = append(tries, fmt.Sprintf("%s bytes %s", sizeOf(r.d, remoteImage), staged))
 	}
 
 	return fmt.Errorf("the staged image never matched. tries: %s. want: %d bytes %s",
-		strings.Join(tries, "; "), bootimg.Ours.Size, bootimg.Ours.SHA256)
+		strings.Join(tries, "; "), r.state.image.Size, r.state.image.SHA256)
 }
 
 // sizeOf is what the device says is there, which is what tells a short write from a wrong one.
@@ -371,17 +387,17 @@ func verifyImage(r *run) (string, bool, error) {
 	// Small blocks and a count, not one read of the whole image: a short read from a single huge
 	// request would hash fewer bytes and report a mismatch on a write that was fine.
 	const block = 512
-	if bootimg.Ours.Size%block != 0 {
-		return "", false, fmt.Errorf("image size %d is not a multiple of %d", bootimg.Ours.Size, block)
+	if r.state.image.Size%block != 0 {
+		return "", false, fmt.Errorf("image size %d is not a multiple of %d", r.state.image.Size, block)
 	}
 	got, err := sha256Of(r.d, fmt.Sprintf("dd if=%s bs=%d count=%d 2>/dev/null",
-		bootimg.Node(r.state.slot), block, bootimg.Ours.Size/block))
+		bootimg.Node(r.state.slot), block, r.state.image.Size/block))
 	if err != nil {
 		return "", false, err
 	}
-	if got != bootimg.Ours.SHA256 {
+	if got != r.state.image.SHA256 {
 		return "", false, fmt.Errorf("the partition hashes to %s, want %s: left in recovery, re-run to write it again",
-			got, bootimg.Ours.SHA256)
+			got, r.state.image.SHA256)
 	}
 	return got[:12] + " matches", false, nil
 }

@@ -50,6 +50,24 @@ func (c *crossover) reset() {
 	}
 }
 
+// clone copies the crossover tree, giving each split a fresh filter pair and fresh allpasses. The
+// coefficients are read-only so they share; only the state is new.
+func (c *crossover) clone() *crossover {
+	out := &crossover{}
+	for _, s := range c.splits {
+		ns := &split{
+			low:         s.low.clone(),
+			high:        s.high.clone(),
+			compensated: append([]int(nil), s.compensated...),
+		}
+		for _, ap := range s.allpass {
+			ns.allpass = append(ns.allpass, ap.clone())
+		}
+		out.splits = append(out.splits, ns)
+	}
+	return out
+}
+
 // process fills out with one band each. The input is left alone.
 func (c *crossover) process(x []float32, out [][]float32) {
 	rest := out[len(out)-1]
@@ -87,6 +105,8 @@ func newLR4(fc float64, rate int, high bool) *lr4 {
 
 func (l *lr4) step(x float32) float32 { return l.b.step(l.a.step(x)) }
 
+func (l *lr4) clone() *lr4 { return &lr4{a: l.a.clone(), b: l.b.clone()} }
+
 // biquad is a direct form II transposed section.
 type biquad struct {
 	b0, b1, b2, a1, a2 float64
@@ -99,6 +119,11 @@ func (f *biquad) step(x float32) float32 {
 	f.z1 = f.b1*in - f.a1*out + f.z2
 	f.z2 = f.b2*in - f.a2*out
 	return float32(out)
+}
+
+func (f *biquad) clone() *biquad {
+	r := *f
+	return &r
 }
 
 // newButterworth is a second-order section at Q of a half root two, low or high pass.

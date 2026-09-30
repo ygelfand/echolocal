@@ -114,6 +114,26 @@ lint: ## Run golangci-lint
 tidy: ## Tidy go.mod / go.sum
 	go mod tidy
 
+##@ Diagnostics
+
+.PHONY: build-aspprobe
+build-aspprobe: ## Build the aspprobe diagnostic for the device (DOT_ARCH=arm|arm64)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(DOT_ARCH) go build -ldflags "-s -w" -o $(BUILD_DIR)/aspprobe-$(DOT_ARCH) ./cmd/aspprobe
+
+.PHONY: build-dumpdaceq
+build-dumpdaceq: ## Build the dumpdaceq diagnostic for the device (DOT_ARCH=arm|arm64)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(DOT_ARCH) go build -ldflags "-s -w" -o $(BUILD_DIR)/dumpdaceq-$(DOT_ARCH) ./cmd/dumpdaceq
+
+.PHONY: probe-asp
+probe-asp: build-aspprobe ## Try asp.Load on the device's tuning and report bucket count
+	$(ADB) push $(BUILD_DIR)/aspprobe-$(DOT_ARCH) $(DEVICE_TMP)/aspprobe >/dev/null
+	$(ADB) shell 'chmod +x $(DEVICE_TMP)/aspprobe; $(DEVICE_TMP)/aspprobe $(asp_dir)'
+
+.PHONY: push-dumpdaceq
+push-dumpdaceq: build-dumpdaceq ## Push dumpdaceq to /data/local/tmp and print the biquad blob
+	$(ADB) push $(BUILD_DIR)/dumpdaceq-$(DOT_ARCH) $(DEVICE_TMP)/dumpdaceq >/dev/null
+	$(ADB) shell 'chmod +x $(DEVICE_TMP)/dumpdaceq; $(DEVICE_TMP)/dumpdaceq'
+
 .PHONY: check
 check: fmt vet lint test ## Format, vet, lint and test
 

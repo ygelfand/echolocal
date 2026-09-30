@@ -71,13 +71,19 @@ func newInstallCmd() *cobra.Command {
 			cfg := installer.Config{ZeroPSK: zeroPSK}
 
 			// The image is only resolved when it is going to be written. A device that already has root
-			// needs none, so a build that ships no payload can still install to one.
+			// needs none, so a build that ships no payload can still install to one. The right image is
+			// picked from ro.product.device, with --boot-image overriding when the user has built one
+			// for a device we do not ship a binary for.
 			state, err := installer.Probe(d)
 			if err != nil {
 				return err
 			}
 			if !state.Ready {
-				if cfg.BootImage, cfg.BootImageFrom, err = payload(assets.BootImage(), bootImage, "boot image"); err != nil {
+				// payload() picks the user's --boot-image when given, otherwise the shipped one
+				// for this device. An empty shipped (a device with no image in this build) plus
+				// no --boot-image is the error "this build ships no boot image" — which the user
+				// can fix by pointing at one of their own.
+				if cfg.BootImage, cfg.BootImageFrom, err = payload(assets.BootImage(state.Device), bootImage, "boot image"); err != nil {
 					return err
 				}
 				if cfg.Approved, err = approveFlash(cmd.Context(), out, d, state, cfg.BootImageFrom, assumeYes); err != nil {

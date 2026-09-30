@@ -81,6 +81,7 @@ func (a *API) Start(context.Context) error {
 	}
 
 	a.name = layout.Slug(device.Name)
+	dev, _ := layout.Device()
 	a.srv = &esphome.Server{
 		Addr:         device.Addr,
 		WriteTimeout: writeTimeout,
@@ -89,7 +90,7 @@ func (a *API) Start(context.Context) error {
 			FriendlyName:      device.Name,
 			MACAddress:        mac,
 			Manufacturer:      layout.Manufacturer,
-			Model:             layout.Model,
+			Model:             layout.Model(dev),
 			Version:           layout.Version,
 			VoiceFeatures:     voice.Features,
 			BluetoothFeatures: bluetooth.Get().Features(),

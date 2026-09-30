@@ -75,7 +75,7 @@ func newSession(conn *websocket.Conn, o *out, bg *speaker.Arbiter, name string, 
 		// The factory mac: survives a reinstall, a rename and a new address.
 		ClientID: mac,
 		DeviceInfo: protocol.DeviceInfo{
-			ProductName:     layout.Model,
+			ProductName:     productName(),
 			Manufacturer:    layout.Manufacturer,
 			SoftwareVersion: layout.Version,
 		},
@@ -103,6 +103,26 @@ func newSession(conn *websocket.Conn, o *out, bg *speaker.Arbiter, name string, 
 const bufferSeconds = 30
 
 const bufferCapacity = bufferSeconds * speaker.Rate * speaker.Channels * speaker.Bits / 8
+
+// productName returns the Sendspin ProductName for this hardware, cached after the first lookup.
+// A missing ro.product.device (running on a host, or a board this build has never seen) reports the
+// generic "EchoLocal" rather than "unknown" so dashboards still have a useful label.
+var (
+	productOnce sync.Once
+	product     string
+)
+
+func productName() string {
+	productOnce.Do(func() {
+		dev, _ := layout.Device()
+		if p := layout.Model(dev); p != "EchoLocal (unknown)" {
+			product = p
+			return
+		}
+		product = "EchoLocal"
+	})
+	return product
+}
 
 // run drives the connection until it closes or ctx ends.
 func (s *session) run(ctx context.Context) error {

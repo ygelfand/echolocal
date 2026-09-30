@@ -7,6 +7,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/ygelfand/echolocal/internal/android/prop"
 )
 
 // Where echod and its state live. /system is read-only once installed, so anything written
@@ -90,13 +93,66 @@ const MaxNodeName = 31
 // Hardware identity, as Home Assistant shows it in the device panel.
 const (
 	Manufacturer = "EchoLocal"
-	Model        = "Echo Dot 2 (biscuit)"
-	Board        = "biscuit"
 	Platform     = "echolocal"
 
 	// DefaultName is the fallback display name when a device has none recorded.
 	DefaultName = "Echo Dot"
 )
+
+// DeviceProfiles names the Echo hardware echod runs on, keyed by ro.product.device. Model and Board
+// are presented to Home Assistant and over mDNS so a HA dashboard makes sense with more than one
+// device on it.
+//
+// A device whose codename is not listed here falls back to ModelUnknown / BoardUnknown. That is a
+// deliberate degradation: the daemon still runs, but its identity advertises that it does not
+// recognise the hardware — better than pretending to be a different device.
+var DeviceProfiles = map[string]DeviceProfile{
+	"biscuit_puffin": {Model: "Echo Dot 2 (biscuit)", Board: "biscuit"},
+	"radar_puffin":   {Model: "Echo 2 (radar)", Board: "radar"},
+}
+
+// DeviceProfile is what a hardware variant calls itself in user-facing surfaces.
+type DeviceProfile struct {
+	Model string
+	Board string
+}
+
+// Model returns the published Model for a device codename, or "EchoLocal (unknown)" for one that is
+// not in DeviceProfiles.
+func Model(device string) string {
+	if p, ok := DeviceProfiles[device]; ok {
+		return p.Model
+	}
+	return "EchoLocal (unknown)"
+}
+
+// Board returns the published Board for a device codename, or "unknown" for one that is not in
+// DeviceProfiles.
+func Board(device string) string {
+	if p, ok := DeviceProfiles[device]; ok {
+		return p.Board
+	}
+	return "unknown"
+}
+
+var (
+	deviceOnce sync.Once
+	deviceName string
+	deviceErr  error
+)
+
+// Device returns ro.product.device as the running kernel reports it, or an empty string with the
+// error if it cannot be read. It is cached after the first call: the property is set once at boot
+// and does not change for the life of the process.
+//
+// On a host (no getprop, no /dev/socket/property_service) this returns an error, which the caller
+// is expected to handle — Model("") and Board("") will then return the "unknown" variants.
+func Device() (string, error) {
+	deviceOnce.Do(func() {
+		deviceName, deviceErr = prop.Get("ro.product.device")
+	})
+	return deviceName, deviceErr
+}
 
 // MACPath is the address the factory recorded, which the Wi-Fi driver takes when it comes up. idme
 // is a kernel interface, so it reads this early in boot, before wlan0 exists and without /data.

@@ -31,6 +31,13 @@ type bandState struct {
 	compRatio     float64
 	compGainMinDB float64
 
+	// compInVol is a fixed gain applied to the signal before the compressor tracks it. radar uses
+	// these to push some bands a few dB above the unit pipeline.
+	compInVol float64
+	// limInVol is a fixed gain applied after the compressor and before the band's limiter, so the
+	// limiter sees the same level the vendor's reference build did.
+	limInVol float64
+
 	env    float64
 	gainDB float64
 	attack float64
@@ -88,9 +95,6 @@ func newMBCL(m mbcl, rate int) (*mbclState, error) {
 	}
 
 	for _, b := range m.Bands {
-		if b.CompInVol != 0 || b.LimInVol != 0 {
-			return nil, fmt.Errorf("asp: %s asks for band input gain we do not apply", mbclFile)
-		}
 		if b.CompRatio < 1 {
 			return nil, fmt.Errorf("asp: %s has a compression ratio of %g", mbclFile, b.CompRatio)
 		}
@@ -98,6 +102,8 @@ func newMBCL(m mbcl, rate int) (*mbclState, error) {
 			compThreshDB:  b.CompThresh,
 			compRatio:     b.CompRatio,
 			compGainMinDB: b.CompGainMin,
+			compInVol:     math.Pow(10, b.CompInVol/20),
+			limInVol:      math.Pow(10, b.LimInVol/20),
 			attack:        smoothing(attack, rate),
 			relCo:         smoothing(millis(b.LimRelease), rate),
 			lim:           newLimiter(b.LimThresh, millis(b.LimRelease), rate),
@@ -141,6 +147,41 @@ func (s *mbclState) reset() {
 	s.full.reset()
 }
 
+// clone returns a copy of the MBCL with fresh history. Used to give each per-volume EQ chain its
+// own compressor state, so swapping buckets does not smear one chain's gain onto the next.
+func (s *mbclState) clone() *mbclState {
+	out := &mbclState{
+		split: s.split.clone(),
+		full:  s.full.clone(),
+		work:  make([][]float32, len(s.bands)),
+	}
+	for _, b := range s.bands {
+		out.bands = append(out.bands, &bandState{
+			compThreshDB:  b.compThreshDB,
+			compRatio:     b.compRatio,
+			compGainMinDB: b.compGainMinDB,
+			compInVol:     b.compInVol,
+			limInVol:      b.limInVol,
+			attack:        b.attack,
+			relCo:         b.relCo,
+			lim:           b.lim.clone(),
+		})
+	}
+	return out
+}
+
+func (l *limiter) clone() *limiter {
+	return &limiter{
+		ceiling: l.ceiling,
+		gain:    l.gain,
+		attack:  l.attack,
+		relCo:   l.relCo,
+		delay:   append([]float32(nil), l.delay...),
+		want:    append([]float64(nil), l.want...),
+		low:     append([]int(nil), l.low...),
+	}
+}
+
 func (l *limiter) reset() {
 	l.gain, l.front, l.head, l.tail = 1, 0, 0, 0
 	clear(l.delay)
@@ -174,7 +215,8 @@ func (s *mbclState) process(x []float32) {
 // process compresses one band and then holds it under its own ceiling.
 func (b *bandState) process(x []float32) {
 	for i, v := range x {
-		level := b.track(float64(v))
+		s := float64(v) * b.compInVol
+		level := b.track(s)
 
 		want := 0.0
 		if level > b.compThreshDB {
@@ -183,7 +225,7 @@ func (b *bandState) process(x []float32) {
 		}
 
 		b.gainDB = approach(b.gainDB, want, b.attack, b.relCo)
-		x[i] = float32(float64(v) * math.Pow(10, b.gainDB/20))
+		x[i] = float32(s * math.Pow(10, b.gainDB/20) * b.limInVol)
 	}
 	b.lim.process(x)
 }

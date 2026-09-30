@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/ygelfand/go-esphome-device/mdns"
@@ -41,7 +42,7 @@ func (a *API) advertise(ctx context.Context, port int) {
 			MACAddress:   a.srv.Info.MACAddress,
 			Version:      a.srv.Info.Version,
 			Platform:     layout.Platform,
-			Board:        layout.Board,
+			Board:        boardForDevice(),
 			Encrypted:    a.srv.PSK != nil,
 			IPs:          ips,
 		})
@@ -82,4 +83,20 @@ func pause(ctx context.Context, d time.Duration) bool {
 	case <-time.After(d):
 		return true
 	}
+}
+
+// boardForDevice returns the layout.Board for the running hardware, cached after the first call.
+// Used inside the mDNS advertise loop so a missing or transient prop lookup does not stall
+// re-advertisement.
+var (
+	boardOnce sync.Once
+	boardName string
+)
+
+func boardForDevice() string {
+	boardOnce.Do(func() {
+		dev, _ := layout.Device()
+		boardName = layout.Board(dev)
+	})
+	return boardName
 }
