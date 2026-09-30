@@ -24,6 +24,8 @@ var registered = []string{
 	"button_volume_up",
 	"cached_data",
 	"check_for_updates",
+	"clock_source",
+	"clock_sync",
 	"cpu_cores",
 	"cpu_cores_online",
 	"cpu_temperature",

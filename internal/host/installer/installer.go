@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ygelfand/echolocal/internal/android/lease"
 	"strings"
 	"time"
 
@@ -71,6 +72,7 @@ var steps = []step{
 	{"selinux permissive", checkPermissive},
 	{"remount /system rw", remountRW},
 	{"stop and disable Amazon services", deAmazon},
+	{"ask DHCP for time servers", requestNTPServers},
 	{"clear the saved usb config", clearUSBConfig},
 	{"install echod", installBinary},
 	{"back up stock ledcontroller", backupService},
@@ -315,4 +317,22 @@ func startService(r *run) (string, bool, error) {
 
 	state, _ := r.d.Getprop("init.svc." + layout.ServiceName)
 	return "", false, fmt.Errorf("echod did not report a start within 10s (init.svc.%s=%s)", layout.ServiceName, state)
+}
+
+// requestNTPServers adds the time servers to what dhcpcd asks the DHCP server for, so the clock
+// component can find a local one in the lease. dhcpcd reads its configuration when it starts, which
+// the reboot at the end of an install takes care of.
+func requestNTPServers(r *run) (string, bool, error) {
+	data, err := r.d.ReadFile(lease.ConfPath)
+	if err != nil {
+		return "", false, err
+	}
+	out, changed := lease.RequestNTP(string(data))
+	if !changed {
+		return "already asked for", true, nil
+	}
+	if err := r.d.WriteFile(lease.ConfPath, []byte(out), 0o644); err != nil {
+		return "", false, err
+	}
+	return "ntp_servers added to " + lease.ConfPath, false, nil
 }

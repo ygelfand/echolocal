@@ -50,6 +50,8 @@ var Actions = []Action{
 	stop("perfrecoveryd", "Amazon's performance monitoring"),
 	stop("avahi-daemon", "Amazon's mDNS, for Spotify Connect; echod advertises itself"),
 	stop("drm", "drmserver, for protected media playback"),
+	stop("sntpd", "Amazon's time sync, with its server list compiled in; the clock component replaces it"),
+	stop("securetime", "asks a TEE this device does not have for the time, every few seconds"),
 	{
 		Name: "take the pin controller back from mediaserver",
 		Reason: "the vendor audio HAL clears the microphone mute line while it sets up an input path, " +

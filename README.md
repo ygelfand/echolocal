@@ -34,6 +34,10 @@ receivers to locate tracked devices.
 
 **Lux sensor.** The board carries an ambient light sensor that Amazon appears to have left unused.
 
+**Clock.** The Dot sets its own time from the NTP server your DHCP server offers, one you configure, or
+the public pools, and keeps it in the hardware clock across reboots. See
+[the clock guide](guides/setting-the-clock.md).
+
 ## The optional integration
 
 Everything above works with stock Home Assistant. The
