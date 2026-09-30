@@ -61,6 +61,12 @@ type WakeWord struct {
 	MaxListen int `json:"max_listen"`
 	MaxThink  int `json:"max_think"`
 
+	// Unended is how a turn ends when listening runs out on talk that never stopped: Home Assistant
+	// heard speech begin and never heard it end, which is a television or a video that said the wake
+	// word and kept on talking. Empty in a slot saved before the setting existed, which reads as the
+	// default.
+	Unended Unended `json:"unended"`
+
 	// Recordings is how many of this slot's turns to keep the audio of on disk. Zero keeps none.
 	Recordings int `json:"recordings"`
 }
@@ -73,6 +79,9 @@ const (
 
 	DefaultMaxListen = 15
 	DefaultMaxThink  = 90
+
+	// The trouble tone, which is what running out of time always sounded like.
+	DefaultUnended = UnendedAlert
 
 	// Zero is no follow-up unless Home Assistant asks for one.
 	DefaultFollowUp = 0
@@ -93,6 +102,7 @@ func DefaultWakeWord() WakeWord {
 		Buffer:    DefaultBuffer,
 		MaxListen: DefaultMaxListen,
 		MaxThink:  DefaultMaxThink,
+		Unended:   DefaultUnended,
 	}
 }
 
@@ -169,6 +179,10 @@ func (w WakeWriter) MaxThink(seconds int) error {
 	return w.word(func(word *WakeWord) { word.MaxThink = seconds })
 }
 
+func (w WakeWriter) Unended(v Unended) error {
+	return w.word(func(word *WakeWord) { word.Unended = v })
+}
+
 func (w WakeWriter) Recordings(count int) error {
 	return w.word(func(word *WakeWord) { word.Recordings = count })
 }
@@ -211,6 +225,34 @@ func (d Delivery) Label() string {
 		return "Streamed"
 	}
 	return string(d)
+}
+
+// Unended is how a turn ends when the talk it was listening to never stopped.
+type Unended string
+
+const (
+	// UnendedAlert sounds the trouble tone, as any other turn that runs out of time does.
+	UnendedAlert Unended = "alert"
+
+	// UnendedQuiet ends the turn without a sound, the way a follow-up nobody answered ends: nobody was
+	// talking to the device. Home Assistant finding no words in the audio ends the same way.
+	UnendedQuiet Unended = "quiet"
+
+	// UnendedSend stops listening and lets Home Assistant answer what it heard, as if the talk had ended.
+	UnendedSend Unended = "send"
+)
+
+// Label is how the setting is shown.
+func (u Unended) Label() string {
+	switch u {
+	case UnendedAlert:
+		return "Alert"
+	case UnendedQuiet:
+		return "Quiet"
+	case UnendedSend:
+		return "Send to Home Assistant"
+	}
+	return string(u)
 }
 
 // Tone is the sound a wake word makes when it fires.

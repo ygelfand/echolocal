@@ -97,6 +97,8 @@ var registered = []string{
 	"speaker",
 	"speaker_eq",
 	"stop_word_sensitivity",
+	"talk_timeout_1",
+	"talk_timeout_2",
 	"test_playback",
 	"thinking_effect_1",
 	"thinking_effect_2",
