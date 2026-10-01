@@ -20,19 +20,20 @@ const Port = 8928
 // listener accepts the servers that dial in, one at a time. The spec ranks competing servers by
 // declared activity; until that is implemented the first to arrive holds the room.
 type listener struct {
-	out *out
-	bg  *speaker.Arbiter
+	out   *out
+	bg    *speaker.Arbiter
+	trust *trust
 
 	// player is what the room shows Home Assistant. Written to from the accept goroutine and from the
 	// session, so it has to tolerate that.
 	player *Player
 
-	mu   sync.Mutex
-	busy bool
+	mu      sync.Mutex
+	current *session
 }
 
-func newListener(o *out, bg *speaker.Arbiter, p *Player) *listener {
-	return &listener{out: o, bg: bg, player: p}
+func newListener(o *out, bg *speaker.Arbiter, tr *trust, p *Player) *listener {
+	return &listener{out: o, bg: bg, trust: tr, player: p}
 }
 
 // serve holds the port until ctx ends.
@@ -50,12 +51,6 @@ func (l *listener) serve(ctx context.Context, name string) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		if !l.take() {
-			http.Error(w, "already connected", http.StatusConflict)
-			return
-		}
-		defer l.give()
-
 		conn, err := up.Upgrade(w, r, nil)
 		if err != nil {
 			slog.Warn("sendspin upgrade failed", "from", r.RemoteAddr, "err", err)
@@ -63,19 +58,34 @@ func (l *listener) serve(ctx context.Context, name string) error {
 		}
 		defer conn.Close()
 
+		s := newSession(conn, l.trust, l.out, l.bg, name, l.player)
+		if !l.take(s) {
+			// The spec has a second server judged by what it declares once the handshake is done. Until
+			// that is built, the room is simply busy, and the socket closing says so.
+			slog.Info("sendspin turning away a second server", "from", r.RemoteAddr)
+			return
+		}
+		defer l.give(s)
+
 		slog.Info("sendspin server connected", "from", r.RemoteAddr)
 		l.player.state.Set(stateJoined)
 		defer l.player.state.Set(stateWaiting)
+		defer l.player.setSecurity(securityWaiting)
 
 		// For as long as the server is connected, not just while audio is arriving: a paused group is
 		// one this room can still be told to play again.
-		s := newSession(conn, l.out, l.bg, name, l.player)
 		l.player.holds(s)
 		defer l.player.holds(nil)
 
-		if err := s.run(ctx); err != nil {
+		err = s.run(ctx)
+		switch {
+		case errors.Is(err, errPreamble):
+			// Closed without a word, as the spec has it: a server on the old, unencrypted protocol
+			// lands here too, and there is nothing to tell it that it would understand.
+			slog.Warn("sendspin handshake failed", "from", r.RemoteAddr, "err", err)
+		case err != nil:
 			slog.Warn("sendspin session ended", "from", r.RemoteAddr, "err", err)
-		} else {
+		default:
 			slog.Info("sendspin server disconnected", "from", r.RemoteAddr)
 		}
 	})
@@ -96,18 +106,32 @@ func (l *listener) serve(ctx context.Context, name string) error {
 }
 
 // take admits one server and turns away the rest.
-func (l *listener) take() bool {
+func (l *listener) take(s *session) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.busy {
+	if l.current != nil {
 		return false
 	}
-	l.busy = true
+	l.current = s
 	return true
 }
 
-func (l *listener) give() {
+func (l *listener) give(s *session) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.busy = false
+	if l.current == s {
+		l.current = nil
+	}
+}
+
+// unpairedOff is the operator withdrawing unpaired access: a server that relied on it is told to pair
+// and hung up on. A paired server is not relying on it, and stays.
+func (l *listener) unpairedOff() {
+	l.mu.Lock()
+	s := l.current
+	l.mu.Unlock()
+	if s != nil && s.cat() == categorySentinel {
+		slog.Info("sendspin unpaired access withdrawn, leaving", "server", short(s.c.serverID))
+		s.kick(goodbyePairingRequired)
+	}
 }

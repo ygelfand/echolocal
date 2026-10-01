@@ -11,6 +11,6 @@ func newToolsCmd() *cobra.Command {
 	}
 	c.AddCommand(newMicCmd(), newLEDCmd(), newInfoCmd(), newButtonsCmd(), newI2CCmd(), newMuteCmd(),
 		newMixerCmd(), newPlayCmd(), newWakeCmd(), newVoiceCmd(), newMediaCmd(), newEchoCmd(),
-		newRemountCmd())
+		newRemountCmd(), newSendspinCmd())
 	return c
 }

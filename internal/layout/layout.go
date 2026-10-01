@@ -16,7 +16,10 @@ const (
 	Binary   = Dir + "/echod"
 	StateDir = "/data/misc/echolocal"
 	KeyPath  = StateDir + "/psk"
-	NamePath = StateDir + "/name"
+
+	// SendspinTrustPath holds the room's Sendspin identity, pairing key and pairing records.
+	SendspinTrustPath = StateDir + "/sendspin.json"
+	NamePath          = StateDir + "/name"
 
 	// PrevBinary is the binary an update replaced, kept until the new one has proved itself. Its
 	// presence at boot is what says a trial never finished, so nothing may leave one lying around.
