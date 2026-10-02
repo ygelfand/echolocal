@@ -12,7 +12,7 @@ func TestCommandResultFindsBatchedCompletion(t *testing.T) {
 	completion := commandComplete(opcode, 0)
 	batch := append(report, completion...)
 
-	remainder, complete, err := commandResult(batch, opcode)
+	remainder, _, complete, err := commandResult(batch, opcode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestCommandResultHoldsSplitEvent(t *testing.T) {
 	completion := commandComplete(opcode, 0)
 	first := completion[:5]
 
-	remainder, complete, err := commandResult(first, opcode)
+	remainder, _, complete, err := commandResult(first, opcode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestCommandResultHoldsSplitEvent(t *testing.T) {
 		t.Errorf("remainder = %x, want %x", remainder, first)
 	}
 
-	remainder, complete, err = commandResult(append(remainder, completion[5:]...), opcode)
+	remainder, _, complete, err = commandResult(append(remainder, completion[5:]...), opcode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestCommandResultReturnsTrailingPartialEvent(t *testing.T) {
 	report := []byte{h4Event, evtLEMeta, 2, leAdvertisingReport, 0}
 	batch := append(completion, report[:4]...)
 
-	remainder, complete, err := commandResult(batch, opcode)
+	remainder, _, complete, err := commandResult(batch, opcode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestCommandResultReturnsTrailingPartialEvent(t *testing.T) {
 
 func TestCommandResultReturnsStatus(t *testing.T) {
 	const opcode = 0x200a
-	_, complete, err := commandResult(commandComplete(opcode, 0x0c), opcode)
+	_, _, complete, err := commandResult(commandComplete(opcode, 0x0c), opcode)
 	if !complete {
 		t.Fatal("command did not complete")
 	}
@@ -94,7 +94,7 @@ func TestCommandResultReturnsCommandStatusError(t *testing.T) {
 	event := []byte{h4Event, evtCommandStatus, 4, 0x0c, 1, 0, 0}
 	binary.LittleEndian.PutUint16(event[5:], opcode)
 
-	_, complete, err := commandResult(event, opcode)
+	_, _, complete, err := commandResult(event, opcode)
 	if !complete {
 		t.Fatal("command did not complete")
 	}
@@ -107,7 +107,7 @@ func TestCommandResultRejectsMalformedEvent(t *testing.T) {
 	const opcode = 0x200a
 	batch := append([]byte{0xff}, commandComplete(opcode, 0)...)
 
-	_, complete, err := commandResult(batch, opcode)
+	_, _, complete, err := commandResult(batch, opcode)
 	if complete {
 		t.Fatal("malformed stream completed")
 	}
@@ -126,8 +126,8 @@ func TestReportsReadAddressInWrittenOrder(t *testing.T) {
 	report[2] = byte(len(report) - 3)
 
 	var got []Advertisement
-	r := &Radio{}
-	remainder, err := r.parse(report, func(a Advertisement) { got = append(got, a) })
+	r := &Radio{found: func(a Advertisement) { got = append(got, a) }}
+	remainder, err := r.parse(report)
 	if err != nil {
 		t.Fatal(err)
 	}

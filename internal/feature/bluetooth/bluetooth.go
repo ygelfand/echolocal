@@ -40,6 +40,10 @@ const (
 
 // bluetoothFeatures is what the device advertises when the proxy is on.
 const bluetoothFeatures = esphome.BluetoothPassiveScan |
+	esphome.BluetoothActiveConnections |
+	esphome.BluetoothRemoteCaching |
+	esphome.BluetoothPairing |
+	esphome.BluetoothCacheClearing |
 	esphome.BluetoothRawAdvertisements |
 	esphome.BluetoothStateAndMode
 
@@ -57,6 +61,7 @@ type beaconState struct {
 type Proxy struct {
 	proxy  *esphome.BluetoothProxy
 	radio  *ble.Radio
+	gatt   *gatt
 	enable *esphome.Switch
 	beacon beaconState
 
@@ -84,6 +89,7 @@ func build() *Proxy {
 	b := &Proxy{
 		proxy:   &esphome.BluetoothProxy{},
 		radio:   ble.Get(),
+		gatt:    newGATT(ble.Get()),
 		beacon:  beaconState{advertisement: beaconAdvertisement(minor), minor: minor},
 		wanted:  make(chan struct{}, 1),
 		reports: make(chan ble.Advertisement, queued),
@@ -97,7 +103,14 @@ func build() *Proxy {
 		},
 	}
 
-	b.proxy.OnSubscribed = func(bool) { b.apply() }
+	b.proxy.OnSubscribed = func(subscribed bool) {
+		if !subscribed {
+			// Home Assistant has gone, and ESPHome drops its connections when it does: nobody is
+			// left to use them, and they hold the devices.
+			go b.gatt.closeAll()
+		}
+		b.apply()
+	}
 	b.proxy.OnMode = func(bool) { b.apply() }
 
 	b.enable.Set(config.Get().Bluetooth.Proxy)
@@ -121,8 +134,14 @@ func (b *Proxy) Name() string { return "bluetooth proxy" }
 
 func (b *Proxy) Entities() []esphome.Entity { return []esphome.Entity{b.enable} }
 
-// Handle answers the proxy's own protocol messages: subscribe, unsubscribe, set mode.
+// Handle answers the proxy's own protocol messages: subscribe, unsubscribe, set mode, and the
+// connections and GATT operations Home Assistant asks for through it.
 func (b *Proxy) Handle(ctx context.Context, conn *esphome.Conn, msg proto.Message) error {
+	if b.Enabled() {
+		if handled, err := b.gatt.handle(conn, msg); handled {
+			return err
+		}
+	}
 	return b.proxy.Handle(ctx, conn, msg)
 }
 
@@ -196,6 +215,16 @@ func (b *Proxy) tune(beacon beaconState) bool {
 
 	if settled {
 		return true
+	}
+	// Only the scan mode changed: switch it in place, so that connections survive.
+	if want == b.radio.Running() && scan && b.radio.Scanning() {
+		err := b.radio.Rescan(active)
+		if err == nil {
+			slog.Info("ble scanning", "active", active)
+			_ = b.proxy.Report(esphome.ScannerRunning)
+			return true
+		}
+		slog.Warn("ble scan mode change failed, restarting the radio", "err", err)
 	}
 	if b.radio.Running() {
 		b.radio.Stop()

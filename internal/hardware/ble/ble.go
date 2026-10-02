@@ -1,4 +1,5 @@
-// Package ble scans for Bluetooth Low Energy advertisements over the controller's HCI node.
+// Package ble scans for Bluetooth Low Energy advertisements over the controller's HCI node, and
+// connects to devices as a GATT client.
 package ble
 
 import (
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // Node is the controller's HCI character device.
@@ -17,12 +19,22 @@ const Node = "/dev/stpbt"
 const (
 	h4Command = 0x01
 
+	cmdDisconnect          = 0x0406
 	cmdReset               = 0x0C03
+	cmdReadBufferSize      = 0x1005
+	cmdReadBDAddr          = 0x1009
+	cmdLEReadBufferSize    = 0x2002
 	cmdLEAdvertisingParams = 0x2006
 	cmdLEAdvertisingData   = 0x2008
 	cmdLEAdvertisingEnable = 0x200A
 	cmdLEScanParams        = 0x200B
 	cmdLEScanEnable        = 0x200C
+	cmdLECreateConnection  = 0x200D
+	cmdLECreateCancel      = 0x200E
+	cmdLEConnectionUpdate  = 0x2013
+	cmdLEEnableEncryption  = 0x2019
+	cmdLELTKNegativeReply  = 0x201B
+	cmdLERemoteParamReply  = 0x2020
 )
 
 // How much of the time the radio listens, in units of 0.625 ms: 18.75 ms out of every 200 ms. Wifi
@@ -33,8 +45,18 @@ const (
 	advertisingInterval = 1600
 )
 
+// commandTimeout bounds a command sent while the reader runs. The controller answers in
+// milliseconds; waiting longer means it has stopped answering.
+const commandTimeout = 5 * time.Second
+
+// ErrNotRunning is a command or connection asked of a closed controller.
+var ErrNotRunning = errors.New("ble: controller is not running")
+
 // Advertisement is one LE advertising report.
 type Advertisement struct {
+	// EventType is the PDU the report came from: 0 connectable, 1 directed, 2 scannable, 3 not
+	// connectable, 4 a scan response.
+	EventType   uint8
 	Address     [6]byte
 	AddressType uint8
 	RSSI        int8
@@ -42,9 +64,11 @@ type Advertisement struct {
 }
 
 // Addr is the address as a big-endian integer.
-func (a Advertisement) Addr() uint64 {
+func (a Advertisement) Addr() uint64 { return addrUint(a.Address) }
+
+func addrUint(a [6]byte) uint64 {
 	var v uint64
-	for _, b := range a.Address {
+	for _, b := range a {
 		v = v<<8 | uint64(b)
 	}
 	return v
@@ -56,13 +80,43 @@ type Radio struct {
 	fd       int
 	open     bool
 	scanning bool
+	active   bool
 	stop     context.CancelFunc
 	// finished is both the reader's completion signal and its handoff of an unfinished H4 event.
 	finished chan []byte
 	// held carries an unfinished H4 event between synchronous startup commands.
-	held []byte
+	held  []byte
+	found func(Advertisement)
 
 	reports uint64
+
+	// wmu keeps packets whole on the node: commands and ACL data are written from several goroutines.
+	wmu sync.Mutex
+
+	// cmd is one command at a time once the reader owns the node, and pending the one in flight.
+	cmd     sync.Mutex
+	pmu     sync.Mutex
+	pending *pendingCommand
+
+	acl  aclBuffers
+	link links
+
+	// address is the controller's public address, least significant octet first, which pairing
+	// mixes into its keys.
+	address [6]byte
+
+	// sink replaces the node for writes in tests, where there is no controller.
+	sink func([]byte) error
+}
+
+type pendingCommand struct {
+	opcode uint16
+	done   chan commandReply
+}
+
+type commandReply struct {
+	params []byte
+	err    error
 }
 
 var (
@@ -72,7 +126,11 @@ var (
 
 // Get is the radio.
 func Get() *Radio {
-	once.Do(func() { radio = &Radio{fd: -1} })
+	once.Do(func() {
+		radio = &Radio{fd: -1}
+		radio.acl.init()
+		radio.link.init()
+	})
 	return radio
 }
 
@@ -128,16 +186,22 @@ func (r *Radio) Start(scan, active bool, advertisement []byte, found func(Advert
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r.stop, r.finished, r.open = cancel, make(chan []byte, 1), true
-	r.scanning = scan
+	r.scanning, r.active, r.found = scan, active, found
 	held := r.held
 	r.held = nil
 
-	go r.read(ctx, found, held, r.finished)
+	go r.read(ctx, held, r.finished)
 	return nil
 }
 
-// Stop ends scanning and advertising and closes the node.
+// Stop ends scanning, advertising and every connection, and closes the node.
 func (r *Radio) Stop() {
+	if !r.Running() {
+		return
+	}
+	// Disconnecting needs the reader, to hear the controller confirm it.
+	r.link.closeAll(r)
+
 	r.mu.Lock()
 	if !r.open {
 		r.mu.Unlock()
@@ -149,10 +213,15 @@ func (r *Radio) Stop() {
 	r.mu.Unlock()
 
 	stop()
+	// The reader is blocked in read until the controller says something, which with nothing
+	// scanning may be never. A command it answers at once is something to say.
+	_ = r.write(readLocalVersion)
 	held := <-done
+	r.failPending(ErrNotRunning)
+	r.acl.reset(0, 0)
 
-	held, _ = command(fd, held, cmdLEScanEnable, []byte{0x00, 0x00})
-	_, _ = command(fd, held, cmdLEAdvertisingEnable, []byte{0x00})
+	held, _, _ = command(fd, held, cmdLEScanEnable, []byte{0x00, 0x00})
+	_, _, _ = command(fd, held, cmdLEAdvertisingEnable, []byte{0x00})
 	_ = syscall.Close(fd)
 
 	r.mu.Lock()
@@ -161,22 +230,71 @@ func (r *Radio) Stop() {
 	slog.Info("ble stopped")
 }
 
+// readLocalVersion is a command every controller answers straight away.
+var readLocalVersion = []byte{h4Command, 0x01, 0x10, 0x00}
+
+// Rescan changes between active and passive scanning without closing the controller, so that the
+// connections it holds survive Home Assistant changing its mind about scan responses.
+func (r *Radio) Rescan(active bool) error {
+	r.mu.Lock()
+	scanning, was := r.scanning, r.active
+	r.mu.Unlock()
+	if !scanning || active == was {
+		return nil
+	}
+
+	if _, err := r.Command(cmdLEScanEnable, []byte{0x00, 0x00}); err != nil {
+		return err
+	}
+	if _, err := r.Command(cmdLEScanParams, scanParams(active)); err != nil {
+		return err
+	}
+	if _, err := r.Command(cmdLEScanEnable, []byte{0x01, 0x00}); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.active = active
+	r.mu.Unlock()
+	return nil
+}
+
+// Active reports whether the running scan asks for scan responses.
+func (r *Radio) Active() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.active
+}
+
+func scanParams(active bool) []byte {
+	scan := make([]byte, 7)
+	if active {
+		scan[0] = 0x01
+	}
+	binary.LittleEndian.PutUint16(scan[1:], scanInterval)
+	binary.LittleEndian.PutUint16(scan[3:], scanWindow)
+	return scan
+}
+
 // begin resets and configures the controller. Held with mu.
 func (r *Radio) begin(scanning, active bool, advertisement []byte) error {
 	if err := r.send("reset", cmdReset, nil); err != nil {
 		return err
 	}
+	if err := r.bufferSize(); err != nil {
+		return err
+	}
+	var params []byte
+	var err error
+	if r.held, params, err = command(r.fd, r.held, cmdReadBDAddr, nil); err != nil {
+		return fmt.Errorf("ble: reading the controller's address: %w", err)
+	}
+	if len(params) >= 6 {
+		copy(r.address[:], params[:6])
+	}
 	// This MTK controller can scan and advertise together, but only when scanning is enabled first.
 	// Enabling advertising first leaves the subsequent scan command waiting indefinitely.
 	if scanning {
-		scan := make([]byte, 7)
-		if active {
-			scan[0] = 0x01
-		}
-		binary.LittleEndian.PutUint16(scan[1:], scanInterval)
-		binary.LittleEndian.PutUint16(scan[3:], scanWindow)
-
-		if err := r.send("scan parameters", cmdLEScanParams, scan); err != nil {
+		if err := r.send("scan parameters", cmdLEScanParams, scanParams(active)); err != nil {
 			return err
 		}
 		if err := r.send("scan enable", cmdLEScanEnable, []byte{0x01, 0x00}); err != nil {
@@ -186,6 +304,36 @@ func (r *Radio) begin(scanning, active bool, advertisement []byte) error {
 	if len(advertisement) != 0 {
 		return r.advertise(advertisement)
 	}
+	return nil
+}
+
+// bufferSize learns how much ACL data the controller takes at once. LE has its own buffers unless
+// the controller reports none, in which case LE shares the BR/EDR ones. Held with mu.
+func (r *Radio) bufferSize() error {
+	var err error
+	var params []byte
+	r.held, params, err = command(r.fd, r.held, cmdLEReadBufferSize, nil)
+	if err != nil {
+		return fmt.Errorf("ble: LE buffer size: %w", err)
+	}
+	size, count := 0, 0
+	if len(params) >= 3 {
+		size, count = int(binary.LittleEndian.Uint16(params)), int(params[2])
+	}
+	if size == 0 || count == 0 {
+		r.held, params, err = command(r.fd, r.held, cmdReadBufferSize, nil)
+		if err != nil {
+			return fmt.Errorf("ble: buffer size: %w", err)
+		}
+		if len(params) >= 5 {
+			size, count = int(binary.LittleEndian.Uint16(params)), int(binary.LittleEndian.Uint16(params[3:]))
+		}
+	}
+	if size == 0 || count == 0 {
+		return errors.New("ble: controller reports no ACL buffers")
+	}
+	r.acl.reset(size, count)
+	slog.Debug("ble acl buffers", "size", size, "count", count)
 	return nil
 }
 
@@ -214,14 +362,108 @@ func (r *Radio) advertise(advertisement []byte) error {
 
 func (r *Radio) send(name string, opcode uint16, params []byte) error {
 	var err error
-	r.held, err = command(r.fd, r.held, opcode, params)
+	r.held, _, err = command(r.fd, r.held, opcode, params)
 	if err != nil {
 		return fmt.Errorf("ble: %s: %w", name, err)
 	}
 	return nil
 }
 
-func (r *Radio) read(ctx context.Context, found func(Advertisement), held []byte, finished chan<- []byte) {
+// Command sends one HCI command through the running reader and waits for the controller to finish
+// it: Command Complete returns its parameters after the status, and a Command Status that accepts
+// the command returns none. What such a command goes on to do arrives later as its own event.
+//
+// Never call it from the reader's goroutine, which is the only one that can hear the answer.
+func (r *Radio) Command(opcode uint16, params []byte) ([]byte, error) {
+	r.cmd.Lock()
+	defer r.cmd.Unlock()
+
+	if !r.Running() {
+		return nil, ErrNotRunning
+	}
+
+	p := &pendingCommand{opcode: opcode, done: make(chan commandReply, 1)}
+	r.pmu.Lock()
+	r.pending = p
+	r.pmu.Unlock()
+	defer func() {
+		r.pmu.Lock()
+		if r.pending == p {
+			r.pending = nil
+		}
+		r.pmu.Unlock()
+	}()
+
+	pkt := make([]byte, 4, 4+len(params))
+	pkt[0] = h4Command
+	binary.LittleEndian.PutUint16(pkt[1:], opcode)
+	pkt[3] = byte(len(params))
+	if err := r.write(append(pkt, params...)); err != nil {
+		return nil, err
+	}
+
+	select {
+	case reply := <-p.done:
+		return reply.params, reply.err
+	case <-time.After(commandTimeout):
+		return nil, fmt.Errorf("ble: command 0x%04x: no answer from the controller", opcode)
+	}
+}
+
+// commandEvent hands a Command Complete or Command Status to the command waiting for it.
+func (r *Radio) commandEvent(event []byte) {
+	r.pmu.Lock()
+	p := r.pending
+	r.pmu.Unlock()
+	if p == nil {
+		return
+	}
+
+	done, params, err := completes(event, p.opcode)
+	if !done && err == nil && event[1] == evtCommandStatus && len(event) >= 7 &&
+		binary.LittleEndian.Uint16(event[5:]) == p.opcode {
+		done = true // accepted; the outcome follows as another event
+	}
+	if !done && err == nil {
+		return
+	}
+
+	r.pmu.Lock()
+	if r.pending == p {
+		r.pending = nil
+		p.done <- commandReply{params: params, err: err}
+	}
+	r.pmu.Unlock()
+}
+
+func (r *Radio) failPending(err error) {
+	r.pmu.Lock()
+	defer r.pmu.Unlock()
+	if r.pending != nil {
+		r.pending.done <- commandReply{err: err}
+		r.pending = nil
+	}
+}
+
+// write puts one whole H4 packet on the node.
+func (r *Radio) write(pkt []byte) error {
+	r.wmu.Lock()
+	defer r.wmu.Unlock()
+	if r.sink != nil {
+		return r.sink(pkt)
+	}
+
+	r.mu.Lock()
+	fd := r.fd
+	r.mu.Unlock()
+	if fd < 0 {
+		return ErrNotRunning
+	}
+	_, err := syscall.Write(fd, pkt)
+	return err
+}
+
+func (r *Radio) read(ctx context.Context, held []byte, finished chan<- []byte) {
 	defer func() { finished <- held }()
 
 	// The driver refuses a read larger than its own buffer, and an HCI event is at most 258 bytes.
@@ -242,7 +484,7 @@ func (r *Radio) read(ctx context.Context, found func(Advertisement), held []byte
 			continue
 		}
 
-		held, err = r.parse(append(held, buf[:n]...), found)
+		held, err = r.parse(append(held, buf[:n]...))
 		if err != nil {
 			slog.Error("ble event framing failed", "err", err)
 			held = nil
@@ -253,21 +495,76 @@ func (r *Radio) read(ctx context.Context, found func(Advertisement), held []byte
 
 // parse takes whole packets off the front and returns the remainder. A read carries as many as the
 // controller had ready, and the last can be cut short.
-func (r *Radio) parse(b []byte, found func(Advertisement)) ([]byte, error) {
+func (r *Radio) parse(b []byte) ([]byte, error) {
 	for {
-		event, remainder, ok, err := nextEvent(b)
+		pkt, remainder, ok, err := nextEvent(b)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return append([]byte(nil), remainder...), nil
 		}
-
-		if event[1] == evtLEMeta {
-			r.reports++
-			reports(event[3:], found)
-		}
+		r.dispatch(pkt)
 		b = remainder
+	}
+}
+
+// dispatch routes one packet. It runs on the reader and must not block: nothing else can hear the
+// controller while it waits.
+func (r *Radio) dispatch(pkt []byte) {
+	if pkt[0] == h4ACL {
+		r.link.data(r, pkt)
+		return
+	}
+
+	switch pkt[1] {
+	case evtCommandComplete, evtCommandStatus:
+		r.commandEvent(pkt)
+	case evtNumCompletedPackets:
+		r.acl.completed(pkt[3:])
+	case evtEncryptionChange, evtKeyRefreshComplete:
+		if len(pkt) >= 6 {
+			status := pkt[3]
+			if pkt[1] == evtEncryptionChange && status == 0 && len(pkt) >= 7 && pkt[6] == 0 {
+				status = statusConnectionFailed // the link came out unencrypted
+			}
+			r.link.encryption(binary.LittleEndian.Uint16(pkt[4:])&0x0fff, status)
+		}
+	case evtDisconnectionComplete:
+		if len(pkt) >= 7 {
+			handle := binary.LittleEndian.Uint16(pkt[4:]) & 0x0fff
+			r.acl.forget(handle)
+			r.link.disconnected(handle, pkt[6])
+		}
+	case evtLEMeta:
+		if len(pkt) < 4 {
+			return
+		}
+		switch pkt[3] {
+		case leAdvertisingReport:
+			r.mu.Lock()
+			r.reports++
+			found := r.found
+			r.mu.Unlock()
+			if found != nil {
+				reports(pkt[3:], found)
+			}
+		case leConnectionComplete, leEnhancedConnectionComplete:
+			r.link.connected(pkt[3:])
+		case leLongTermKeyRequest:
+			// No keys are kept, so no link is encrypted with one.
+			if len(pkt) >= 6 {
+				handle := append([]byte(nil), pkt[4:6]...)
+				go func() { _, _ = r.Command(cmdLELTKNegativeReply, handle) }()
+			}
+		case leRemoteConnParamRequest:
+			// Accept what the peripheral asks for: it knows what it needs to stay up.
+			if len(pkt) >= 14 {
+				reply := make([]byte, 14)
+				copy(reply, pkt[4:14])
+				go func() { _, _ = r.Command(cmdLERemoteParamReply, reply) }()
+			}
+		}
 	}
 }
 
@@ -288,7 +585,7 @@ func reports(p []byte, found func(Advertisement)) {
 			return
 		}
 
-		a := Advertisement{AddressType: p[at+1], RSSI: int8(p[end])}
+		a := Advertisement{EventType: p[at], AddressType: p[at+1], RSSI: int8(p[end])}
 		// HCI carries an address least significant octet first. Address is the MAC as it is written,
 		// which is the order a resolvable private address has to be in to be matched against an IRK.
 		for i := range a.Address {
@@ -301,8 +598,8 @@ func reports(p []byte, found func(Advertisement)) {
 	}
 }
 
-// command writes one HCI command and waits for its Command Complete.
-func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, error) {
+// command writes one HCI command and waits for its Command Complete, before the reader runs.
+func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, []byte, error) {
 	pkt := make([]byte, 4, 4+len(params))
 	pkt[0] = h4Command
 	binary.LittleEndian.PutUint16(pkt[1:], opcode)
@@ -310,7 +607,7 @@ func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, error) 
 	pkt = append(pkt, params...)
 
 	if _, err := syscall.Write(fd, pkt); err != nil {
-		return held, err
+		return held, nil, err
 	}
 
 	buf := make([]byte, 512)
@@ -320,7 +617,7 @@ func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, error) 
 			if errors.Is(err, syscall.EINTR) {
 				continue
 			}
-			return held, err
+			return held, nil, err
 		}
 		if n == 0 {
 			continue
@@ -328,12 +625,13 @@ func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, error) 
 
 		held = append(held, buf[:n]...)
 		var complete bool
-		held, complete, err = commandResult(held, opcode)
+		var result []byte
+		held, result, complete, err = commandResult(held, opcode)
 		if err != nil {
-			return held, err
+			return held, nil, err
 		}
 		if complete {
-			return held, nil
+			return held, result, nil
 		}
 	}
 }
