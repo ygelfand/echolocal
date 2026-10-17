@@ -111,6 +111,9 @@ func Restart(ctx context.Context, d *adb.Device, report Reporter) error {
 
 func execute(ctx context.Context, steps []step, r *run, report Reporter) error {
 	for i, s := range steps {
+		if i > 0 {
+			time.Sleep(time.Second)
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

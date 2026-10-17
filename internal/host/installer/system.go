@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ygelfand/echolocal/internal/android/services"
 	"github.com/ygelfand/echolocal/internal/host/assets"
@@ -24,7 +25,10 @@ func (r *run) patchInitRC(at string, edits ...rcEdit) (int, error) {
 	}
 
 	var count int
-	for _, path := range found {
+	for i, path := range found {
+		if i > 0 {
+			time.Sleep(250 * time.Millisecond)
+		}
 		rc, err := r.d.ReadFile(path)
 		if err != nil {
 			return count, err
