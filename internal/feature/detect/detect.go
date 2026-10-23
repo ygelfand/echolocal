@@ -10,10 +10,13 @@ import (
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/runtime/service"
 
+	model "github.com/ygelfand/libcountertop/pkg/inference/wake"
+
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/diag"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
+	"github.com/ygelfand/echolocal/internal/feature/wakeobserve"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
@@ -58,6 +61,22 @@ func paused() bool {
 func newDetect() *Detect {
 	e := detect.New(detect.StopSlot+1, mic.Get())
 	e.Paused = paused
+	obs := wakeobserve.Get().Recorder
+	e.OnFrame = func(frame []int16, paused bool, dropped uint64) {
+		obs.Frame(frame, paused || config.Get().Microphone.Muted, dropped)
+	}
+	e.OnScore = obs.Score
+	e.OnPeak = obs.Peak
+	e.OnModel = func(slot int, m model.Model) {
+		obs.Model(
+			slot,
+			m.ID,
+			string(m.Kind),
+			m.Path,
+			m.Config.SlidingWindowSize,
+			m.Config.FeaturesStepMs,
+		)
+	}
 
 	e.Threshold = func(slot int) float64 {
 		if slot == detect.StopSlot {

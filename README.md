@@ -170,3 +170,5 @@ make install-echod                # build, install and restart it on the attache
 - **echod** runs on the device: the hardware, the screen, the wake word engines, the conversation,
   and an ESPHome native API server.
 - **echolocal** is the host CLI: installing, Wi‑Fi, and offline tools for debugging the device.
+
+For opt-in troubleshooting of unexpected activations, see [wake diagnostics](internal/wakecapture/README.md).

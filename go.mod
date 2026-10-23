@@ -132,3 +132,7 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0 // indirect
 )
+
+// Review dependency for https://github.com/ygelfand/libcountertop/pull/2.
+// Replace with the merged upstream version before merging this change.
+replace github.com/ygelfand/libcountertop => github.com/simeszi001/libcountertop v0.1.1-0.20261023034508-4953d5f48fa2

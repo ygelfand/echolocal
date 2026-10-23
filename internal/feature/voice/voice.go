@@ -14,6 +14,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/alarm"
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/timer"
+	"github.com/ygelfand/echolocal/internal/feature/wakeobserve"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
 	"github.com/ygelfand/echolocal/internal/hardware/buttons"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
@@ -46,6 +47,7 @@ func build() *Voice {
 		&esphome.VoiceSatellite{OnExternalWakeWords: wake.Lib().Answer},
 		dependencies(),
 		satellite.Options{
+			OnTrace: wakeobserve.Get().Mark,
 			Slots:   wakeword.Slots,
 			Initial: slots,
 			Timers:  timer.Get(),
@@ -57,7 +59,10 @@ func build() *Voice {
 	)}
 	slog.Info("wake words", "ours", len(ours), "slots", slots)
 
-	wakeword.Requested.Listen(v.Start)
+	wakeword.Requested.Listen(func(slot int) {
+		wakeobserve.Get().Mark("wake_requested", slot)
+		v.Start(slot)
+	})
 
 	buttons.Get().Events.Listen(func(e buttons.Event) {
 		if e.Name != buttons.Action {
@@ -65,8 +70,10 @@ func build() *Voice {
 		}
 		switch e.Kind {
 		case buttons.Tap:
+			wakeobserve.Get().Mark("button_tap", 0)
 			v.Action()
 		case buttons.Hold:
+			wakeobserve.Get().Mark("button_hold", 1)
 			v.ActionHold()
 		}
 	})
