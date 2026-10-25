@@ -225,6 +225,8 @@ github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/sagikazarmark/locafero v0.12.0 h1:/NQhBAkUb4+fH1jivKHWusDYFjMOOKU88eegjfxfHb4=
 github.com/sagikazarmark/locafero v0.12.0/go.mod h1:sZh36u/YSZ918v0Io+U9ogLYQJ9tLLBmM4eneO6WwsI=
+github.com/simeszi001/libcountertop v0.1.1-0.20261023034508-4953d5f48fa2 h1:9OizZzSLIzye776Rw+VYuO3OjLHi03OIl4Vwg4iBvGo=
+github.com/simeszi001/libcountertop v0.1.1-0.20261023034508-4953d5f48fa2/go.mod h1:BTnmY9FgdA6jnhvpmk7P67JyLBeA3z1t5fogegW5bCk=
 github.com/spf13/afero v1.15.0 h1:b/YBCLWAJdFWJTN9cLhiXXcD7mzKn9Dm86dNnfyQw1I=
 github.com/spf13/afero v1.15.0/go.mod h1:NC2ByUVxtQs4b3sIUphxK0NioZnmxgyCrfzeuq8lxMg=
 github.com/spf13/cast v1.10.0 h1:h2x0u2shc1QuLHfxi+cTJvs30+ZAHOGRic8uyGTDWxY=
@@ -264,8 +266,6 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/ygelfand/go-esphome-device v0.0.17 h1:2dXpMLR8F6N2soYXFqOqoMyBIiM+biFQx5PKiH2OHWw=
 github.com/ygelfand/go-esphome-device v0.0.17/go.mod h1:Rrbk7Xmsx2Au87DCXhPfOvI8O7OXFtWqUjxqiGL0nCQ=
-github.com/ygelfand/libcountertop v0.1.1-0.20261021223608-d51a3865a9e1 h1:DSyeU0qrjmPDCQ6bF32orj65n/GzmppzGRHHpyuJvSE=
-github.com/ygelfand/libcountertop v0.1.1-0.20261021223608-d51a3865a9e1/go.mod h1:BTnmY9FgdA6jnhvpmk7P67JyLBeA3z1t5fogegW5bCk=
 github.com/yuin/goldmark v1.8.5 h1:r6N5afV5qj/5S4UTch8agZHJ8UxNCMwX7WjkkJam2NA=
 github.com/yuin/goldmark v1.8.5/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
 github.com/yuin/goldmark-emoji v1.0.6 h1:QWfF2FYaXwL74tfGOW5izeiZepUDroDJfWubQI9HTHs=
