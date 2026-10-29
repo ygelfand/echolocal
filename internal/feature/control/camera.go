@@ -6,23 +6,9 @@ import (
 	"github.com/spf13/cobra"
 	harness "github.com/ygelfand/libcountertop/pkg/runtime/control"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/cameracmd"
-	"github.com/ygelfand/libcountertop/pkg/runtime/control/doorbellcmd"
-	"github.com/ygelfand/libcountertop/pkg/runtime/control/homealarmcmd"
 
-	"github.com/ygelfand/echolocal/internal/feature/doorbell"
-	"github.com/ygelfand/echolocal/internal/feature/homealarm"
 	"github.com/ygelfand/echolocal/internal/feature/vision"
 )
-
-func init() {
-	boardCommands = append(boardCommands, func(t *harness.Tree) {
-		t.Top(
-			cameraCommand(),
-			doorbellcmd.Command(doorbell.Get),
-			homealarmcmd.Command(homealarm.Get, homealarm.Shown),
-		)
-	})
-}
 
 func cameraCommand() *cobra.Command {
 	camera := harness.Group("camera", "The camera", "")

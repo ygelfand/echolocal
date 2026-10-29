@@ -3,38 +3,44 @@
 package control
 
 import (
-	"fmt"
-
-	"github.com/spf13/cobra"
 	harness "github.com/ygelfand/libcountertop/pkg/runtime/control"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/btcmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/castcmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/displaycmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/doorbellcmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/homealarmcmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/homecmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/screencmd"
 
+	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/a2dp"
+	"github.com/ygelfand/echolocal/internal/feature/chromecast"
+	"github.com/ygelfand/echolocal/internal/feature/doorbell"
+	"github.com/ygelfand/echolocal/internal/feature/homealarm"
+	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
+	"github.com/ygelfand/echolocal/internal/feature/message"
 	"github.com/ygelfand/echolocal/internal/feature/nws"
 	"github.com/ygelfand/echolocal/internal/feature/poster"
 	"github.com/ygelfand/echolocal/internal/feature/timer"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
+	"github.com/ygelfand/echolocal/internal/hardware/gpu"
+	"github.com/ygelfand/echolocal/internal/layout"
 )
 
 func showing(t *harness.Tree) {
-	shot := &cobra.Command{
-		Use:   "shot <path>",
-		Short: "Write what the panel is showing to a PNG",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := screencmd.Shot(display.Get(), args[0]); err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), args[0])
-			return nil
-		},
-	}
+	t.Add(harness.DisplayTask, displaycmd.Commands(displaycmd.Dependencies{
+		Panel:    display.Get,
+		GPU:      gpu.Get,
+		Messages: message.Get,
+		Label:    config.Defaults().Visual.Label,
+		Shot:     layout.StateDir + "/screen.png",
+		Thumbs:   "/data/local/tmp/echolocal-thumbs",
+	})...)
 
 	open, stack, ready := panelCommands()
 	t.Add(
 		harness.DisplayTask,
-		shot,
 		screencmd.Record(display.Get),
-		thumbsCommand(),
 		open,
 		stack,
 		screencmd.Timer(timer.Get),
@@ -42,4 +48,13 @@ func showing(t *harness.Tree) {
 		screencmd.Wallpaper(poster.Get),
 	)
 	t.Add(harness.DeviceTask, ready)
+	t.Top(
+		btcmd.Command(a2dp.Get(), "echolocal"),
+		callCommand(),
+		cameraCommand(),
+		doorbellcmd.Command(doorbell.Get),
+		homealarmcmd.Command(homealarm.Get, homealarm.Shown),
+		castcmd.Command(chromecast.Page),
+	)
+	t.Top(homecmd.Commands(homeassistant.Get())...)
 }

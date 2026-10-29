@@ -22,38 +22,36 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/visuals"
 )
 
-func init() {
-	extensions = append(extensions, func(_ *widgets.UI, o *screens.Options) {
-		wake := alarms.New(alarms.Options{
-			Shell:  shell.Get(),
-			Alarms: alarm.Get(),
-			Tones:  alerts.Get().Tones,
-		})
-		apps.Get().Add(wake.App())
-		o.Alarms = alarm.Get()
-		light := dawnview.NewLight(
-			shell.Get(),
-			alarm.Get(),
-			visuals.Show(dawnview.NewSource(dawnview.Options{
-				Alarms:  alarm.Get(),
-				Look:    func() schema.WakeLook { return alerts.Get().Current().Wake },
-				Clock24: func() bool { return config.Get().Screen.Hours == schema.TwentyFourHour },
-			})),
-			idle.Get(),
-		)
-		alarm.Get().Dawning.Listen(func(sharedalarm.Dawn) { light.Check() })
-		alarm.Get().Changed.Listen(func(struct{}) {
-			if alarm.Get().Ringing() {
-				idle.Get().Wake()
-			}
-			light.Check()
-			shell.Get().Redraw()
-		})
-		brightness.Get().Rising(func() (float64, bool) {
-			if d := alarm.Get().Dawn(); d.Rising() {
-				return d.Share(time.Now()), true
-			}
-			return 1, dawnview.Showing(alarm.Get())
-		})
+func extendAlarms(_ *widgets.UI, o *screens.Options, _ func() *screens.App) {
+	wake := alarms.New(alarms.Options{
+		Shell:  shell.Get(),
+		Alarms: alarm.Get(),
+		Tones:  alerts.Get().Tones,
+	})
+	apps.Get().Add(wake.App())
+	o.Alarms = alarm.Get()
+	light := dawnview.NewLight(
+		shell.Get(),
+		alarm.Get(),
+		visuals.Show(dawnview.NewSource(dawnview.Options{
+			Alarms:  alarm.Get(),
+			Look:    func() schema.WakeLook { return alerts.Get().Current().Wake },
+			Clock24: func() bool { return config.Get().Screen.Hours == schema.TwentyFourHour },
+		})),
+		idle.Get(),
+	)
+	alarm.Get().Dawning.Listen(func(sharedalarm.Dawn) { light.Check() })
+	alarm.Get().Changed.Listen(func(struct{}) {
+		if alarm.Get().Ringing() {
+			idle.Get().Wake()
+		}
+		light.Check()
+		shell.Get().Redraw()
+	})
+	brightness.Get().Rising(func() (float64, bool) {
+		if d := alarm.Get().Dawn(); d.Rising() {
+			return d.Share(time.Now()), true
+		}
+		return 1, dawnview.Showing(alarm.Get())
 	})
 }

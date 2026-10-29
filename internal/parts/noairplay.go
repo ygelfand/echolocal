@@ -1,4 +1,4 @@
-//go:build !payload
+//go:build !airplay
 
 package parts
 

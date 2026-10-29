@@ -19,22 +19,20 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/shell"
 )
 
-func init() {
-	extensions = append(extensions, func(look *widgets.UI, o *screens.Options) {
-		sky := radarview.New(radarview.Options{
-			UI:       look,
-			Shell:    shell.Get(),
-			Radar:    radar.Get(),
-			Settings: config.WeatherSection,
-			Clock24: func() bool {
-				return config.Get().Screen.Hours == schema.TwentyFourHour
-			},
-			Again: func(w *gogui.Window, after time.Duration) { Get().Again(w, after) },
-			Gate:  func(w *gogui.Window) gogui.View { return Get().Gate(w) },
-		})
-		apps.Get().Add(sky.App())
-		commands.Get().Listen(sky.Command())
-		o.OpenRadar = sky.Open
-		o.Views = append(o.Views, sky.Screen)
+func extendRadar(look *widgets.UI, o *screens.Options, app func() *screens.App) {
+	sky := radarview.New(radarview.Options{
+		UI:       look,
+		Shell:    shell.Get(),
+		Radar:    radar.Get(),
+		Settings: config.WeatherSection,
+		Clock24: func() bool {
+			return config.Get().Screen.Hours == schema.TwentyFourHour
+		},
+		Again: func(w *gogui.Window, after time.Duration) { app().Again(w, after) },
+		Gate:  func(w *gogui.Window) gogui.View { return app().Gate(w) },
 	})
+	apps.Get().Add(sky.App())
+	commands.Get().Listen(sky.Command())
+	o.OpenRadar = sky.Open
+	o.Views = append(o.Views, sky.Screen)
 }

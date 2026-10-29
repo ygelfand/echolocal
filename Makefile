@@ -20,8 +20,7 @@ LDFLAGS := -X '$(BUILDVARS).Version=$(VERSION)' \
 
 BUILD_DIR := bin
 
-# UPX 5.x packs static ARM executables that fail upx -t.
-UPX_VERSION := 4.2.4
+UPX_VERSION := 5.3.0
 UPX_DIR := $(BUILD_DIR)/upx-$(UPX_VERSION)
 UPX := $(UPX_DIR)/build/upx
 
@@ -43,7 +42,7 @@ PACK ?=
 empty :=
 space := $(empty) $(empty)
 comma := ,
-ALL_TAGS := $(strip $(TAGS) board_$(or $(BOARD),biscuit) $(if $(filter $(BOARD),$(SCREEN_BOARDS)),voice payload))
+ALL_TAGS := $(strip $(TAGS) board_$(or $(BOARD),biscuit) airplay $(if $(filter $(BOARD),$(SCREEN_BOARDS)),voice payload))
 DEVICE_TAGS := $(if $(ALL_TAGS),-tags $(subst $(space),$(comma),$(ALL_TAGS)),)
 
 DEVICE_LDFLAGS := -s -w $(LDFLAGS) $(if $(BOARD),-X '$(BOARDVARS).pinned=$(BOARD)')
@@ -66,7 +65,7 @@ STATE_DIR := /data/misc/echolocal
 
 NDK ?= $(firstword $(ANDROID_NDK_HOME) $(ANDROID_NDK_LATEST_HOME) $(wildcard /opt/homebrew/Caskroom/android-ndk/*/AndroidNDK*.app/Contents/NDK))
 NDK_HOST := $(if $(filter Darwin,$(shell uname -s)),darwin-x86_64,linux-x86_64)
-NATIVE_API = $(shell go run ./cmd/native-target $(BOARD))
+NATIVE_API = $(shell go run ./cmd/native-target $(or $(BOARD),biscuit))
 NDK_CC = $(NDK)/toolchains/llvm/prebuilt/$(NDK_HOST)/bin/armv7a-linux-androideabi$(NATIVE_API)-clang
 LIBCOUNTERTOP_MODULE := github.com/ygelfand/libcountertop
 LIBCOUNTERTOP_DIR = $(shell go list -m -f '{{.Dir}}' $(LIBCOUNTERTOP_MODULE))
@@ -112,7 +111,7 @@ build-echolocal: ## Build the host CLI into ./bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echolocal ./cmd/echolocal
 
 .PHONY: build-echod
-build-echod: $(if $(filter $(BOARD),$(PART_BOARDS)),stage-voice stage-airplay stage-parts) ##Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot; PACK=bin/upx-4.2.4/build/upx to compress it)
+build-echod: stage-airplay $(if $(filter $(BOARD),$(PART_BOARDS)),stage-voice stage-parts) ##Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot; PACK=bin/upx-5.3.0/build/upx to compress it)
 	@mkdir -p $(BUILD_DIR)
 	$(DEVICE_ENV) go build $(DEVICE_TAGS) -ldflags "$(DEVICE_LDFLAGS)" -o $(DEVICE_BIN) ./cmd/echod
 	$(if $(PACK),$(PACK) -q $(DEVICE_BIN))

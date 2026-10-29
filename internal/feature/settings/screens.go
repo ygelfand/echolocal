@@ -3,6 +3,7 @@
 package settings
 
 import (
+	gogui "github.com/go-gui-org/go-gui/gui"
 	sharedvolume "github.com/ygelfand/libcountertop/pkg/audio/volume"
 	sharedsettings "github.com/ygelfand/libcountertop/pkg/display/settings"
 	sharedshell "github.com/ygelfand/libcountertop/pkg/display/shell"
@@ -41,29 +42,21 @@ func root() *sharedshell.Page {
 		VolumePage:   func() sharedshell.View { return volume.Page() },
 		AboutPage:    func() sharedshell.View { return aboutPage() },
 		Sections: func() []sharedsettings.Section {
-			out := make([]sharedsettings.Section, 0, len(sections))
-			for _, s := range sections {
-				out = append(
-					out,
-					sharedsettings.Section{
-						Label: s.label,
-						Glyph: s.glyph,
-						Page:  func() sharedshell.View { return s.page() },
-					},
-				)
+			return []sharedsettings.Section{
+				{
+					Label: "settings.camera",
+					Glyph: gogui.IconCamera,
+					Page:  func() sharedshell.View { return cameraPage() },
+				},
+				{
+					Label: "voice.title",
+					Glyph: gogui.IconMegaphone,
+					Page:  func() sharedshell.View { return voicePage() },
+				},
 			}
-			return out
 		},
 	})
 }
-
-type section struct {
-	label string
-	glyph string
-	page  func() *sharedshell.Page
-}
-
-var sections []section
 
 func visualPage() *sharedshell.Page {
 	return visualPicker(say.T("debug.visuals"), "", nil, nil, func(k sharedvisual.Kind) {

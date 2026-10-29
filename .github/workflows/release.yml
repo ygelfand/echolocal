@@ -65,4 +65,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           VERSION: ${{ github.ref_name }}
-          PACK: bin/upx-4.2.4/build/upx --lzma -2
+          PACK: bin/upx-${{ steps.upx.outputs.version }}/build/upx --lzma -2

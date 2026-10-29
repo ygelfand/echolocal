@@ -4,7 +4,6 @@ package all
 
 import (
 	_ "github.com/ygelfand/echolocal/internal/feature/a2dp"
-	_ "github.com/ygelfand/echolocal/internal/feature/airplay"
 	_ "github.com/ygelfand/echolocal/internal/feature/apps"
 	_ "github.com/ygelfand/echolocal/internal/feature/assistant"
 	_ "github.com/ygelfand/echolocal/internal/feature/brightness"

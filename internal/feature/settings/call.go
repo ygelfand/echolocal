@@ -13,13 +13,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/shell"
 )
 
-func init() {
-	features = append(features, feature{
-		key:  "call.settings",
-		page: callsPage,
-	})
-}
-
 func callsPage() *sharedshell.Page { return callPages().Calls() }
 
 func callPages() *sharedsettings.CallPages {

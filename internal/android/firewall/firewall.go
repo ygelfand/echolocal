@@ -18,16 +18,17 @@ const (
 	Sendspin = "ECHOLOCAL_SENDSPIN"
 	Web      = "ECHOLOCAL_WEB"
 	Cast     = "ECHOLOCAL_CAST"
+	AirPlay  = "ECHOLOCAL_AIRPLAY"
 )
 
-var All = []string{API, ADB, Sendspin, Web, Cast}
+var All = []string{API, ADB, Sendspin, Web, Cast, AirPlay}
 
 const iface = "wlan0"
 
 var ready sync.Mutex
 
-func acceptRule(chain string, port int) []string {
-	return []string{chain, "-i", iface, "-p", "tcp", "--dport", fmt.Sprint(port), "-j", "ACCEPT"}
+func acceptRule(chain, proto string, port int) []string {
+	return []string{chain, "-i", iface, "-p", proto, "--dport", fmt.Sprint(port), "-j", "ACCEPT"}
 }
 
 func jumpRule(chain string) []string {
@@ -35,21 +36,28 @@ func jumpRule(chain string) []string {
 }
 
 func Open(chain string, ports ...int) error {
-	ready.Lock()
-	defer ready.Unlock()
-	return open(chain, ports)
+	return Allow(chain, ports, nil)
 }
 
-func open(chain string, ports []int) error {
+func Allow(chain string, tcp, udp []int) error {
+	ready.Lock()
+	defer ready.Unlock()
+	return open(chain, tcp, udp)
+}
+
+func open(chain string, tcp, udp []int) error {
 	if err := ensure(chain); err != nil {
 		return err
 	}
 	if err := iptablesRun("-F", chain); err != nil {
 		return err
 	}
-	for _, port := range ports {
-		if err := iptablesRun(append([]string{"-A"}, acceptRule(chain, port)...)...); err != nil {
-			return err
+	for proto, ports := range map[string][]int{"tcp": tcp, "udp": udp} {
+		for _, port := range ports {
+			if err := iptablesRun(
+				append([]string{"-A"}, acceptRule(chain, proto, port)...)...); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -66,7 +74,7 @@ func Close(chain string) error {
 }
 
 func Opened(chain string, port int) (bool, error) {
-	return has(acceptRule(chain, port))
+	return has(acceptRule(chain, "tcp", port))
 }
 
 // firewall.sh flushes INPUT once the boot completes; the chains and their contents survive.

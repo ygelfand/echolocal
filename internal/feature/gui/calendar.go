@@ -16,20 +16,18 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/shell"
 )
 
-func init() {
-	extensions = append(extensions, func(look *widgets.UI, o *screens.Options) {
-		cal := calendar.Get().Calendar
-		diary := agenda.New(agenda.Options{
-			UI:       look,
-			Shell:    shell.Get(),
-			Calendar: cal,
-			Gate:     func(w *gogui.Window) gogui.View { return Get().Gate(w) },
-			TwentyFour: func() bool {
-				return config.Get().Screen.Hours == schema.TwentyFourHour
-			},
-		})
-		apps.Get().Add(diary.App())
-		o.Calendar = cal
-		o.Views = append(o.Views, diary.Screen)
+func extendCalendar(look *widgets.UI, o *screens.Options, app func() *screens.App) {
+	cal := calendar.Get().Calendar
+	diary := agenda.New(agenda.Options{
+		UI:       look,
+		Shell:    shell.Get(),
+		Calendar: cal,
+		Gate:     func(w *gogui.Window) gogui.View { return app().Gate(w) },
+		TwentyFour: func() bool {
+			return config.Get().Screen.Hours == schema.TwentyFourHour
+		},
 	})
+	apps.Get().Add(diary.App())
+	o.Calendar = cal
+	o.Views = append(o.Views, diary.Screen)
 }

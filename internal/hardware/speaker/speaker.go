@@ -96,6 +96,18 @@ func (p *Player) Attach(s mix.Source) { p.bus.Attach(s) }
 
 func (p *Player) Written() uint64 { return p.written.Load() }
 
+func (p *Player) Latency() time.Duration {
+	pb, _ := p.device()
+	if pb == nil {
+		return 0
+	}
+	frames, err := pb.Delay()
+	if err != nil {
+		return 0
+	}
+	return time.Duration(max(frames, 0)+period) * time.Second / Rate
+}
+
 func New() *Player {
 	saved := config.Get().Speaker
 	p := &Player{

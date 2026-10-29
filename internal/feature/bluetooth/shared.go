@@ -25,6 +25,8 @@ var get = sync.OnceValue(func() *Proxy {
 			mac, _ := layout.FactoryMAC()
 			return sharedproxy.BeaconAdvertisement(sharedproxy.BeaconMinor(mac))
 		},
+		Links: ble.Get(),
+		Bonds: layout.BondsPath,
 	})}
 	component.Settings.Add(p.Controls())
 	return p

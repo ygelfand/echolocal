@@ -14,14 +14,12 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/shell"
 )
 
-func init() {
-	extensions = append(extensions, func(look *widgets.UI, o *screens.Options) {
-		if component.Board().CameraWidth == 0 {
-			return
-		}
-		m := mirror.New(mirror.Options{Shell: shell.Get(), Camera: settings.Preview()})
-		apps.Get().Add(m.App())
-		commands.Get().Listen(m.Command())
-		o.Views = append(o.Views, m.Screen)
-	})
+func extendMirror(look *widgets.UI, o *screens.Options, _ func() *screens.App) {
+	if component.Board().CameraWidth == 0 {
+		return
+	}
+	m := mirror.New(mirror.Options{Shell: shell.Get(), Camera: settings.Preview()})
+	apps.Get().Add(m.App())
+	commands.Get().Listen(m.Command())
+	o.Views = append(o.Views, m.Screen)
 }

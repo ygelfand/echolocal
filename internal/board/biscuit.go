@@ -18,6 +18,7 @@ var Biscuit = Board{
 	Model:        "Echo Dot 2 (biscuit)",
 	DefaultName:  "Echo Dot",
 	Caps:         Ring | MuteLight | HeadphoneJack,
+	NativeAPI:    25,
 	RadioZone:    "mtktswmt",
 	Tuning: asp.Files{
 		EQ: []asp.Step{

@@ -25,41 +25,39 @@ import (
 	featureshell "github.com/ygelfand/echolocal/internal/feature/shell"
 )
 
-func init() {
-	extensions = append(extensions, func(ui *widgets.UI, o *screens.Options) {
-		apps.Get().Add(cameras.Get().App())
-		apps.Get().Add(doorbell.View().App())
-		photosApp := photosview.New(photosview.Options{
-			Shell:    featureshell.Get(),
-			Photos:   photos.Get(),
-			Settings: config.PhotosSection,
-			Page:     func() shell.View { return settings.Visuals().Photos() },
-			GPU:      gpu.Get(),
-			Display:  display.Get(),
-		})
-		apps.Get().Add(photosApp.App())
-		alarmPanel := homealarm.NewView(ui)
-		apps.Get().Add(alarmPanel.App())
-		o.HomeAlarmPage = func() shell.View { return alarmPanel.Page() }
-		o.Views = append(o.Views, alarmPanel.Screen)
-		for _, a := range homecontrol.Get().Apps() {
-			apps.Get().Add(a)
-		}
-		o.Views = append(o.Views, cameras.Get().Screen, doorbell.View().Screen, photosApp.Screen)
-		if o.Boards == nil {
-			o.Boards = map[string]screens.Board{}
-		}
-		o.Boards[cameraview.TabKind] = screens.Board{
-			Glyph: cameras.Get().Glyph,
-			Draw:  cameras.Get().Board,
-		}
-		o.Boards[doorbellview.TabKind] = screens.Board{
-			Glyph: doorbell.View().Glyph,
-			Draw:  doorbell.View().Board,
-		}
-		o.Boards[homealarmview.TabKind] = screens.Board{
-			Glyph: alarmPanel.Glyph,
-			Draw:  alarmPanel.Board,
-		}
+func extendCameras(ui *widgets.UI, o *screens.Options, _ func() *screens.App) {
+	apps.Get().Add(cameras.Get().App())
+	apps.Get().Add(doorbell.View().App())
+	photosApp := photosview.New(photosview.Options{
+		Shell:    featureshell.Get(),
+		Photos:   photos.Get(),
+		Settings: config.PhotosSection,
+		Page:     func() shell.View { return settings.Visuals().Photos() },
+		GPU:      gpu.Get(),
+		Display:  display.Get(),
 	})
+	apps.Get().Add(photosApp.App())
+	alarmPanel := homealarm.NewView(ui)
+	apps.Get().Add(alarmPanel.App())
+	o.HomeAlarmPage = func() shell.View { return alarmPanel.Page() }
+	o.Views = append(o.Views, alarmPanel.Screen)
+	for _, a := range homecontrol.Get().Apps() {
+		apps.Get().Add(a)
+	}
+	o.Views = append(o.Views, cameras.Get().Screen, doorbell.View().Screen, photosApp.Screen)
+	if o.Boards == nil {
+		o.Boards = map[string]screens.Board{}
+	}
+	o.Boards[cameraview.TabKind] = screens.Board{
+		Glyph: cameras.Get().Glyph,
+		Draw:  cameras.Get().Board,
+	}
+	o.Boards[doorbellview.TabKind] = screens.Board{
+		Glyph: doorbell.View().Glyph,
+		Draw:  doorbell.View().Board,
+	}
+	o.Boards[homealarmview.TabKind] = screens.Board{
+		Glyph: alarmPanel.Glyph,
+		Draw:  alarmPanel.Board,
+	}
 }

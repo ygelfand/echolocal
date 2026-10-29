@@ -17,18 +17,16 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/volume"
 )
 
-func init() {
-	extensions = append(extensions, func(look *widgets.UI, o *screens.Options) {
-		calls := callview.New(callview.Options{
-			UI:    look,
-			Shell: shell.Get(),
-			Calls: call.Get(),
-			Peers: discovery.Get(),
-			Voice: sharedvolume.For(volume.Get(), config.StreamVoice),
-			Video: component.Board().CameraWidth > 0,
-		})
-		apps.Get().Add(calls.App())
-		discovery.Get().Changed.Listen(func(struct{}) { shell.Get().Redraw() })
-		o.Views = append(o.Views, calls.Screen)
+func extendCalls(look *widgets.UI, o *screens.Options, _ func() *screens.App) {
+	calls := callview.New(callview.Options{
+		UI:    look,
+		Shell: shell.Get(),
+		Calls: call.Get(),
+		Peers: discovery.Get(),
+		Voice: sharedvolume.For(volume.Get(), config.StreamVoice),
+		Video: component.Board().CameraWidth > 0,
 	})
+	apps.Get().Add(calls.App())
+	discovery.Get().Changed.Listen(func(struct{}) { shell.Get().Redraw() })
+	o.Views = append(o.Views, calls.Screen)
 }

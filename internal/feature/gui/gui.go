@@ -58,8 +58,6 @@ func init() {
 	)
 }
 
-var extensions []func(*widgets.UI, *screens.Options)
-
 var Get = sync.OnceValue(func() *screens.App {
 	look := widgets.NewUI(config.ScreenSection)
 	o := screens.Options{
@@ -137,8 +135,23 @@ var Get = sync.OnceValue(func() *screens.App {
 			screens.On(&web.Get().Offered),
 		},
 	}
-	for _, extend := range extensions {
-		extend(look, &o)
+	var app *screens.App
+	self := func() *screens.App { return app }
+	for _, extend := range []func(*widgets.UI, *screens.Options, func() *screens.App){
+		extendAlarms,
+		extendApps,
+		extendCalendar,
+		extendCalls,
+		extendCameras,
+		extendLock,
+		extendMirror,
+		extendRadar,
+		extendRadio,
+		extendShopping,
+		extendSync,
+	} {
+		extend(look, &o, self)
 	}
-	return screens.New(o)
+	app = screens.New(o)
+	return app
 })

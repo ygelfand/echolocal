@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ygelfand/echolocal/internal/lib/i2c"
+	"github.com/ygelfand/libcountertop/pkg/system/i2c"
 )
 
 func newI2CCmd() *cobra.Command {
@@ -20,12 +20,21 @@ func newI2CCmd() *cobra.Command {
 			"Reads are safe. Writing races whatever driver owns the device.",
 	}
 
-	var (
-		bus   int
-		force bool
-	)
+	var bus int
 	c.PersistentFlags().IntVarP(&bus, "bus", "b", 0, "I2C bus number")
-	c.PersistentFlags().BoolVar(&force, "force", true, "claim addresses owned by a kernel driver")
+
+	device := func(addr uint8) (*i2c.Device, func(), error) {
+		b, err := i2c.Open(bus)
+		if err != nil {
+			return nil, nil, err
+		}
+		d, err := i2c.At(b, uint16(addr))
+		if err != nil {
+			_ = b.Close()
+			return nil, nil, err
+		}
+		return d, func() { _ = b.Close() }, nil
+	}
 
 	parseAddr := func(s string) (uint8, error) {
 		v, err := strconv.ParseUint(strings.TrimPrefix(s, "0x"), 16, 8)
@@ -57,15 +66,22 @@ func newI2CCmd() *cobra.Command {
 				last = uint8(v)
 			}
 
-			b, err := i2c.Open(bus, addr, force)
+			if last < first {
+				return fmt.Errorf("i2c: %d..%d is not a range", first, last)
+			}
+			d, done, err := device(addr)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = b.Close() }()
+			defer done()
 
-			regs, err := b.Dump(first, last)
-			if err != nil {
-				return err
+			regs := make([]byte, 0, int(last-first)+1)
+			for r := int(first); r <= int(last); r++ {
+				v, err := d.Byte(byte(r))
+				if err != nil {
+					v = 0xff
+				}
+				regs = append(regs, v)
 			}
 
 			out := cmd.OutOrStdout()
@@ -102,20 +118,20 @@ func newI2CCmd() *cobra.Command {
 				return err
 			}
 
-			b, err := i2c.Open(bus, addr, force)
+			d, done, err := device(addr)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = b.Close() }()
+			defer done()
 
-			before, readable := b.ReadReg(uint8(reg))
-			if err := b.WriteReg(uint8(reg), uint8(val)); err != nil {
+			before, readable := d.Byte(byte(reg))
+			if err := d.Write(byte(reg), byte(val)); err != nil {
 				return err
 			}
 
 			// The LED driver at 0x3f answers writes and NAKs every read with ENXIO.
 			out := cmd.OutOrStdout()
-			after, err := b.ReadReg(uint8(reg))
+			after, err := d.Byte(byte(reg))
 			switch {
 			case readable != nil || err != nil:
 				fmt.Fprintf(

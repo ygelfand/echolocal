@@ -5,8 +5,6 @@ package settings
 import (
 	"sync"
 
-	gogui "github.com/go-gui-org/go-gui/gui"
-
 	"github.com/ygelfand/libcountertop/pkg/camera/live"
 	sharedpreview "github.com/ygelfand/libcountertop/pkg/display/camerapreview"
 	sharedsettings "github.com/ygelfand/libcountertop/pkg/display/settings"
@@ -46,13 +44,4 @@ func cameraPage() *sharedshell.Page { return cameraPages().Page() }
 
 func streamPage() *sharedshell.Page {
 	return sharedsettings.ServicePage(say.T("features.rtsp"), rtspd.Get().Settings())
-}
-
-func init() {
-	sections = append(
-		sections,
-		section{label: "settings.camera", glyph: gogui.IconCamera, page: cameraPage},
-	)
-	pages["camera"] = cameraPage
-	features = append(features, feature{key: "features.rtsp", page: streamPage})
 }

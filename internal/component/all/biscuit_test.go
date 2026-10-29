@@ -11,6 +11,7 @@ import (
 )
 
 var registered = []string{
+	"airplay",
 	"alerts_ring_for",
 	"alerts_timer",
 	"artist",
@@ -80,6 +81,7 @@ var registered = []string{
 	"max_listen_2",
 	"max_think_1",
 	"max_think_2",
+	"media_airplay_audio_mode",
 	"media_duck_level",
 	"memory_available",
 	"metrics_interval",

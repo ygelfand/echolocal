@@ -1,9 +1,6 @@
-//go:build !board_biscuit
-
 package airplay
 
 import (
-	"image"
 	"log/slog"
 	"sync"
 
@@ -11,10 +8,10 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/media/playback"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 
+	"github.com/ygelfand/echolocal/internal/android/firewall"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/playout"
-	"github.com/ygelfand/echolocal/internal/hardware/display"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/parts"
@@ -34,8 +31,7 @@ func (r *Receiver) Close() error {
 }
 
 var get = sync.OnceValue(func() *Receiver {
-	b := component.Board()
-	r := &Receiver{sharedairplay.NewReceiver(sharedairplay.Options{
+	o := sharedairplay.Options{
 		Settings: config.AirPlaySection,
 		Device:   component.DevicePlayback,
 		Helper:   layout.AirPlayHelper,
@@ -43,19 +39,23 @@ var get = sync.OnceValue(func() *Receiver {
 		Keyfile:  layout.AirPlayKey,
 		Name:     deviceName,
 		MAC:      mac,
-		Size: func() (int, int) {
-			w, h := display.Get().Native()
-			return display.Get().Orientation().Size(w, h)
-		},
-		Largest: image.Pt(b.DecodeWidth, b.DecodeHeight),
 		Output: func(ended func()) playback.Output {
 			o := playout.New()
 			o.SetEnded(ended)
 			return o
 		},
+		OpenPorts: func() {
+			err := firewall.Allow(firewall.AirPlay, sharedairplay.TCPPorts, sharedairplay.UDPPorts)
+			if err != nil {
+				slog.Error("opening the airplay ports failed", "err", err)
+			}
+		},
+		Latency:  speaker.Get().Latency,
 		Rate:     speaker.Rate,
 		Channels: speaker.Channels,
-	})}
+	}
+	screen(&o)
+	r := &Receiver{sharedairplay.NewReceiver(o)}
 	component.Settings.Add(r.Settings())
 	return r
 })

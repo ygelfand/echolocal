@@ -9,8 +9,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/lock"
 )
 
-func init() {
-	extensions = append(extensions, func(look *widgets.UI, o *screens.Options) {
-		o.Views = append(o.Views, lock.Get().Gate().Views(look))
-	})
+func extendLock(look *widgets.UI, o *screens.Options, _ func() *screens.App) {
+	o.Views = append(o.Views, lock.Get().Gate().Views(look))
 }

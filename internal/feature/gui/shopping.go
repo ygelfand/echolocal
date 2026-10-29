@@ -14,17 +14,15 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/todo"
 )
 
-func init() {
-	extensions = append(extensions, func(look *widgets.UI, o *screens.Options) {
-		list := todo.Get().Todo
-		shop := shopping.New(shopping.Options{
-			UI:    look,
-			Shell: shell.Get(),
-			Todo:  list,
-			Gate:  func(w *gogui.Window) gogui.View { return Get().Gate(w) },
-		})
-		apps.Get().Add(shop.App())
-		o.Todo = list
-		o.Views = append(o.Views, shop.Screen)
+func extendShopping(look *widgets.UI, o *screens.Options, app func() *screens.App) {
+	list := todo.Get().Todo
+	shop := shopping.New(shopping.Options{
+		UI:    look,
+		Shell: shell.Get(),
+		Todo:  list,
+		Gate:  func(w *gogui.Window) gogui.View { return app().Gate(w) },
 	})
+	apps.Get().Add(shop.App())
+	o.Todo = list
+	o.Views = append(o.Views, shop.Screen)
 }
