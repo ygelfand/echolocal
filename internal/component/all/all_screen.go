@@ -25,6 +25,7 @@ import (
 	_ "github.com/ygelfand/echolocal/internal/feature/splash"
 	_ "github.com/ygelfand/echolocal/internal/feature/states"
 	_ "github.com/ygelfand/echolocal/internal/feature/tessera"
+	_ "github.com/ygelfand/echolocal/internal/feature/thermostat"
 	_ "github.com/ygelfand/echolocal/internal/feature/visuals"
 	_ "github.com/ygelfand/echolocal/internal/feature/volume"
 	_ "github.com/ygelfand/echolocal/internal/feature/weather"

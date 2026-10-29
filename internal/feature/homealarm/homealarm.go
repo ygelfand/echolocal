@@ -23,10 +23,9 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/alerts"
-	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/idle"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
-	"github.com/ygelfand/echolocal/internal/feature/states"
 	"github.com/ygelfand/echolocal/internal/feature/visuals"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
 	"github.com/ygelfand/echolocal/internal/hardware/gpu"
@@ -41,15 +40,7 @@ func init() {
 }
 
 var Get = sync.OnceValue(func() *shared.Alarm {
-	a := shared.New(shared.Options{
-		Controller: homeassistant.Get(),
-		States:     states.Get(),
-		Settings:   config.HomeAlarmSection,
-		DeviceID:   component.DeviceScreen,
-		Chimes:     alerts.Get().Tones,
-	})
-	component.Settings.Add(a.Settings())
-	return a
+	return shared.Build(product.Get(), config.HomeAlarmSection, alerts.Get().Tones)
 })
 
 var shown atomic.Pointer[homealarmview.View]

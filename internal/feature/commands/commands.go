@@ -9,6 +9,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/detect"
+	"github.com/ygelfand/echolocal/internal/feature/discovery"
+	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/parts"
@@ -29,12 +31,18 @@ func (c *Commands) Close() error {
 
 var get = sync.OnceValue(func() *Commands {
 	c := &Commands{voice.NewListener(voice.Options{
-		Helper:   layout.VoiceHelper,
-		Binary:   parts.Voice(),
+		Helper:   layout.SpeechHelper,
+		Binary:   parts.Speech(),
 		ModelDir: layout.ModelDir,
 		Source:   mic.Get(),
 		Paused:   detect.Get().Paused,
 		Settings: config.VoiceSection,
+		Home:     homeassistant.Get(),
+		Peers:    discovery.Get().PeerNames,
+		Retired: []string{
+			layout.StateDir + "/bin/echolocal-voice",
+			layout.ModelDir + "/whistle-*.cact",
+		},
 	})}
 	return c
 })

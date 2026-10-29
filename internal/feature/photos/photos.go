@@ -9,8 +9,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/board"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
-	"github.com/ygelfand/echolocal/internal/layout"
 )
 
 type componentPhotos struct{ *photos.Library }
@@ -18,17 +18,10 @@ type componentPhotos struct{ *photos.Library }
 func (p componentPhotos) Restore(c config.Config) { p.Library.Restore(c.Photos) }
 
 var get = sync.OnceValue(func() *photos.Library {
-	l := photos.New(photos.Options{
-		Settings: config.PhotosSection,
-		Dir:      layout.PhotoDir,
-		DeviceID: component.DeviceScreen,
-		Most: func() int {
-			w, h := display.Get().Native()
-			return max(w, h)
-		},
+	return photos.Build(product.Get(), config.PhotosSection, func() int {
+		w, h := display.Get().Native()
+		return max(w, h)
 	})
-	component.Settings.Add(l.Settings())
-	return l
 })
 
 func Get() *photos.Library { return get() }

@@ -9,6 +9,7 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/display/photosview"
 	"github.com/ygelfand/libcountertop/pkg/display/screens"
 	"github.com/ygelfand/libcountertop/pkg/display/shell"
+	"github.com/ygelfand/libcountertop/pkg/display/thermostatview"
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
 
 	"github.com/ygelfand/echolocal/internal/hardware/display"
@@ -23,6 +24,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/photos"
 	"github.com/ygelfand/echolocal/internal/feature/settings"
 	featureshell "github.com/ygelfand/echolocal/internal/feature/shell"
+	"github.com/ygelfand/echolocal/internal/feature/thermostat"
 )
 
 func extendCameras(ui *widgets.UI, o *screens.Options, _ func() *screens.App) {
@@ -41,6 +43,10 @@ func extendCameras(ui *widgets.UI, o *screens.Options, _ func() *screens.App) {
 	apps.Get().Add(alarmPanel.App())
 	o.HomeAlarmPage = func() shell.View { return alarmPanel.Page() }
 	o.Views = append(o.Views, alarmPanel.Screen)
+	climate := thermostat.NewView(ui)
+	apps.Get().Add(climate.App())
+	o.ThermostatPage = func() shell.View { return climate.Page() }
+	o.Views = append(o.Views, climate.Screen)
 	for _, a := range homecontrol.Get().Apps() {
 		apps.Get().Add(a)
 	}
@@ -59,5 +65,10 @@ func extendCameras(ui *widgets.UI, o *screens.Options, _ func() *screens.App) {
 	o.Boards[homealarmview.TabKind] = screens.Board{
 		Glyph: alarmPanel.Glyph,
 		Draw:  alarmPanel.Board,
+	}
+	o.Boards[thermostatview.TabKind] = screens.Board{
+		Glyph:  climate.Glyph,
+		Draw:   climate.Board,
+		Ground: climate.Ground,
 	}
 }

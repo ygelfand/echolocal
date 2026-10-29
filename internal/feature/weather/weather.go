@@ -11,9 +11,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/board"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
-	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
-	"github.com/ygelfand/echolocal/internal/feature/shell"
-	"github.com/ygelfand/echolocal/internal/feature/states"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 )
 
 func init() {
@@ -30,16 +28,7 @@ type Weather struct{ *weather.Weather }
 func (w Weather) Restore(cfg config.Config) { w.Publish(cfg.Weather) }
 
 var get = sync.OnceValue(func() *Weather {
-	w := &Weather{weather.New(weather.Options{
-		Controller: homeassistant.Get(),
-		States:     states.Get(),
-		Settings:   config.WeatherSection,
-		Home:       config.HomeSection,
-		Redraw:     func() { shell.Get().Redraw() },
-		DeviceID:   component.DeviceScreen,
-	})}
-	component.Settings.Add(w.Settings())
-	return w
+	return &Weather{weather.Build(product.Get(), config.WeatherSection, config.HomeSection)}
 })
 
 func Get() *Weather { return get() }

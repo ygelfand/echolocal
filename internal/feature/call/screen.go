@@ -7,7 +7,6 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/display/callview"
 	sharedcall "github.com/ygelfand/libcountertop/pkg/media/call"
 
-	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/livecam"
 	"github.com/ygelfand/echolocal/internal/feature/message"
 	"github.com/ygelfand/echolocal/internal/feature/privacy"
@@ -25,5 +24,4 @@ func front(d *sharedcall.Dependencies) {
 		Camera:  callvideo.NewCamera(livecam.Get().Sessions()),
 	})
 	d.Messages = message.Get()
-	d.Home = homeassistant.Get()
 }

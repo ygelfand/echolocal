@@ -10,6 +10,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/detect"
 	"github.com/ygelfand/echolocal/internal/feature/discovery"
+	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/tones"
 	"github.com/ygelfand/echolocal/internal/feature/web"
@@ -34,6 +35,7 @@ func Get() *sharedcall.Calls {
 			Media:    media.Get(),
 			Sound:    device{},
 			Tones:    tones.Get(),
+			Home:     homeassistant.Get(),
 		}
 		front(&d)
 		shared = sharedcall.New(d)

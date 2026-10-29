@@ -104,7 +104,7 @@ const ReleasesPath = StateDir + "/releases.json"
 
 const ModelDir = StateDir + "/models"
 
-const VoiceHelper = StateDir + "/bin/echolocal-voice"
+const SpeechHelper = StateDir + "/bin/echolocal-asr"
 
 const AirPlayHelper = StateDir + "/bin/echolocal-airplay"
 
@@ -116,13 +116,9 @@ const TesseraPort = 6054
 
 const AirPlayKey = StateDir + "/airplay.pem"
 
-const TileDir = StateDir + "/tiles"
-
 const RecordingDir = StateDir + "/recordings"
 
 const ToneDir = StateDir + "/tones"
-
-const PhotoDir = StateDir + "/photos"
 
 const TempDir = StateDir + "/tmp"
 

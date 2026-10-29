@@ -23,7 +23,11 @@ type Triggers struct {
 
 var get = sync.OnceValue(func() *Triggers {
 	t := &Triggers{knobs: &setting.Controls[schema.Voice]{
-		Table:  voice.NewTable(actions.Get().Names(), commandNames()),
+		Table: voice.NewTable(
+			actions.Get().Names(),
+			commandNames(),
+			labelChoices(),
+		),
 		Device: component.DeviceVoice,
 		Read:   config.VoiceSection.Read,
 		Save:   save,

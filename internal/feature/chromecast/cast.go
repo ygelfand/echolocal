@@ -3,6 +3,7 @@ package chromecast
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/playout"
 	"github.com/ygelfand/echolocal/internal/feature/timesync"
+	"github.com/ygelfand/echolocal/internal/feature/web"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
 )
@@ -31,6 +33,12 @@ func init() {
 		sharedcomponent.Device,
 		func() *receiver { return &receiver{Get()} },
 		append([]sharedcomponent.Option{sharedcomponent.Order(60)}, needs()...)...,
+	)
+	web.HandlePeerOpen(
+		"GET /setup/*",
+		http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) { Get().Setup().ServeHTTP(w, r) },
+		),
 	)
 }
 
@@ -61,6 +69,7 @@ func build() *castreceiver.Receiver {
 		Network:  network,
 		Server: castreceiver.Config{
 			Name:            deviceName,
+			Manufacturer:    layout.Manufacturer,
 			Model:           component.Board().Model,
 			Version:         layout.Version,
 			Hardware:        hardware,

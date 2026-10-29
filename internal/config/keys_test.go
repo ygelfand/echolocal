@@ -58,6 +58,7 @@ func TestSavedKeysKeepTheirLayout(t *testing.T) {
 		"rtsp",
 		"screen",
 		"sendspin",
+		"thermostat",
 		"time",
 		"update",
 		"visual",

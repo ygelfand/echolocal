@@ -3,6 +3,9 @@
 package control
 
 import (
+	"context"
+
+	"github.com/ygelfand/libcountertop/pkg/inference/asr"
 	harness "github.com/ygelfand/libcountertop/pkg/runtime/control"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/btcmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/castcmd"
@@ -11,6 +14,8 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/homealarmcmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/homecmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/screencmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/speechcmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/thermostatcmd"
 
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/a2dp"
@@ -21,10 +26,12 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/message"
 	"github.com/ygelfand/echolocal/internal/feature/nws"
 	"github.com/ygelfand/echolocal/internal/feature/poster"
+	"github.com/ygelfand/echolocal/internal/feature/thermostat"
 	"github.com/ygelfand/echolocal/internal/feature/timer"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
 	"github.com/ygelfand/echolocal/internal/hardware/gpu"
 	"github.com/ygelfand/echolocal/internal/layout"
+	"github.com/ygelfand/echolocal/internal/parts"
 )
 
 func showing(t *harness.Tree) {
@@ -48,12 +55,16 @@ func showing(t *harness.Tree) {
 		screencmd.Wallpaper(poster.Get),
 	)
 	t.Add(harness.DeviceTask, ready)
+	t.Add(harness.AudioTask, speechcmd.Command(func(ctx context.Context) (asr.Options, error) {
+		return asr.Prepare(ctx, layout.SpeechHelper, parts.Speech(), layout.ModelDir)
+	}))
 	t.Top(
 		btcmd.Command(a2dp.Get(), "echolocal"),
 		callCommand(),
 		cameraCommand(),
 		doorbellcmd.Command(doorbell.Get),
 		homealarmcmd.Command(homealarm.Get, homealarm.Shown),
+		thermostatcmd.Command(thermostat.Get, thermostat.Shown),
 		castcmd.Command(chromecast.Page),
 	)
 	t.Top(homecmd.Commands(homeassistant.Get())...)

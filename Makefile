@@ -73,9 +73,9 @@ SURFACE_SRC = $(LIBCOUNTERTOP_DIR)/native/surface
 SURFACE_BIN = $(BUILD_DIR)/echolocal-surface-api$(NATIVE_API)
 CAMSHIM_BIN = $(BUILD_DIR)/libecholocal-camshim-api$(NATIVE_API).so
 CAMERA_BIN = $(BUILD_DIR)/echolocal-camera-api$(NATIVE_API)
-VOICE_BIN = $(BUILD_DIR)/echolocal-voice-api$(NATIVE_API)
+ASR_BIN = $(BUILD_DIR)/echolocal-asr-api$(NATIVE_API)
 AIRPLAY_BIN = $(BUILD_DIR)/echolocal-airplay-api$(NATIVE_API)
-COUNTERTOP_NATIVE = $(MAKE) -f "$(LIBCOUNTERTOP_DIR)/native/Makefile" API=$(NATIVE_API) PREFIX=echolocal OUT="$(abspath $(BUILD_DIR))" NDK="$(NDK)" SURFACE_BIN="$(abspath $(SURFACE_BIN))" CAMERA_BIN="$(abspath $(CAMERA_BIN))" CAMSHIM_BIN="$(abspath $(CAMSHIM_BIN))" VOICE_BIN="$(abspath $(VOICE_BIN))" AIRPLAY_BIN="$(abspath $(AIRPLAY_BIN))"
+COUNTERTOP_NATIVE = $(MAKE) -f "$(LIBCOUNTERTOP_DIR)/native/Makefile" API=$(NATIVE_API) PREFIX=echolocal OUT="$(abspath $(BUILD_DIR))" NDK="$(NDK)" SURFACE_BIN="$(abspath $(SURFACE_BIN))" CAMERA_BIN="$(abspath $(CAMERA_BIN))" CAMSHIM_BIN="$(abspath $(CAMSHIM_BIN))" ASR_BIN="$(abspath $(ASR_BIN))" AIRPLAY_BIN="$(abspath $(AIRPLAY_BIN))"
 PARTS_DIR := internal/parts/payload
 PART_BOARDS := $(SCREEN_BOARDS)
 
@@ -111,7 +111,7 @@ build-echolocal: ## Build the host CLI into ./bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echolocal ./cmd/echolocal
 
 .PHONY: build-echod
-build-echod: stage-airplay $(if $(filter $(BOARD),$(PART_BOARDS)),stage-voice stage-parts) ##Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot; PACK=bin/upx-5.3.0/build/upx to compress it)
+build-echod: stage-airplay $(if $(filter $(BOARD),$(PART_BOARDS)),stage-speech stage-parts) ##Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot; PACK=bin/upx-5.3.0/build/upx to compress it)
 	@mkdir -p $(BUILD_DIR)
 	$(DEVICE_ENV) go build $(DEVICE_TAGS) -ldflags "$(DEVICE_LDFLAGS)" -o $(DEVICE_BIN) ./cmd/echod
 	$(if $(PACK),$(PACK) -q $(DEVICE_BIN))
@@ -127,11 +127,11 @@ $(UPX):
 	cmake -S $(UPX_DIR) -B $(UPX_DIR)/build -DCMAKE_BUILD_TYPE=Release >/dev/null
 	cmake --build $(UPX_DIR)/build -j >/dev/null
 
-.PHONY: stage-voice
-stage-voice: countertop-native-source ## Build and stage the voice command helper echod embeds
-	+$(COUNTERTOP_NATIVE) voice
+.PHONY: stage-speech
+stage-speech: countertop-native-source ## Build and stage the speech recognizer helper echod embeds
+	+$(COUNTERTOP_NATIVE) asr
 	@mkdir -p $(PARTS_DIR)
-	cp $(VOICE_BIN) $(PARTS_DIR)/echolocal-voice
+	cp $(ASR_BIN) $(PARTS_DIR)/echolocal-asr
 
 .PHONY: stage-airplay
 stage-airplay: countertop-native-source ## Build and stage the AirPlay mirroring helper echod embeds

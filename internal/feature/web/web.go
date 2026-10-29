@@ -56,4 +56,6 @@ func Handle(pattern string, h http.Handler) { Get().Handle(pattern, h) }
 
 func HandlePeer(pattern string, h http.Handler) { Get().HandlePeer(pattern, h) }
 
+func HandlePeerOpen(pattern string, h http.Handler) { Get().HandlePeerOpen(pattern, h) }
+
 func Adopted() bool { return config.Get().API.Adopted }

@@ -10,9 +10,7 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
-	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
-	"github.com/ygelfand/echolocal/internal/feature/shell"
-	"github.com/ygelfand/echolocal/internal/feature/states"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 )
 
 func init() {
@@ -24,15 +22,7 @@ type Calendar struct{ *calendar.Calendar }
 func (c Calendar) Restore(cfg config.Config) { c.Publish(cfg.Calendar) }
 
 var get = sync.OnceValue(func() *Calendar {
-	c := &Calendar{calendar.New(calendar.Options{
-		Controller: homeassistant.Get(),
-		States:     states.Get(),
-		Settings:   config.CalendarSection,
-		Redraw:     func() { shell.Get().Redraw() },
-		DeviceID:   component.DeviceScreen,
-	})}
-	component.Settings.Add(c.Settings())
-	return c
+	return &Calendar{calendar.Build(product.Get(), config.CalendarSection)}
 })
 
 func Get() *Calendar { return get() }

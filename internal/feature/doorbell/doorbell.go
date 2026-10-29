@@ -19,11 +19,10 @@ import (
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/alerts"
 	"github.com/ygelfand/echolocal/internal/feature/cameras"
-	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/idle"
 	"github.com/ygelfand/echolocal/internal/feature/message"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
-	"github.com/ygelfand/echolocal/internal/feature/states"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
@@ -38,15 +37,7 @@ func init() {
 }
 
 var Get = sync.OnceValue(func() *shared.Doorbell {
-	d := shared.New(shared.Options{
-		Settings: config.DoorbellSection,
-		Finder:   homeassistant.Get(),
-		States:   states.Get(),
-		DeviceID: component.DeviceCamera,
-		Chimes:   alerts.Get().Tones,
-	})
-	component.Settings.Add(d.Settings())
-	return d
+	return shared.Build(product.Get(), config.DoorbellSection, alerts.Get().Tones)
 })
 
 var View = sync.OnceValue(func() *doorbellview.View {

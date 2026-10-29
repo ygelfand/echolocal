@@ -11,10 +11,8 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
-	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 	featureremember "github.com/ygelfand/echolocal/internal/feature/remember"
-	"github.com/ygelfand/echolocal/internal/feature/shell"
-	"github.com/ygelfand/echolocal/internal/layout"
 )
 
 func init() {
@@ -22,13 +20,11 @@ func init() {
 }
 
 var get = sync.OnceValue(func() *nws.NWS {
-	return nws.New(nws.Options{
-		Controller: homeassistant.Get(),
-		Agent:      "(EchoLocal " + layout.Version + ", github.com/ygelfand/echolocal)",
-		Settings:   config.WeatherSection,
-		Dismissed:  remember.NewSlot[[]string](featureremember.Get(), "weather.dismissed"),
-		Redraw:     func() { shell.Get().Redraw() },
-	})
+	return nws.Build(
+		product.Get(),
+		config.WeatherSection,
+		remember.NewSlot[[]string](featureremember.Get(), "weather.dismissed"),
+	)
 })
 
 func Get() *nws.NWS { return get() }
