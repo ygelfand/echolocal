@@ -14,6 +14,7 @@ const (
 	CamShim  = Dir + "/libecholocal-camshim.so"
 	StateDir = "/data/misc/echolocal"
 	KeyPath  = StateDir + "/psk"
+	DialPath = StateDir + "/dial-target"
 	NamePath = StateDir + "/name"
 
 	CrashPath = StateDir + "/crash"

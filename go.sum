@@ -107,6 +107,8 @@ github.com/go-gui-org/go-glyph v1.26.4 h1:7FlbBV7S+g1HwdU/ypTBkbyoumQZfd/4Tdg3Nb
 github.com/go-gui-org/go-glyph v1.26.4/go.mod h1:aP4jOhDJbaHwrIGjlBk9uV4OvWxr09JI7Z93Ad9lO2w=
 github.com/go-gui-org/go-gui v0.91.0 h1:rrIz5LKPkUmc/wYI42cVvES7JZl8/4OBoe7p9BvFAfk=
 github.com/go-gui-org/go-gui v0.91.0/go.mod h1:gBYp7hon3TtDquD1IG2xVwpmPjOoeqjFBbf4eytkNdE=
+github.com/go-gui-org/go-gui v0.94.0 h1:pypxcGY9AZLwd8ot0LtVSv6g3c4X2SgR1tz5KX8jmXY=
+github.com/go-gui-org/go-gui v0.94.0/go.mod h1:gBYp7hon3TtDquD1IG2xVwpmPjOoeqjFBbf4eytkNdE=
 github.com/go-pdf/fpdf v0.9.0 h1:PPvSaUuo1iMi9KkaAn90NuKi+P4gwMedWPHhj8YlJQw=
 github.com/go-pdf/fpdf v0.9.0/go.mod h1:oO8N111TkmKb9D7VvWGLvLJlaZUQVPM+6V42pp3iV4Y=
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible h1:a+iTbH5auLKxaNwQFg0B+TCYl6lbukKPc7b5x0n1s6Q=

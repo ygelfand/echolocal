@@ -19,6 +19,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
 	"github.com/ygelfand/echolocal/internal/feature/wakeword"
+	"github.com/ygelfand/echolocal/internal/feature/web"
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/logging"
 )
@@ -33,6 +34,7 @@ type API struct{ *nativeapi.Server }
 var get = sync.OnceValue(func() *API {
 	s := nativeapi.New(nativeapi.Dependencies{
 		KeyPath:      layout.KeyPath,
+		DialPath:     layout.DialPath,
 		Identity:     identity,
 		Bluetooth:    func() esphome.BluetoothFeature { return bluetooth.Get().Features() },
 		Registry:     component.Default(),
@@ -78,6 +80,7 @@ func identity() (nativeapi.Identity, error) {
 			ProjectName:   layout.Manufacturer + "." + device.Board.Codename,
 			Devices:       devices(device.Name),
 			VoiceFeatures: voice.Features,
+			WebserverPort: web.Port,
 		},
 	}, nil
 }
