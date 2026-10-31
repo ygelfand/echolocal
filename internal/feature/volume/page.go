@@ -49,7 +49,8 @@ func showing(s config.Stream) bool {
 	if top == sharedshell.View(page()) {
 		return true
 	}
-	if _, idle := top.(*idleview.View); idle && s == config.StreamMedia && tessera.Firmware().SaverUp() {
+	if _, idle := top.(*idleview.View); idle && s == config.StreamMedia &&
+		tessera.Firmware().SaverUp() {
 		return true
 	}
 	v, ok := top.(shows)
