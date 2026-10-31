@@ -62,7 +62,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           install-only: true
 
       - name: format check
@@ -101,7 +101,7 @@ jobs:
         run: make build-echod BOARD=${{ matrix.board }}
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           install-only: true
       - name: lint with the board tag
         run: golangci-lint run --build-tags board_${{ matrix.board }},payload
