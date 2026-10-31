@@ -52,10 +52,15 @@ jobs:
         env:
           CGO_ENABLED: 1
 
-      - name: cross-compile biscuit without native tools
+      - name: install Android NDK
         run: |
-          make build-echod DOT_ARCH=arm NDK=/nonexistent
-          make build-echod DOT_ARCH=arm64 NDK=/nonexistent
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
+
+      - name: cross-compile biscuit
+        run: |
+          make build-echod DOT_ARCH=arm
+          make build-echod DOT_ARCH=arm64
 
       - name: build without the assembly
         run: make build-echod TAGS=noasm
