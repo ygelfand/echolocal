@@ -1,13 +1,13 @@
 ---
 title: Doorbell
-description: Live video and two-way audio with Reolink and ONVIF doorbells.
+description: Live video and two-way audio with Reolink, ONVIF and RTSP doorbells and cameras.
 ---
 
 On the Echo Shows.
 
 When someone rings, the device wakes, rings and shows live video with the doorbell's
-sound and a microphone button for two-way audio. It supports up to four doorbells. Person, package, vehicle and
-animal detections show as notifications.
+sound and a microphone button for two-way audio. It supports up to four doorbells. Person, package,
+vehicle, animal and motion detections show as notifications.
 
 ## Add a doorbell
 
@@ -17,15 +17,35 @@ Choose one of three setup methods:
 | | |
 |---|---|
 | **Home Assistant (Reolink integration)** | Doorbells and cameras from Home Assistant's Reolink integration. Tap **Auto setup** on one; its camera and its ring, person, package, vehicle and animal sensors are filled in |
-| **Reolink NVR** | Enter the NVR's address, user and password and tap **Connect**, then tap a channel |
-| **Manual** | Enter the doorbell's name, UID or IP address, user and password |
+| **Reolink NVR** | Enter the NVR's address, user and password and tap **Connect**, then tap a channel. The channel uses ONVIF for video, events and talkback |
+| **Manual** | Enter a name and pick **Video**; the form then asks for what that video source needs |
 
-A doorbell added with **Auto setup** has no password, so it uses Home Assistant for its video and
-its rings, without talkback. Tap it on the Doorbell page and enter its password to connect to it
-directly, with talkback.
+A doorbell added with **Auto setup** uses Home Assistant for its video and its rings, without
+talkback. To connect to it directly, with talkback, tap it on the Doorbell page, set **Video** to
+**Reolink** and enter its password.
 
-Tap **Save** to check the login and save the doorbell. **Not saved** reports a wrong
-password, a different doorbell at that address, or a doorbell it can't reach.
+### The doorbell's page
+
+**Video** comes right after the name, and the rows below it follow the choice:
+
+| Video | Rows |
+|---|---|
+| **Reolink** | UID, IP address or hostname, user, password and stream |
+| **ONVIF** | IP address or hostname, user, password and stream |
+| **RTSP** | The stream's RTSP URL, and the user and password if they aren't in the URL |
+| **Home Assistant** | The Home Assistant camera to show |
+
+- **ONVIF** finds the camera on the network by itself. If it isn't found, add the camera's ONVIF
+  port to the address (`192.168.1.20:8000`) to connect to it directly.
+- **Stream** picks the main or sub stream. With ONVIF, main is the camera's largest stream and
+  sub its smallest.
+- **Events** and **Talkback** only offer the sources that work with the chosen video.
+- When **Events** is **Home Assistant** or **Automatic**, the page also lists the Home Assistant
+  camera and a **Ring**, **Person**, **Package**, **Vehicle**, **Animal** and **Motion** sensor. Each can be
+  any binary sensor in Home Assistant, from any camera brand.
+
+Tap **Save** to check the doorbell and save it. **Not saved** says what's missing, or reports a
+wrong password, a different doorbell at that address, or a doorbell it can't reach.
 
 Tap a doorbell on the Doorbell page to change it, see whether its events and video are working, or
 **Remove** it.
@@ -37,6 +57,7 @@ Tap a doorbell on the Doorbell page to change it, see whether its events and vid
 | Ring style | `select.<device>_camera_doorbell_ring_style` | What a ring does | Auto answer, Same as screen, None, Banner, Card, Full screen, Toast | Auto answer |
 | Ring sound | `select.<device>_camera_doorbell_ring_sound` | | Chimes, Ring and custom tones | Ring |
 | Ring for | `select.<device>_camera_doorbell_ring_for` | How long the ring sound repeats | Never, 5 s to 5 min | 30 s |
+| Keep live view open | `select.<device>_camera_doorbell_live_view_open_for` | How long the live view stays open | 1, 2, 3, 5 or 10 min | 2 min |
 | Notification style | `select.<device>_camera_doorbell_notification_style` | How detections appear | Same as screen, None, Banner, Card, Full screen, Toast | Same as screen |
 | Notification sound | `select.<device>_camera_doorbell_notification_sound` | | Chimes and custom tones | Ding |
 | Dashboard tab | `switch.<device>_camera_doorbell_dashboard_tab` | A **Doorbell** tab on the [native dashboard](/use/dashboards/#doorbell-and-home-alarm) | | Off |
@@ -47,14 +68,15 @@ Tap a doorbell on the Doorbell page to change it, see whether its events and vid
   **Watch** button, while the ring sound repeats for **Ring for**.
 - **None** shows nothing and plays nothing, but the screen still wakes.
 
-Detections show as "Person at the …", "Package at the …", "Vehicle by the …" or "Animal at the …",
-in the notification style, for 20 seconds.
+Detections show as "Person at the …", "Package at the …", "Vehicle by the …", "Animal at the …" or
+"Motion at the …", in the notification style, for 20 seconds. Motion comes from the doorbell's own
+motion detection over Reolink or ONVIF, or from the **Motion** sensor with Home Assistant events.
 
 ## Watching and talking
 
 The live view has a speaker button for the doorbell's sound and a microphone button: tap it to
-talk, tap again to stop. The doorbell's sound is muted while you talk. An auto-answered view closes
-after 2 minutes.
+talk, tap again to stop. The doorbell's sound is muted while you talk. The view closes after
+**Keep live view open**.
 
 If the screen can't play the doorbell's main stream, it uses the sub stream.
 
@@ -64,22 +86,21 @@ Recent events are kept until EchoLocal restarts.
 ## Sources
 
 Set the video, event and talkback sources separately on each doorbell's settings page or in
-Home Assistant. Each source defaults to **Automatic**.
+Home Assistant.
 
 | Setting | Entity | Choices |
 |---|---|---|
-| Video | `select.<device>_camera_doorbell_1_video_source` | **Automatic**, Reolink, RTSP, Home Assistant |
-| Events | `select.<device>_camera_doorbell_1_event_source` | **Automatic**, ONVIF, Reolink, Home Assistant |
-| Talkback | `select.<device>_camera_doorbell_1_talkback_source` | **Automatic**, Reolink, ONVIF |
+| Video | `select.<device>_camera_doorbell_1_video_source` | Reolink, ONVIF, RTSP, Home Assistant |
+| Events | `select.<device>_camera_doorbell_1_event_source` | Automatic, Reolink, ONVIF, Home Assistant |
+| Talkback | `select.<device>_camera_doorbell_1_talkback_source` | Automatic, Reolink, ONVIF |
 | Name | `text.<device>_camera_doorbell_1_name` | |
 
 The same four entities exist for doorbells 2 to 4.
 
-- **Automatic**, with a password, connects to a Reolink doorbell directly. If that fails, video
-  tries RTSP and then Home Assistant, events use Home Assistant's sensors, and talkback tries ONVIF.
-  Without a password it uses Home Assistant.
+- **Automatic** events and talkback are for Reolink video. Events connect to the doorbell and use
+  Home Assistant's sensors while it can't be reached; talkback tries Reolink, then ONVIF.
 - **Home Assistant** video opens the doorbell's Home Assistant camera, with no talkback.
-- **ONVIF** talkback works with doorbells that take G.711 audio.
+- **ONVIF** talkback works with doorbells that take G.711 audio, over ONVIF or RTSP video.
 
 **Doorbell status** (`doorbell_status`) in Home Assistant says how many doorbells are connected, or
 what's wrong.

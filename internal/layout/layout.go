@@ -106,6 +106,12 @@ const ModelDir = StateDir + "/models"
 
 const SpeechHelper = StateDir + "/bin/echolocal-asr"
 
+const PryonDir = ModelDir + "/pryon"
+
+const GeminiDir = ModelDir + "/gemini"
+
+const PryonHelper = StateDir + "/bin/echolocal-pryon"
+
 const AirPlayHelper = StateDir + "/bin/echolocal-airplay"
 
 const TesseraHelper = StateDir + "/bin/echolocal-tessera"

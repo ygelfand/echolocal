@@ -190,19 +190,20 @@ On the Echo Shows only.
 | Doorbell 1 event source | Automatic | Automatic, Reolink, ONVIF, Home Assistant | `select.<device>_camera_doorbell_1_event_source` |
 | Doorbell 1 name | — | Text | `text.<device>_camera_doorbell_1_name` |
 | Doorbell 1 talkback source | Automatic | Automatic, Reolink, ONVIF | `select.<device>_camera_doorbell_1_talkback_source` |
-| Doorbell 1 video source | Automatic | Automatic, Reolink, RTSP, Home Assistant | `select.<device>_camera_doorbell_1_video_source` |
+| Doorbell 1 video source | — | Reolink, ONVIF, RTSP, Home Assistant | `select.<device>_camera_doorbell_1_video_source` |
 | Doorbell 2 event source | Automatic | Automatic, Reolink, ONVIF, Home Assistant | `select.<device>_camera_doorbell_2_event_source` |
 | Doorbell 2 name | — | Text | `text.<device>_camera_doorbell_2_name` |
 | Doorbell 2 talkback source | Automatic | Automatic, Reolink, ONVIF | `select.<device>_camera_doorbell_2_talkback_source` |
-| Doorbell 2 video source | Automatic | Automatic, Reolink, RTSP, Home Assistant | `select.<device>_camera_doorbell_2_video_source` |
+| Doorbell 2 video source | — | Reolink, ONVIF, RTSP, Home Assistant | `select.<device>_camera_doorbell_2_video_source` |
 | Doorbell 3 event source | Automatic | Automatic, Reolink, ONVIF, Home Assistant | `select.<device>_camera_doorbell_3_event_source` |
 | Doorbell 3 name | — | Text | `text.<device>_camera_doorbell_3_name` |
 | Doorbell 3 talkback source | Automatic | Automatic, Reolink, ONVIF | `select.<device>_camera_doorbell_3_talkback_source` |
-| Doorbell 3 video source | Automatic | Automatic, Reolink, RTSP, Home Assistant | `select.<device>_camera_doorbell_3_video_source` |
+| Doorbell 3 video source | — | Reolink, ONVIF, RTSP, Home Assistant | `select.<device>_camera_doorbell_3_video_source` |
 | Doorbell 4 event source | Automatic | Automatic, Reolink, ONVIF, Home Assistant | `select.<device>_camera_doorbell_4_event_source` |
 | Doorbell 4 name | — | Text | `text.<device>_camera_doorbell_4_name` |
 | Doorbell 4 talkback source | Automatic | Automatic, Reolink, ONVIF | `select.<device>_camera_doorbell_4_talkback_source` |
-| Doorbell 4 video source | Automatic | Automatic, Reolink, RTSP, Home Assistant | `select.<device>_camera_doorbell_4_video_source` |
+| Doorbell 4 video source | — | Reolink, ONVIF, RTSP, Home Assistant | `select.<device>_camera_doorbell_4_video_source` |
+| Doorbell live view open for | 2 minutes | 1 minute, 2 minutes, 3 minutes, 5 minutes, 10 minutes | `select.<device>_camera_doorbell_live_view_open_for` |
 | Doorbell notification sound | Ding | None, Chirp, Ding, Rise, Timer, Trouble | `select.<device>_camera_doorbell_notification_sound` |
 | Doorbell ring for | 30 seconds | Never, 5 seconds, 10 seconds, 15 seconds, 30 seconds, 45 seconds, 1 minute, 2 minutes, 3 minutes, 5 minutes | `select.<device>_camera_doorbell_ring_for` |
 | Doorbell notification style | Same as screen | Same as screen, None, Banner, Card, Full screen, Toast | `select.<device>_camera_doorbell_notification_style` |
@@ -241,7 +242,8 @@ On the Echo Shows only.
 
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
-| AirPlay (Echo Shows) | Off | On, Off | `switch.<device>_playback_airplay` |
+| AirPlay | Off | On, Off | `switch.<device>_playback_airplay` |
+| AirPlay audio mode | Instant | Instant, Synced with video | `select.<device>_playback_airplay_audio_mode` |
 | Music ducking | -15 dB | -40 to -3 dB | `number.<device>_playback_music_ducking` |
 | Sendspin | Off | On, Off | `switch.<device>_playback_sendspin` |
 | Volume buttons | What's playing | Main volume, What's playing | `select.<device>_playback_volume_buttons` |
@@ -329,6 +331,7 @@ On the Echo Shows only.
 | Mirror (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_mirror` |
 | Radar (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_radar` |
 | All commands (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_all_commands` |
+| Home Assistant names to listen for (Echo Shows) | Areas only | Areas only | `select.<device>_voice_triggers_home_assistant_names_to_listen_for` |
 
 ## Voice assistants
 
@@ -458,4 +461,13 @@ On the Echo Shows only.
 | Install version | Select for rollback | The available versions | `select.<device>_install_version` |
 | Time zone | Home Assistant | Home Assistant, UTC, Europe/London, Europe/Lisbon, Europe/Paris, Europe/Berlin and 34 more | `select.<device>_time_zone` |
 | Update channel | stable | stable, dev | `select.<device>_update_channel` |
+
+## Thermostat
+
+On the Echo Shows only.
+
+| Setting | Default | Choices | Entity |
+|---|---|---|---|
+| Thermostat look | Dial | Dial, Column, Wheel, Bars, Split, Terminal, Brass, Mission | `select.<device>_screen_thermostat_look` |
+| Thermostat dashboard tab | Off | On, Off | `switch.<device>_screen_thermostat_dashboard_tab` |
 

@@ -31,6 +31,18 @@ On an Echo Show you can also pick the wake word under **Settings → Voice assis
 **Allow the device to perform Home Assistant actions** turned on for the device in the ESPHome
 integration; without it the row is dimmed.
 
+## More wake words
+
+Turn these on under **Settings → Voice assistants** on an Echo Show to add
+more choices to each assistant's **Wake word** list:
+
+| Toggle | Adds |
+|---|---|
+| **Amazon wake words** | Alexa, Amazon, Computer, Echo, Ziggy, Hey Disney, Hey Melissa, Hey Samuel, Hey Shaq and Amit Ji, in several languages and dialects: **Pryon: Alexa**, **Pryon: Alexa (de-DE)** |
+| **Gemini wake word** | "Hey Google", listed as **Gemini: Hey Google** |
+
+A word is downloaded the first time an assistant uses it.
+
 ## Starting without the wake word
 
 - **Echo Dot:** tap the action button for assistant 1, hold it for assistant 2.
@@ -80,6 +92,9 @@ Say **"stop"**, no wake word needed, tap the screen on an Echo Show, or tap the 
 
 **Stop word sensitivity** in Home Assistant sets the detection threshold (0.5–1, default 0.7).
 Set it to 1 to disable stop-word detection.
+
+**Amazon stop word**, under **Settings → Voice assistants**, adds Amazon's "stop" detector next to
+the built-in one. It can be turned on only while **Amazon wake words** is on.
 
 ## Voice triggers
 

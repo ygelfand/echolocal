@@ -3,6 +3,8 @@ package detect
 import (
 	"sync"
 
+	sharedwake "github.com/ygelfand/libcountertop/pkg/inference/wake"
+
 	"github.com/ygelfand/echolocal/internal/hardware/led"
 )
 
@@ -51,6 +53,23 @@ func (w *wakeBusy) scored(slot int) {
 
 	delete(w.pending, slot)
 	w.settle()
+}
+
+type downloadLight struct {
+	busy *led.Busy
+	task *led.Task
+}
+
+func (d *downloadLight) show(p sharedwake.Preparation) {
+	if !p.Active() {
+		d.task.Done()
+		d.task = nil
+		return
+	}
+	if d.task == nil {
+		d.task = d.busy.Start(led.WorkDownload)
+	}
+	d.task.Progress(float64(p.At))
 }
 
 func (w *wakeBusy) settle() {

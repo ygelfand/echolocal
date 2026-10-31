@@ -44,6 +44,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/web"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
 	hwtouch "github.com/ygelfand/echolocal/internal/hardware/touch"
+	"github.com/ygelfand/echolocal/internal/lib/wake"
 	echoui "github.com/ygelfand/echolocal/internal/ui"
 	"github.com/ygelfand/echolocal/internal/ui/theme"
 )
@@ -120,10 +121,16 @@ var Get = sync.OnceValue(func() *screens.App {
 		Streams:         config.Streams(),
 
 		Upgrade: func() widgets.Upgrade {
-			up := firmware.Get().Upgrade()
-			return widgets.Upgrade{Active: up.Active(), At: up.At, Version: up.Version}
+			if up := firmware.Get().Upgrade(); up.Active() {
+				return widgets.Upgrade{Active: true, At: up.At, Version: up.Version}
+			}
+			p := wake.Lib().Preparation()
+			return widgets.Upgrade{Active: p.Active(), At: p.At, Label: p.Phrase}
 		},
-		Upgrading: screens.On(&firmware.Get().Upgrading),
+		Upgrading: screens.All(
+			screens.On(&firmware.Get().Upgrading),
+			screens.On(&wake.Lib().Preparing),
+		),
 		Marks: func() screens.Marks {
 			m := privacy.Get().Current()
 			return screens.Marks{Mic: m.MicMuted, Camera: m.CameraBlocked}

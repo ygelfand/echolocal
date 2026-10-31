@@ -9,6 +9,7 @@ permissions:
 
 env:
   GOWORK: "off"
+  COUNTERTOP_FILES_URL: ${{ secrets.COUNTERTOP_FILES_URL }}
 
 jobs:
   release:

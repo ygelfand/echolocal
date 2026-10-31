@@ -5,6 +5,7 @@ package control
 import (
 	"context"
 
+	sharedapps "github.com/ygelfand/libcountertop/pkg/display/apps"
 	"github.com/ygelfand/libcountertop/pkg/inference/asr"
 	harness "github.com/ygelfand/libcountertop/pkg/runtime/control"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/btcmd"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/a2dp"
+	"github.com/ygelfand/echolocal/internal/feature/apps"
 	"github.com/ygelfand/echolocal/internal/feature/chromecast"
 	"github.com/ygelfand/echolocal/internal/feature/doorbell"
 	"github.com/ygelfand/echolocal/internal/feature/homealarm"
@@ -53,6 +55,7 @@ func showing(t *harness.Tree) {
 		screencmd.Timer(timer.Get),
 		screencmd.Warning(nws.Get),
 		screencmd.Wallpaper(poster.Get),
+		screencmd.App(func() []sharedapps.App { return apps.Get().List() }),
 	)
 	t.Add(harness.DeviceTask, ready)
 	t.Add(harness.AudioTask, speechcmd.Command(func(ctx context.Context) (asr.Options, error) {

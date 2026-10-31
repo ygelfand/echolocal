@@ -16,7 +16,8 @@ BUILDVARS := github.com/ygelfand/echolocal/internal/layout
 BOARDVARS := github.com/ygelfand/echolocal/internal/board
 LDFLAGS := -X '$(BUILDVARS).Version=$(VERSION)' \
 	-X '$(BUILDVARS).GitCommit=$(GIT_COMMIT)' \
-	-X '$(BUILDVARS).BuildDate=$(BUILD_DATE)'
+	-X '$(BUILDVARS).BuildDate=$(BUILD_DATE)' \
+	$(if $(COUNTERTOP_FILES_URL),-X 'github.com/ygelfand/libcountertop/pkg/network/releases.files=$(COUNTERTOP_FILES_URL)')
 
 BUILD_DIR := bin
 
@@ -42,7 +43,7 @@ PACK ?=
 empty :=
 space := $(empty) $(empty)
 comma := ,
-ALL_TAGS := $(strip $(TAGS) board_$(or $(BOARD),biscuit) airplay $(if $(filter $(BOARD),$(SCREEN_BOARDS)),voice payload))
+ALL_TAGS := $(strip $(TAGS) board_$(or $(BOARD),biscuit) airplay pryon $(if $(filter $(BOARD),$(SCREEN_BOARDS)),voice payload))
 DEVICE_TAGS := $(if $(ALL_TAGS),-tags $(subst $(space),$(comma),$(ALL_TAGS)),)
 
 DEVICE_LDFLAGS := -s -w $(LDFLAGS) $(if $(BOARD),-X '$(BOARDVARS).pinned=$(BOARD)')
@@ -75,7 +76,8 @@ CAMSHIM_BIN = $(BUILD_DIR)/libecholocal-camshim-api$(NATIVE_API).so
 CAMERA_BIN = $(BUILD_DIR)/echolocal-camera-api$(NATIVE_API)
 ASR_BIN = $(BUILD_DIR)/echolocal-asr-api$(NATIVE_API)
 AIRPLAY_BIN = $(BUILD_DIR)/echolocal-airplay-api$(NATIVE_API)
-COUNTERTOP_NATIVE = $(MAKE) -f "$(LIBCOUNTERTOP_DIR)/native/Makefile" API=$(NATIVE_API) PREFIX=echolocal OUT="$(abspath $(BUILD_DIR))" NDK="$(NDK)" SURFACE_BIN="$(abspath $(SURFACE_BIN))" CAMERA_BIN="$(abspath $(CAMERA_BIN))" CAMSHIM_BIN="$(abspath $(CAMSHIM_BIN))" ASR_BIN="$(abspath $(ASR_BIN))" AIRPLAY_BIN="$(abspath $(AIRPLAY_BIN))"
+PRYON_BIN = $(BUILD_DIR)/echolocal-pryon-api$(NATIVE_API)
+COUNTERTOP_NATIVE = $(MAKE) -f "$(LIBCOUNTERTOP_DIR)/native/Makefile" API=$(NATIVE_API) PREFIX=echolocal OUT="$(abspath $(BUILD_DIR))" NDK="$(NDK)" SURFACE_BIN="$(abspath $(SURFACE_BIN))" CAMERA_BIN="$(abspath $(CAMERA_BIN))" CAMSHIM_BIN="$(abspath $(CAMSHIM_BIN))" ASR_BIN="$(abspath $(ASR_BIN))" AIRPLAY_BIN="$(abspath $(AIRPLAY_BIN))" PRYON_BIN="$(abspath $(PRYON_BIN))"
 PARTS_DIR := internal/parts/payload
 PART_BOARDS := $(SCREEN_BOARDS)
 
@@ -111,7 +113,7 @@ build-echolocal: ## Build the host CLI into ./bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/echolocal ./cmd/echolocal
 
 .PHONY: build-echod
-build-echod: stage-airplay $(if $(filter $(BOARD),$(PART_BOARDS)),stage-speech stage-parts) ##Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot; PACK=bin/upx-5.3.0/build/upx to compress it)
+build-echod: stage-airplay stage-pryon $(if $(filter $(BOARD),$(PART_BOARDS)),stage-speech stage-parts) ##Cross-compile echod for the Echo Dot (DOT_ARCH=arm64 for a Fire OS 5 kernel; TAGS=noasm for the portable dot; PACK=bin/upx-5.3.0/build/upx to compress it)
 	@mkdir -p $(BUILD_DIR)
 	$(DEVICE_ENV) go build $(DEVICE_TAGS) -ldflags "$(DEVICE_LDFLAGS)" -o $(DEVICE_BIN) ./cmd/echod
 	$(if $(PACK),$(PACK) -q $(DEVICE_BIN))
@@ -138,6 +140,12 @@ stage-airplay: countertop-native-source ## Build and stage the AirPlay mirroring
 	+$(COUNTERTOP_NATIVE) airplay
 	@mkdir -p $(PARTS_DIR)
 	cp $(AIRPLAY_BIN) $(PARTS_DIR)/echolocal-airplay
+
+.PHONY: stage-pryon
+stage-pryon: countertop-native-source ## Build and stage the Pryon wake word helper echod embeds
+	+$(COUNTERTOP_NATIVE) pryon
+	@mkdir -p $(PARTS_DIR)
+	cp $(PRYON_BIN) $(PARTS_DIR)/echolocal-pryon
 
 .PHONY: stage-parts
 stage-parts: build-surface build-camshim build-camera ## Stage the native parts echod embeds for the boards that carry them

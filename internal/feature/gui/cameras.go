@@ -66,9 +66,5 @@ func extendCameras(ui *widgets.UI, o *screens.Options, _ func() *screens.App) {
 		Glyph: alarmPanel.Glyph,
 		Draw:  alarmPanel.Board,
 	}
-	o.Boards[thermostatview.TabKind] = screens.Board{
-		Glyph:  climate.Glyph,
-		Draw:   climate.Board,
-		Ground: climate.Ground,
-	}
+	o.Boards[thermostatview.TabKind] = screens.Board{Glyph: climate.Glyph, Draw: climate.Board}
 }
