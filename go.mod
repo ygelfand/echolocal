@@ -10,8 +10,8 @@ require (
 	github.com/go-gui-org/go-gui v0.94.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	github.com/ygelfand/go-esphome-device v0.0.17
-	github.com/ygelfand/libcountertop v0.1.1-0.20261031165839-a69147f1221a
+	github.com/ygelfand/go-esphome-device v0.0.18
+	github.com/ygelfand/libcountertop v0.1.1-0.20261031214335-b4dd1a7cd975
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 )
 
@@ -47,6 +47,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/gen2brain/jpegn v0.6.2 // indirect
 	github.com/go-chi/chi/v5 v5.5.0 // indirect
 	github.com/go-gui-org/go-glyph v1.26.4 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
