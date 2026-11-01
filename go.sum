@@ -288,8 +288,8 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/ygelfand/go-esphome-device v0.0.18 h1:BRLGeh/ipHYCE4c4T0uqDkXCwOxFOOseCnqFotZ3T5U=
 github.com/ygelfand/go-esphome-device v0.0.18/go.mod h1:wCDvFZ4VYe1sq+pOQz7NhbELA1HwvcNrCxdle+hjZcs=
-github.com/ygelfand/libcountertop v0.1.1-0.20261101220516-818eeb046dc9 h1:AiVHlh46QTKqtWZdr5G0V+BNdIA1vp8lqGda5tWhST8=
-github.com/ygelfand/libcountertop v0.1.1-0.20261101220516-818eeb046dc9/go.mod h1:rZZbMLqHV/UHuVMBW2vK86Pg0su3/s9ZUOsx/BiagRs=
+github.com/ygelfand/libcountertop v0.1.1-0.20261101222147-591b848d0a39 h1:xXl8OCZxC3rmgUCUxmT+EDv6nPmwh7VuPDOfbpdxnt8=
+github.com/ygelfand/libcountertop v0.1.1-0.20261101222147-591b848d0a39/go.mod h1:rZZbMLqHV/UHuVMBW2vK86Pg0su3/s9ZUOsx/BiagRs=
 github.com/ygelfand/reolinkproxy v0.0.0-20261026000641-3a2fddcfed4f h1:am3mVXsua7qzoNwvd1UYBZf7EIx8ZkhPeCLw1DqlAiY=
 github.com/ygelfand/reolinkproxy v0.0.0-20261026000641-3a2fddcfed4f/go.mod h1:jvxG4yqkSOqNZ2CjC6cbD8uM0upQmt9yntM+2lu5WTY=
 github.com/yuin/goldmark v1.8.5 h1:r6N5afV5qj/5S4UTch8agZHJ8UxNCMwX7WjkkJam2NA=
