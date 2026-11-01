@@ -26,6 +26,14 @@ import (
 	"github.com/ygelfand/echolocal/internal/ui"
 )
 
+func init() {
+	component.Register(
+		sharedcomponent.Device,
+		Engine,
+		append([]sharedcomponent.Option{sharedcomponent.Order(59)}, needs()...)...,
+	)
+}
+
 func configureSettings(r *castreceiver.Receiver) {
 	r.Settings().Table = r.Settings().Table.Without("youtube.lounge")
 }
@@ -47,6 +55,23 @@ var tuning = sync.OnceValue(func() *engine.Tuning {
 })
 
 func Tuning() *engine.Tuning { return tuning() }
+
+var host = sync.OnceValue(func() *engine.Host {
+	return engine.NewHost(engine.HostOptions{
+		Dir:         layout.CastEngineDir,
+		State:       layout.CastEngineState,
+		Args:        webreceiver.EngineArgs(),
+		Nameservers: nameservers,
+		Network:     network,
+		Screen: func() (int, int) {
+			t := pictures()()
+			return t.Width, t.Height
+		},
+		Tuning: Tuning(),
+	})
+})
+
+func Engine() *engine.Host { return host() }
 
 var page castPage
 
@@ -73,12 +98,9 @@ func Page() castcmd.Page {
 func apps() []cast.Maker {
 	return []cast.Maker{
 		webreceiver.Maker(webreceiver.Options{
-			Dir:         layout.CastEngineDir,
-			State:       layout.CastEngineState,
-			Nameservers: nameservers,
-			Helper:      helper,
-			Built:       page.keep,
-			Tuning:      Tuning(),
+			Engine: Engine(),
+			Helper: helper,
+			Built:  page.keep,
 		}),
 	}
 }

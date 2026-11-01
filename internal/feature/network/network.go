@@ -8,6 +8,7 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 )
 
 func init() {
@@ -18,6 +19,7 @@ type Network struct{ *policy.Policy }
 
 var get = sync.OnceValue(func() *Network {
 	n := &Network{policy.New(config.NetworkSection)}
+	n.DownloadThrough(homeassistant.Get().Downloads())
 	component.Settings.Add(n.Settings())
 	return n
 })

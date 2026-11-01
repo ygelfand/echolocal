@@ -23,6 +23,7 @@ var (
 	PosterSection     = sections.Poster
 	PhotosSection     = sections.Photos
 	DoorbellSection   = sections.Doorbell
+	LovelaceSection   = sections.Lovelace
 	HomeAlarmSection  = sections.HomeAlarm
 	ThermostatSection = sections.Thermostat
 	CamerasSection    = sections.Cameras

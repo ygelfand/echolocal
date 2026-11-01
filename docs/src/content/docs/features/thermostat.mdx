@@ -1,0 +1,49 @@
+---
+title: Thermostat
+description: Set Home Assistant thermostats from the screen, in one of eight looks.
+---
+
+import OptionGallery from '../../../components/OptionGallery.astro';
+
+import { Image } from 'astro:assets';
+import thermostat from '../../../assets/screens/app-thermostat.webp';
+
+On the Echo Shows.
+
+The **Thermostat** app shows up to four Home Assistant `climate` entities: the temperature inside,
+humidity, what the system is doing, and the set point. With two or more, they share the screen.
+
+<Image src={thermostat} alt="Two thermostats side by side in the Dial look with rehearsal data" />
+
+## Set it up
+
+Open **Settings → Home control → Thermostat** and turn on the ones to show under **Thermostats**,
+up to four. Enable home control and **Allow the device to perform Home Assistant actions** in the
+device's ESPHome integration options.
+
+## Using it
+
+- Drag the set point, or press **−** and **+**. On a thermostat in Auto with a low and a high set
+  point, both can be moved.
+- **Mode**, **Preset** and **Fan** open a chooser with the options the thermostat offers.
+- The status reads **Heating to**, **Cooling to**, **Keeping between**, **Holding at**, **Drying**
+  or **Fan running**.
+- The outside temperature comes from the weather entity under
+  [Home control → Weather](/use/settings/#weather).
+
+## Looks
+
+**Look** (`thermostat_look`) picks one of 8 designs: Dial (the default), Column, Wheel, Bars,
+Split, Terminal, Brass and Mission. The picker shows each one with your first thermostat.
+
+The examples use rehearsal data.
+
+<OptionGallery items={[{"src":"/carousel/thermostat-0.webp","label":"Dial","alt":"Thermostat in the Dial look with rehearsal data"},{"src":"/carousel/thermostat-1.webp","label":"Column","alt":"Thermostat in the Column look with rehearsal data"},{"src":"/carousel/thermostat-2.webp","label":"Wheel","alt":"Thermostat in the Wheel look with rehearsal data"},{"src":"/carousel/thermostat-3.webp","label":"Bars","alt":"Thermostat in the Bars look with rehearsal data"},{"src":"/carousel/thermostat-4.webp","label":"Split","alt":"Thermostat in the Split look with rehearsal data"},{"src":"/carousel/thermostat-5.webp","label":"Terminal","alt":"Thermostat in the Terminal look with rehearsal data"},{"src":"/carousel/thermostat-6.webp","label":"Brass","alt":"Thermostat in the Brass look with rehearsal data"},{"src":"/carousel/thermostat-7.webp","label":"Mission","alt":"Thermostat in the Mission look with rehearsal data"}]} layout="stack" label={"Every thermostat look"} width={1280} height={800} />
+
+## Settings
+
+| Setting | Entity | What it does | Default |
+|---|---|---|---|
+| Thermostats | — | The Home Assistant `climate` entities to show, up to four | |
+| Look | `select.<device>_screen_thermostat_look` | The design | Dial |
+| Dashboard tab | `switch.<device>_screen_thermostat_dashboard_tab` | A **Thermostat** tab on the [native dashboard](/use/dashboards/) | Off |

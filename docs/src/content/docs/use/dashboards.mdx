@@ -1,6 +1,6 @@
 ---
 title: Dashboards
-description: EchoLocal's own clock and home control, or a Tessera dashboard from Home Assistant.
+description: EchoLocal's own clock and home control, a Tessera dashboard, or a Home Assistant dashboard.
 ---
 
 import OptionGallery from '../../../components/OptionGallery.astro';
@@ -18,10 +18,9 @@ The dashboard is the device's home screen. Choose its **Mode** in
 
 - **Native**: a big clock, the weather, and tabs for your lights, switches, cameras, doorbells and
   alarm panel
-- **Tessera native**: pages of tiles you lay out in Tessera in Home Assistant, drawn by EchoLocal
-  in your style and theme
-- **Tessera embedded**: the same Tessera pages, drawn by Tessera's own screen software running on
-  the device
+- **Tessera**: pages of tiles you lay out in Tessera in Home Assistant, drawn by Tessera's own screen
+  software running on the device
+- **Home Assistant**: one of your [Home Assistant dashboards](#home-assistant)
 
 **Mode** shows when home control is on and Home Assistant actions are allowed; otherwise the
 dashboard is native. The button beside it reloads the dashboard from Home Assistant.
@@ -99,23 +98,42 @@ full-screen alarm or a spoken announcement. Checks run every five minutes; use o
 alerts for time-critical warnings.
 
 
+## Home Assistant
+
+The device shows one of your Home Assistant dashboards, signed in as a Home Assistant user,
+without Home Assistant's header or sidebar.
+
+<Steps>
+
+1. In Home Assistant, open the [EchoLocal integration](/start/integration/)'s **Configure** and add
+   the users device screens may show dashboards as. Nobody is allowed until you add one.
+
+2. In the device's ESPHome integration options, turn on **Allow the device to perform Home
+   Assistant actions**.
+
+3. On the device, set **Settings → Dashboard → Mode** to **Home Assistant**, then pick
+   **Show as** (one of the allowed users), **Dashboard** and **View**.
+
+</Steps>
+
+**Screen saver** on the same page can show a Home Assistant dashboard too.
+
+The button beside **Mode**, and the device's **Reload dashboard** button in Home Assistant,
+reload the page with a cleared cache.
+
+When the dashboard can't be shown, the screen says why: install the integration, allow a user,
+or choose a user. If Home Assistant doesn't answer, it shows **Home Assistant isn't reachable** and
+tries again by itself; tap it to try right away.
+
 ## Tessera
 
 [Tessera](https://github.com/MaxGramser/homeassistant_espscreen) is a Home Assistant integration
 with a drag-and-drop editor for touch screens. The device shows up in Tessera like any other
-screen; lay out the pages there. There are two ways to show them:
-
-- **Tessera native**: EchoLocal speaks Tessera's screen protocol and draws the tiles in your style
-  and theme.
-- **Tessera embedded**: the device runs Tessera's own screen software, so pages look and behave
-  as they do on Tessera's screens. Its own settings appear as entities on the device's Tessera
-  sub-devices in Home Assistant.
-
-Both use the same Tessera screens, so a layout works in either mode.
+screen; lay out the pages there. The device runs Tessera's own screen software, so pages look
+and behave as they do on Tessera's screens. Its own settings appear as entities on the device's
+Tessera sub-devices in Home Assistant.
 
 <Image src={tessera} alt="A landscape Tessera demonstration page with weather, a clock, temperature, lights, blinds, media and sensors" class="screen" />
-
-<OptionGallery items={[{"src":"/carousel/styles-0.png","label":"Standard","alt":"Tessera dashboard in the Standard style"},{"src":"/carousel/styles-1.png","label":"Material You","alt":"Tessera dashboard in the Material You style"},{"src":"/carousel/styles-2.png","label":"Glass","alt":"Tessera dashboard in the Glass style"},{"src":"/carousel/styles-3.png","label":"E-ink","alt":"Tessera dashboard in the E-ink style"},{"src":"/carousel/styles-4.png","label":"Metro","alt":"Tessera dashboard in the Metro style"},{"src":"/carousel/styles-5.png","label":"Terminal","alt":"Tessera dashboard in the Terminal style"},{"src":"/carousel/styles-6.png","label":"Hi-fi","alt":"Tessera dashboard in the Hi-fi style"},{"src":"/carousel/styles-7.png","label":"Neon","alt":"Tessera dashboard in the Neon style"},{"src":"/carousel/styles-8.png","label":"Skeuo","alt":"Tessera dashboard in the Skeuo style"}]} layout="strip" label={"The same Tessera page in a style"} width={1280} height={800} />
 
 ### Set it up
 
@@ -124,8 +142,7 @@ Both use the same Tessera screens, so a layout works in either mode.
 1. Install Tessera in Home Assistant from its
    [GitHub page](https://github.com/MaxGramser/homeassistant_espscreen).
 
-2. On the device, set **Settings → Dashboard → Mode** to **Tessera native** or **Tessera
-   embedded**.
+2. On the device, set **Settings → Dashboard → Mode** to **Tessera**.
 
 3. The device appears in Tessera as a screen. Without tiles it shows:
 
@@ -137,20 +154,19 @@ Both use the same Tessera screens, so a layout works in either mode.
 
 The grid starts at 4 × 2 tiles on the Echo Show 5 and 6 × 4 on the Echo Show 8.
 
-In a Tessera mode, **Settings → Dashboard** has:
+In Tessera mode, **Settings → Dashboard** has:
 
 | Setting | What it does |
 |---|---|
 | Screen saver | **Native**, or Tessera's screen saver |
 | Grid | Tiles along the long side and the short side |
 | Go back to the home page after the screensaver | Return to the first page when the device wakes |
-| Swipe up from the bottom | Tessera embedded: what a swipe up from the bottom edge opens: **Page panel** (the default), **Home page** or **Nothing** |
-| Use this device's theme | Tessera embedded: draw in the device's theme colors (on by default) |
-| Page transition | Tessera embedded: None, Slide, Cover, Reveal, Deck, Zoom or Fade (Slide by default) |
-| Page follows finger | Tessera embedded: the page moves with your finger while you swipe (on by default) |
+| Swipe up from the bottom | What a swipe up from the bottom edge opens: **Page panel** (the default), **Home page** or **Nothing** |
+| Use this device's theme | Draw in the device's theme colors (on by default) |
+| Page transition | None, Slide, Cover, Reveal, Deck, Zoom or Fade (Slide by default) |
+| Page follows finger | The page moves with your finger while you swipe (on by default) |
 
-With Tessera embedded, also turn on **Auto standby** in Tessera's own screen settings to use its
-screen saver.
+To use Tessera's screen saver, also turn on **Auto standby** in Tessera's own screen settings.
 
 Tile controls require **Allow the device to perform Home Assistant actions** in the device's
 ESPHome integration options. Check this permission if tiles appear but do not respond to taps.

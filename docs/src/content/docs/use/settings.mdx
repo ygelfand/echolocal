@@ -76,6 +76,7 @@ The Wi‑Fi network, IP and MAC address, router and DHCP lease, all read-only. C
 |---|---|---|---|
 | Web access → | The address of the [web page](/use/web/), the admin password, and the certificate in use | | `text.<device>_frontend_admin_password`, `sensor.<device>_frontend_certificate` |
 | Verify certificates | Check TLS certificates on downloads: updates, wake words, photos, radar | On | `switch.<device>_verify_certificates` |
+| Download through Home Assistant | For a device without internet access: updates, the cast engine, speech models and wake word packs download through Home Assistant. Needs the [EchoLocal integration](/start/integration/) and **Allow the device to perform Home Assistant actions** in the device's ESPHome integration options. Photos, radar and other downloads still go directly | Off | `switch.<device>_download_through_home_assistant` |
 
 ## Connected services
 
@@ -179,13 +180,14 @@ What the page holds depends on the mode ([Dashboards](/use/dashboards/)).
 | Setting | What it does | Choices | Default | Entity |
 |---|---|---|---|---|
 | Close paused player after | Close the player card when paused this long | 1, 3, 5, 10, 15 min, Never | 5 min | `select.<device>_screen_close_paused_player_after` |
-| Mode | The native dashboard or [Tessera](/use/dashboards/#tessera). Shown when home control is on and Home Assistant actions are allowed | Native, Tessera native, Tessera embedded | Native | — |
+| Mode | The native dashboard, [Tessera](/use/dashboards/#tessera) or a [Home Assistant dashboard](/use/dashboards/#home-assistant). Shown when home control is on and Home Assistant actions are allowed | Native, Tessera, Home Assistant | Native | — |
+| Show as, Dashboard, View | Home Assistant: the user to sign in as (one the EchoLocal integration allows), and the dashboard and view to show | | | — |
 | Clock → | Native: face, placement, size, color, date ([below](#clock)) | | | |
 | Weather → | Native: the weather card ([below](#weather)) | | | |
 | Lights, Switches → | Native: **Enable**, then **Select devices** by label or by hand, **Group by area** from N devices (0–5, default 2), and **Include switches** in the lights view ([Lights and switches](/use/dashboards/#lights-and-switches)) | | Off | — |
-| Screen saver | Tessera: the native screen saver or Tessera's | Native, Tessera | Native | `select.<device>_screen_screen_saver_mode` |
+| Screen saver | Tessera or Home Assistant: the native screen saver, Tessera's, or a Home Assistant dashboard | Native, Tessera, Home Assistant | Native | `select.<device>_screen_screen_saver_mode` |
 | Grid, Go back to the home page after the screensaver | Tessera: tiles along the long and short side (1–12), and returning to the first page on waking | | 4 × 2 on the Show 5, 6 × 4 on the Show 8 | — |
-| Swipe up from the bottom, Use this device's theme, Page transition, Page follows finger | Tessera embedded ([Tessera](/use/dashboards/#tessera)) | | Page panel, On, Slide, On | — |
+| Swipe up from the bottom, Use this device's theme, Page transition, Page follows finger | Tessera ([Tessera](/use/dashboards/#tessera)) | | Page panel, On, Slide, On | — |
 
 ### Clock
 
@@ -252,8 +254,8 @@ Under **Settings → Display → Screen saver**.
 </div>
 
 The rows below **Enable home control** show when Home Assistant actions are allowed for the
-device. Apart from the Cameras, Doorbell and Home alarm settings, none of these are Home
-Assistant entities.
+device. Apart from the Cameras, Doorbell, Home alarm and Thermostat settings, none of these
+are Home Assistant entities.
 
 | Setting | What it does | Default |
 |---|---|---|
@@ -264,6 +266,7 @@ Assistant entities.
 | Cameras | The [Cameras app](/features/apps/#cameras): **Dashboard tab** (`switch.<device>_dashboard_tab`), which cameras, **Thumbnail size** (`number.<device>_thumbnail_size`), **Refresh** (`number.<device>_refresh`), **Auto paginate** (`number.<device>_auto_paginate`) and **Home Assistant URL** (`text.<device>_home_assistant_url`) | Off, all cameras, 3, 5 s, Off, empty |
 | Doorbell | Your doorbells, how a ring and a detection appear, and a dashboard tab ([Doorbell](/features/doorbell/)) | Auto answer |
 | Home alarm | The alarm panel, its look, zones, when it takes over the screen, and a dashboard tab ([Home alarm](/features/home-alarm/)) | Keypad |
+| Thermostat | Up to four thermostats, their look, and a dashboard tab ([Thermostat](/features/thermostat/)) | Dial |
 
 ## Sound
 
@@ -361,7 +364,7 @@ device; [config sync](/use/configuration/#config-sync) doesn't copy them.
 
 | Setting | What it does | Default | Entity |
 |---|---|---|---|
-| Language | Interface language | English | `select.<device>_screen_language` |
+| Language | Interface language: English or Italiano | English | `select.<device>_screen_language` |
 | Date & time | Time zone (or follow Home Assistant) and 24-hour format | 24-hour | `select.<device>_time_zone`, `select.<device>_screen_clock_format` |
 | Keyboard size | The on-screen keyboard | Compact | `select.<device>_screen_keyboard_size` |
 | Restart | Restart the app or the whole device | | `button.<device>_restart` (button) |

@@ -5,6 +5,7 @@ description: A card for every device, a dashboard for all of them, Fleet, wake w
 
 import { Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
+import users from '../../../assets/screens/integration-users.webp';
 import dashboard from '../../../assets/screens/dashboard.png';
 import card from '../../../assets/screens/hacs-card.png';
 import cardShow from '../../../assets/screens/hacs-card-show.png';
@@ -47,8 +48,14 @@ Requires Home Assistant **2026.8** or newer.
 
 </Steps>
 
-Its only option is **Show the EchoLocal dashboard in the sidebar**. Change it later from the
-integration's **Configure**.
+Its options, under the integration's **Configure**:
+
+- **Show the EchoLocal dashboard in the sidebar**
+- **Users device screens may show dashboards as**: the Home Assistant users a device can sign
+  in as to show a [Home Assistant dashboard](/use/dashboards/#home-assistant). Nobody is allowed
+  until you add a user here.
+
+<Image src={users} alt="The EchoLocal options with one user allowed on device screens" class="screen" />
 
 ## The card
 

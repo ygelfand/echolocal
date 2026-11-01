@@ -31,18 +31,20 @@ talkback. To connect to it directly, with talkback, tap it on the Doorbell page,
 | Video | Rows |
 |---|---|
 | **Reolink** | UID, IP address or hostname, user, password and stream |
-| **ONVIF** | IP address or hostname, user, password and stream |
+| **ONVIF** | IP address or hostname, with `:port` if ONVIF isn't on port 80, user, password and stream |
 | **RTSP** | The stream's RTSP URL, and the user and password if they aren't in the URL |
 | **Home Assistant** | The Home Assistant camera to show |
 
-- **ONVIF** finds the camera on the network by itself. If it isn't found, add the camera's ONVIF
-  port to the address (`192.168.1.20:8000`) to connect to it directly.
+- **ONVIF** connects to the address on port 80. For a camera whose ONVIF port is different, add
+  the port to the address (`192.168.1.20:8000`).
 - **Stream** picks the main or sub stream. With ONVIF, main is the camera's largest stream and
   sub its smallest.
 - **Events** and **Talkback** only offer the sources that work with the chosen video.
-- When **Events** is **Home Assistant** or **Automatic**, the page also lists the Home Assistant
-  camera and a **Ring**, **Person**, **Package**, **Vehicle**, **Animal** and **Motion** sensor. Each can be
-  any binary sensor in Home Assistant, from any camera brand.
+- When **Events** is **Home Assistant** or **Automatic**, the page also lists a **Ring**,
+  **Person**, **Package**, **Vehicle**, **Animal** and **Motion** sensor. Each can be any binary
+  sensor in Home Assistant, from any camera brand.
+- Reolink and ONVIF doorbells take their own event pictures. With **RTSP** video and Home
+  Assistant events, **Event pictures from** picks a Home Assistant camera that shows the door.
 
 Tap **Save** to check the doorbell and save it. **Not saved** says what's missing, or reports a
 wrong password, a different doorbell at that address, or a doorbell it can't reach.

@@ -14,6 +14,7 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/runtime/service"
+	"github.com/ygelfand/libcountertop/pkg/say"
 	tesseraview "github.com/ygelfand/libcountertop/pkg/tessera/widgets"
 
 	"github.com/ygelfand/echolocal/internal/board"
@@ -21,6 +22,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/assistant"
 	"github.com/ygelfand/echolocal/internal/feature/cameras"
+	"github.com/ygelfand/echolocal/internal/feature/chromecast"
 	"github.com/ygelfand/echolocal/internal/feature/dashboard"
 	"github.com/ygelfand/echolocal/internal/feature/doorbell"
 	"github.com/ygelfand/echolocal/internal/feature/drawer"
@@ -29,6 +31,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/homecontrol"
 	"github.com/ygelfand/echolocal/internal/feature/idle"
+	"github.com/ygelfand/echolocal/internal/feature/lovelace"
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/message"
 	"github.com/ygelfand/echolocal/internal/feature/nws"
@@ -108,6 +111,7 @@ var Get = sync.OnceValue(func() *screens.App {
 			Logo:          echoui.Logo(),
 		}),
 		Firmware: tessera.Firmware(),
+		Lovelace: lovelace.Get(),
 		Forecast: weather.Get(),
 		Warnings: nws.Get(),
 
@@ -124,11 +128,15 @@ var Get = sync.OnceValue(func() *screens.App {
 			if up := firmware.Get().Upgrade(); up.Active() {
 				return widgets.Upgrade{Active: true, At: up.At, Version: up.Version}
 			}
+			if in := chromecast.Engine().Installation(); in.Active {
+				return widgets.Upgrade{Active: true, At: in.At, Label: say.T("upgrade.engine")}
+			}
 			p := wake.Lib().Preparation()
 			return widgets.Upgrade{Active: p.Active(), At: p.At, Label: p.Phrase}
 		},
 		Upgrading: screens.All(
 			screens.On(&firmware.Get().Upgrading),
+			screens.On(&chromecast.Engine().Installing),
 			screens.On(&wake.Lib().Preparing),
 		),
 		Marks: func() screens.Marks {

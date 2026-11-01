@@ -95,6 +95,7 @@ var registered = []string{
 	"mute_led_brightness",
 	"mute_sound",
 	"network_home_key",
+	"network_via_home",
 	"noise_layer_1",
 	"noise_layer_2",
 	"now_playing",

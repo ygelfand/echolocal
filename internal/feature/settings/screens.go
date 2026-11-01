@@ -96,13 +96,14 @@ func networkPage() *sharedshell.Page {
 			Address: address(),
 			MAC:     wifi.Get().MAC(),
 			Verify:  config.Get().Network.Verify,
+			ViaHome: config.Get().Network.ViaHome,
 		}
 		if l := dhcp.Get().Lease(); l != nil {
 			c.Router = l.Router.String()
 			c.Renew = l.Renew
 		}
 		return c
-	}, network.Get().SetVerify, &sharedsettings.WebAccess{
+	}, network.Get().SetVerify, network.Get().SetViaHome, &sharedsettings.WebAccess{
 		Admin:       frontend.Get(),
 		Certificate: certs.Get(),
 	}, shell.Get())

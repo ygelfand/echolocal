@@ -27,6 +27,13 @@ const groups = {
 		width: 1280,
 		height: 800,
 	},
+	thermostat: {
+		alt: (label) => `Thermostat in the ${label} look with rehearsal data`,
+		labels: ['Dial', 'Column', 'Wheel', 'Bars', 'Split', 'Terminal', 'Brass', 'Mission'],
+		extension: 'webp',
+		width: 1280,
+		height: 800,
+	},
 };
 
 export const gallery = Object.fromEntries(Object.entries(groups).map(([name, group]) => [

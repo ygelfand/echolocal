@@ -134,6 +134,10 @@ export default defineConfig({
 							"slug": "features/home-alarm"
 						},
 						{
+							"label": "Thermostat",
+							"slug": "features/thermostat"
+						},
+						{
 							"label": "Camera",
 							"slug": "features/camera"
 						},

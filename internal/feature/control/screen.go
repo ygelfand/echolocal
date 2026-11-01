@@ -25,6 +25,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/doorbell"
 	"github.com/ygelfand/echolocal/internal/feature/homealarm"
 	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
+	"github.com/ygelfand/echolocal/internal/feature/lovelace"
 	"github.com/ygelfand/echolocal/internal/feature/message"
 	"github.com/ygelfand/echolocal/internal/feature/nws"
 	"github.com/ygelfand/echolocal/internal/feature/poster"
@@ -55,6 +56,7 @@ func showing(t *harness.Tree) {
 		screencmd.Timer(timer.Get),
 		screencmd.Warning(nws.Get),
 		screencmd.Wallpaper(poster.Get),
+		screencmd.Reload(lovelace.Get),
 		screencmd.App(func() []sharedapps.App { return apps.Get().List() }),
 	)
 	t.Add(harness.DeviceTask, ready)
