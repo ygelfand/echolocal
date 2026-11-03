@@ -28,6 +28,7 @@ adds:
 - [Voice actions](/features/voice/#voice-triggers) such as "call the kitchen" and "broadcast
   dinner is ready", and live video in the Echo Show's [Cameras app](/features/apps/#cameras)
 - [Calls to an Echo Show](/features/intercom/#calling-from-home-assistant) from a dashboard
+- The [Music app](/features/music/#music-app-echo-show) and the upcoming tracks in **Media**, with Home Assistant's Music Assistant integration
 
 <Image src={dashboard} alt="The EchoLocal dashboard with Echo Dots and Echo Shows" class="screen-wide" />
 
@@ -165,6 +166,14 @@ address.
 |---|---|
 | `echolocal.assign_tone` | Send a tone from the library to devices (`tone`, `device_id`) |
 | `echolocal.unassign_tone` | Remove a tone from devices; it stays in the library |
+| `echolocal.music_search` | Music Assistant artists, albums, tracks, playlists and radio stations matching `query` |
+| `echolocal.music_library` | One part of the Music Assistant library (`media_type`: playlist, album, artist, radio or track) |
+| `echolocal.music_browse` | An album's or playlist's tracks, or an artist's albums and tracks (`uri`) |
+| `echolocal.music_recent` | Recently played items |
+| `echolocal.music_recommendations` | Music Assistant's recommendation rows with their items |
+| `echolocal.music_players` | Music Assistant's speakers and their IDs |
+| `echolocal.music_queue` | The tracks coming up on a player (`player`) |
+| `echolocal.music_play` | Jump to a track in a player's queue (`player`, `queue_item_id`) |
 
 Each Echo's own actions, such as messages, alarms and timers, come from the ESPHome
 integration. See [Messages, timers and alarms](/features/messages/).
