@@ -1,13 +1,15 @@
 package access
 
 import (
+	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/system/access"
 
-	"github.com/ygelfand/echolocal/internal/android/firewall"
+	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 )
@@ -19,31 +21,52 @@ func init() {
 	)
 }
 
-// The boot image sets service.adb.tcp.port to this.
-const adbPort = 5555
+const (
+	port    = "service.adb.tcp.port"
+	off     = "-1"
+	adbPort = 5555
+
+	service = "adbd"
+)
 
 type componentAccess struct{ *access.Access }
 
-// The firewall chain is empty after a reboot but not after an echod restart.
+// init sets service.adb.tcp.port to 5555 on every boot.
 func (c componentAccess) Restore(cfg config.Config) { c.Access.Restore(cfg.Access) }
 
 var get = sync.OnceValue(func() *access.Access {
-	a := access.New(access.Options{Settings: config.AccessSection, ADB: reachable})
+	a := access.New(access.Options{Settings: config.AccessSection, ADB: apply})
 	component.Settings.Add(a.Controls())
 	return a
 })
 
 func Get() *access.Access { return get() }
 
-func reachable(on bool) error {
-	change, what := func() error { return firewall.Close(firewall.ADB) }, "closing"
+// ro.secure is 0: adb over TCP is an unauthenticated root shell.
+func apply(on bool) error {
+	value := off
 	if on {
-		change, what = func() error { return firewall.Open(firewall.ADB, adbPort) }, "opening"
+		value = strconv.Itoa(adbPort)
 	}
-	if err := change(); err != nil {
-		slog.Error(what+" the adb port failed", "port", adbPort, "err", err)
-		return err
+	if at, err := prop.Get(port); err == nil && (at == value || !on && at == "") {
+		return nil
 	}
-	slog.Warn("remote adb", "open", on, "port", adbPort)
+
+	if err := prop.Set(port, value); err != nil {
+		return fmt.Errorf("setting %s: %w", port, err)
+	}
+	if err := prop.Restart(service); err != nil {
+		return fmt.Errorf("restarting %s: %w", service, err)
+	}
+
+	if on {
+		slog.Warn(
+			"adb is listening on the network: anything that can reach this device has a root shell",
+			"port",
+			adbPort,
+		)
+	} else {
+		slog.Info("adb is back to the cable only")
+	}
 	return nil
 }

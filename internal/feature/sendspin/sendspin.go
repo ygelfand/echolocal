@@ -28,6 +28,7 @@ var get = sync.OnceValue(func() *sharedplayer.Player {
 		DeviceID:    component.DevicePlayback,
 		Clock:       timesync.Get(),
 		Media:       media.Get(),
+		Queue:       queue(),
 		OpenPort: func() {
 			if err := firewall.Open(firewall.Sendspin, Port); err != nil {
 				slog.Error("opening the sendspin port failed", "port", Port, "err", err)
@@ -39,6 +40,9 @@ var get = sync.OnceValue(func() *sharedplayer.Player {
 })
 
 func Get() *sharedplayer.Player { return get() }
+
+func ClientID() string { return identity{}.Identity().ID }
+
 func init() {
 	component.Register(
 		sharedcomponent.Device,

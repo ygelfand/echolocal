@@ -12,6 +12,7 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/display/screens"
 	"github.com/ygelfand/libcountertop/pkg/display/shell"
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
+	"github.com/ygelfand/libcountertop/pkg/media/lyrics"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/runtime/service"
 	"github.com/ygelfand/libcountertop/pkg/say"
@@ -37,6 +38,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/nws"
 	"github.com/ygelfand/echolocal/internal/feature/poster"
 	"github.com/ygelfand/echolocal/internal/feature/privacy"
+	"github.com/ygelfand/echolocal/internal/feature/product"
 	"github.com/ygelfand/echolocal/internal/feature/screen"
 	"github.com/ygelfand/echolocal/internal/feature/settings"
 	featureshell "github.com/ygelfand/echolocal/internal/feature/shell"
@@ -100,6 +102,7 @@ var Get = sync.OnceValue(func() *screens.App {
 		Tabs:      dashboard.Tabs(),
 		Home:      homecontrol.Get(),
 		HomeHA:    homeassistant.Get(),
+		Adopted:   func() bool { return config.Get().API.Adopted },
 		Saver:     idle.Get(),
 		Visuals:   settings.Visuals(),
 		Tessera: tesseraview.New(tesseraview.Dependencies{
@@ -120,6 +123,7 @@ var Get = sync.OnceValue(func() *screens.App {
 		DoorbellPage:    func() shell.View { return doorbell.View().Page() },
 		Player:          media.Get(),
 		PlayerPage:      media.Page,
+		Lyrics:          lyrics.Build(product.Get()),
 		MediaVolume:     sharedvolume.For(volume.Get(), config.StreamMedia),
 		Volume:          volume.Get(),
 		Streams:         config.Streams(),
@@ -160,6 +164,7 @@ var Get = sync.OnceValue(func() *screens.App {
 		extendCameras,
 		extendLock,
 		extendMirror,
+		extendMusic,
 		extendRadar,
 		extendRadio,
 		extendShopping,

@@ -42,19 +42,13 @@ func page() *sharedshell.Page {
 
 func Page() sharedshell.View { return page() }
 
-type shows interface{ Shows(config.Stream) bool }
-
 func showing(s config.Stream) bool {
 	top := shell.Get().Top()
 	if top == sharedshell.View(page()) {
 		return true
 	}
-	if _, idle := top.(*idleview.View); idle && s == config.StreamMedia &&
-		tessera.Firmware().SaverUp() {
-		return true
-	}
-	v, ok := top.(shows)
-	return ok && v.Shows(s)
+	_, idle := top.(*idleview.View)
+	return idle && s == config.StreamMedia && tessera.Firmware().SaverUp()
 }
 
 type chimes struct{}
