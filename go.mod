@@ -11,7 +11,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/ygelfand/go-esphome-device v0.0.18
-	github.com/ygelfand/libcountertop v0.1.1-0.20261101222147-591b848d0a39
+	github.com/ygelfand/libcountertop v0.1.1-0.20261103032046-2981792387f3
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 )
 
