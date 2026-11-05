@@ -29,6 +29,7 @@ var get = sync.OnceValue(func() *sharedplayer.Player {
 		Clock:       timesync.Get(),
 		Media:       media.Get(),
 		Queue:       queue(),
+		Favorite:    favorite(),
 		OpenPort: func() {
 			if err := firewall.Open(firewall.Sendspin, Port); err != nil {
 				slog.Error("opening the sendspin port failed", "port", Port, "err", err)

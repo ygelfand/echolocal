@@ -18,7 +18,7 @@ func extendMirror(look *widgets.UI, o *screens.Options, _ func() *screens.App) {
 	if component.Board().CameraWidth == 0 {
 		return
 	}
-	m := mirror.New(mirror.Options{Shell: shell.Get(), Camera: settings.Preview()})
+	m := mirror.New(mirror.Options{UI: look, Shell: shell.Get(), Camera: settings.Preview()})
 	apps.Get().Add(m.App())
 	commands.Get().Listen(m.Command())
 	o.Views = append(o.Views, m.Screen)

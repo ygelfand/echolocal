@@ -7,6 +7,7 @@ import (
 
 	"github.com/ygelfand/libcountertop/pkg/display/agenda"
 	"github.com/ygelfand/libcountertop/pkg/display/screens"
+	sharedshell "github.com/ygelfand/libcountertop/pkg/display/shell"
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
 	"github.com/ygelfand/libcountertop/pkg/settings/schema"
 
@@ -26,6 +27,7 @@ func extendCalendar(look *widgets.UI, o *screens.Options, app func() *screens.Ap
 		TwentyFour: func() bool {
 			return config.Get().Screen.Hours == schema.TwentyFourHour
 		},
+		Settings: func() *sharedshell.Page { return app().CalendarPage() },
 	})
 	apps.Get().Add(diary.App())
 	o.Calendar = cal

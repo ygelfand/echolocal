@@ -39,6 +39,7 @@ var (
 	VisualSection     = sections.Visual
 	WeatherSection    = sections.Weather
 	TodoSection       = sections.Todo
+	TVSection         = sections.TV
 	CalendarSection   = sections.Calendar
 	RadioSection      = sections.Radio
 	VoiceSection      = sections.Voice

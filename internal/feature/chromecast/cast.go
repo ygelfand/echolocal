@@ -135,3 +135,12 @@ func hardware() string {
 	}
 	return layout.MAC(string(raw))
 }
+
+var castID = sync.OnceValue(func() string {
+	if mac := hardware(); mac != "" {
+		return cast.IDFor(mac)
+	}
+	return ""
+})
+
+func ID() string { return castID() }

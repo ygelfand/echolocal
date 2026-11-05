@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ygelfand/libcountertop/pkg/runtime/crash"
+	"github.com/ygelfand/libcountertop/pkg/runtime/oom"
 	"github.com/ygelfand/libcountertop/pkg/runtime/service"
 	"github.com/ygelfand/libcountertop/pkg/system/metrics"
 
@@ -29,6 +30,7 @@ func Run(ctx context.Context) error {
 	b := board.Detect()
 
 	crash.Keep(layout.CrashPath)
+	oom.Settle()
 
 	slog.Info("echod starting", "version", layout.Version, "board", b,
 		"pid", os.Getpid(), "uid", os.Getuid(), "context", selinuxContext())

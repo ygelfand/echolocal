@@ -8,6 +8,8 @@ import apps from '../../../assets/screens/apps.webp';
 import shopping from '../../../assets/screens/app-shopping.webp';
 import radio from '../../../assets/screens/app-radio-browse.webp';
 import alarms from '../../../assets/screens/app-alarm-editor.webp';
+import tv from '../../../assets/screens/app-tv.webp';
+import tvCard from '../../../assets/screens/app-tv-card.webp';
 
 On the Echo Shows.
 
@@ -33,6 +35,8 @@ minutes without a touch; **Photos** stays open.
 | **Photos** | Your [photos](/features/photos/#photos-app), full screen |
 | **Doorbell** | Your [doorbells](/features/doorbell/) and their recent events |
 | **Home alarm** | Your [alarm panel](/features/home-alarm/) from Home Assistant |
+| **Thermostat** | Your [thermostats](/features/thermostat/) |
+| **TV** | The [YouTube TV](#tv) guide, and a remote for your TVs |
 
 ## Media
 
@@ -112,6 +116,30 @@ configured under **Settings → Home control → Doorbell**. See [Doorbell](/fea
 Open the selected Home Assistant alarm panel, including its zones, keypad and supported actions.
 The [Home alarm guide](/features/home-alarm/) shows the panel and every design in its picker.
 Opening the app does not arm or disarm the panel.
+
+## TV
+
+The YouTube TV channel guide, and a remote for whatever YouTube TV is playing. It needs the
+[YouTube TV integration](https://github.com/ygelfand/yttv-hacs) in Home Assistant, version 0.1.12 or
+newer, and **Allow the device to perform Home Assistant actions** turned on for the device in the
+ESPHome integration.
+
+<div class="pair even">
+<Image src={tv} alt="The TV app: the TVs along the top, then the channel guide with a red line at the time now" />
+<Image src={tvCard} alt="A channel's card: the live picture, what's next, a favorite star and Watch here" />
+</div>
+
+- **The TVs** run along the top: every Chromecast the integration knows, with the device itself
+  as **Here**. Tap one to pick it.
+- **Below them** is what that TV is playing, with play/pause, stop and volume.
+- **The guide** lists every channel, favorites first with a star, then A to Z. A line marks the
+  time now. **Find a channel or show** narrows it.
+- **Tap a show** that's on now to watch it on the chosen TV.
+- **Tap a channel's name** for its card: what's on and what's next, a star to make it a favorite,
+  and **Watch on** the chosen TV.
+
+**Settings → Home control → YouTube TV**, or the settings button in the app, picks the
+**Default TV** the app opens on and your **Favorites**.
 
 ## Mirror
 

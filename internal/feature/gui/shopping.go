@@ -6,6 +6,7 @@ import (
 	gogui "github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ygelfand/libcountertop/pkg/display/screens"
+	sharedshell "github.com/ygelfand/libcountertop/pkg/display/shell"
 	"github.com/ygelfand/libcountertop/pkg/display/shopping"
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
 
@@ -17,10 +18,11 @@ import (
 func extendShopping(look *widgets.UI, o *screens.Options, app func() *screens.App) {
 	list := todo.Get().Todo
 	shop := shopping.New(shopping.Options{
-		UI:    look,
-		Shell: shell.Get(),
-		Todo:  list,
-		Gate:  func(w *gogui.Window) gogui.View { return app().Gate(w) },
+		UI:       look,
+		Shell:    shell.Get(),
+		Todo:     list,
+		Gate:     func(w *gogui.Window) gogui.View { return app().Gate(w) },
+		Settings: func() *sharedshell.Page { return app().TodoLists() },
 	})
 	apps.Get().Add(shop.App())
 	o.Todo = list

@@ -169,6 +169,7 @@ var Get = sync.OnceValue(func() *screens.App {
 		extendRadio,
 		extendShopping,
 		extendSync,
+		extendTV,
 	} {
 		extend(look, &o, self)
 	}

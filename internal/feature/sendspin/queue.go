@@ -12,3 +12,7 @@ import (
 func queue() sharedplayer.Queue {
 	return musicassistant.Build(product.Get(), ClientID)
 }
+
+func favorite() sharedplayer.Favorite {
+	return musicassistant.BuildLikes(product.Get(), ClientID)
+}

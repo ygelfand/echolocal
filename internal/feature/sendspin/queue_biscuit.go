@@ -5,3 +5,5 @@ package sendspin
 import sharedplayer "github.com/ygelfand/libcountertop/pkg/media/sendspin"
 
 func queue() sharedplayer.Queue { return nil }
+
+func favorite() sharedplayer.Favorite { return nil }

@@ -29,6 +29,7 @@ adds:
   dinner is ready", and live video in the Echo Show's [Cameras app](/features/apps/#cameras)
 - [Calls to an Echo Show](/features/intercom/#calling-from-home-assistant) from a dashboard
 - The [Music app](/features/music/#music-app-echo-show) and the upcoming tracks in **Media**, with Home Assistant's Music Assistant integration
+- [Updates through Home Assistant](/features/updates/#without-internet-access) for an Echo without internet access
 
 <Image src={dashboard} alt="The EchoLocal dashboard with Echo Dots and Echo Shows" class="screen-wide" />
 
@@ -174,6 +175,7 @@ address.
 | `echolocal.music_players` | Music Assistant's speakers and their IDs |
 | `echolocal.music_queue` | The tracks coming up on a player (`player`) |
 | `echolocal.music_play` | Jump to a track in a player's queue (`player`, `queue_item_id`) |
+| `echolocal.fetch` | Part of a release file (`url`, `offset`, `length`), for [Download through Home Assistant](/features/updates/#without-internet-access); only GitHub and the release file host |
 
 Each Echo's own actions, such as messages, alarms and timers, come from the ESPHome
 integration. See [Messages, timers and alarms](/features/messages/).

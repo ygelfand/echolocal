@@ -16,6 +16,17 @@ On the Echo Shows,
 **Settings → System → Software update** shows the current version, **Check for updates**, and
 **Download and install** when an update is available.
 
+## Without internet access
+
+A device kept off the internet can get its updates through Home Assistant. Turn on **Download
+through Home Assistant** (`network_via_home`) under **Settings → Network & internet**, on the screen
+or in Home Assistant. It needs the [EchoLocal integration](/start/integration/) and **Allow the
+device to perform Home Assistant actions** in the device's ESPHome integration options.
+
+Updates, the cast engine, speech models and wake word packs then download through Home Assistant,
+which fetches them from GitHub and the release file host only. Photos, radar and other
+downloads still go directly.
+
 ## Checks
 
 The device checks for updates a few minutes after startup, then daily. **Update status** shows

@@ -8,6 +8,7 @@ import { Image } from 'astro:assets';
 import nativePhotos from '../../../assets/screens/native-photos.webp';
 import settings from '../../../assets/screens/native-settings.webp';
 import theme from '../../../assets/screens/themes.webp';
+import tvFavorites from '../../../assets/screens/set-tv-favorites.webp';
 import sub_cast from '../../../assets/screens/show-sub-cast.png';
 import sub_intercom from '../../../assets/screens/show-sub-intercom.png';
 import sub_style from '../../../assets/screens/show-sub-style.png';
@@ -202,6 +203,7 @@ What the page holds depends on the mode ([Dashboards](/use/dashboards/)).
 | Size | Nano, Micro, Mini, Small, Medium, Large | Large | `select.<device>_screen_clock_size` |
 | Color | Theme, Amber, Red, Green, Cyan, Blue, Violet, Pink | Theme | `select.<device>_screen_clock_color` |
 | Show date | | On | `switch.<device>_screen_clock_date` |
+| Backing | None, Shade (a soft glow behind the clock), Card | None | `select.<device>_screen_clock_backing` |
 
 ### Weather
 
@@ -235,6 +237,7 @@ Under **Settings → Display → Screen saver**.
 | Clock face | | None or a face | Plain | `select.<device>_screen_idle_clock_face` |
 | Vertical position, Horizontal position | | Top/Center/Bottom or Random; Left/Center/Right or Random | Random, Random | `select.<device>_screen_idle_clock_vertical_position`, `select.<device>_screen_idle_clock_horizontal_position` |
 | Size | | Nano–Large | Large | `select.<device>_screen_idle_clock_size` |
+| Backing | What sits behind the clock: a soft shade or a card | None, Shade, Card | None | `select.<device>_screen_idle_clock_backing` |
 | Weather → | The screen saver's own weather card: show on screen saver (off by default), look, animate, themed colors, placement, and the alert and radar settings above | | | `switch.<device>_screen_weather_on_screen_saver`, `weather_saver_*` |
 | Visual label | Text some visuals show, up to 32 characters | | EchoLocal | `text.<device>_screen_visual_label` |
 | Wake gesture | What wakes the screen saver by touch, night mode included. With anything but Tap, other touches on the screen saver are ignored | Tap or Double tap with 1–5 fingers; Hold or Swipe up, down, left or right with 2–5 fingers; Pinch in, Pinch out | Tap | `select.<device>_screen_wake_gesture` |
@@ -269,6 +272,9 @@ are Home Assistant entities.
 | Doorbell | Your doorbells, how a ring and a detection appear, and a dashboard tab ([Doorbell](/features/doorbell/)) | Auto answer |
 | Home alarm | The alarm panel, its look, zones, when it takes over the screen, and a dashboard tab ([Home alarm](/features/home-alarm/)) | Keypad |
 | Thermostat | Up to four thermostats, their look, and a dashboard tab ([Thermostat](/features/thermostat/)) | Dial |
+| YouTube TV | The [TV app](/features/apps/#tv): **Default TV**, and **Favorites**, the channels listed first in its guide | The device when it's one of the TVs, no favorites |
+
+<Image src={tvFavorites} alt="YouTube TV favorites: every channel with its logo and a switch" />
 
 ## Sound
 
