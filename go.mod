@@ -10,8 +10,8 @@ require (
 	github.com/go-gui-org/go-gui v0.94.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	github.com/ygelfand/go-esphome-device v0.0.18
-	github.com/ygelfand/libcountertop v0.1.1-0.20261105011829-7c6045d3e99b
+	github.com/ygelfand/go-esphome-device v0.0.19
+	github.com/ygelfand/libcountertop v0.1.1-0.20261105012648-0986d46db090
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 )
 
