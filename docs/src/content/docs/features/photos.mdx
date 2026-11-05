@@ -78,6 +78,7 @@ never changes anything. A key needs:
 | `album.read` | **Albums** is filled in |
 | `tag.read` | **Tags** is filled in |
 | `person.read` | **People** is filled in |
+| `face.read` | Optional: Fill and Slow pan crop around faces |
 
 With no filters and **Memories first** off, the first three are enough. A key with all permissions
 also works.
@@ -167,6 +168,9 @@ The wallpaper, the screen saver's photo slots (`idle_photo_fit`) and the Photos 
 | Fit, plain edges | The whole photo, on the theme's background |
 | Framed | The whole photo in a light mat with a shadow, over a blurred copy |
 | Slow pan | Fills the screen and slowly zooms and pans across the photo, turning back every 30 seconds |
+
+With Immich and a key that has `face.read`, Fill and Slow pan keep the faces Immich found in view
+instead of cropping around the center.
 
 The wallpaper defaults to Auto; the screen saver and the Photos app default to Slow pan.
 
