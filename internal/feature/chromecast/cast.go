@@ -96,7 +96,7 @@ func build() *castreceiver.Receiver {
 			},
 			Apps:        apps(),
 			Notice:      notice(),
-			Preferences: castreceiver.Preferences("echolocal", config.CastSection),
+			Preferences: preferences(),
 		},
 	})
 	configureSettings(r)

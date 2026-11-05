@@ -59,4 +59,9 @@ var (
 		func() *storage.Store[Config] { return store().Store },
 		func(c *Config) *Speaker { return &c.Speaker },
 	)
+
+	LoungeSection = storage.Bind(
+		func() *storage.Store[Config] { return store().Store },
+		func(c *Config) *schema.Lounge { return &c.Lounge },
+	)
 )

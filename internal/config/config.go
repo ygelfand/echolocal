@@ -16,6 +16,8 @@ type Config struct {
 	Volume     Volume     `json:"volume"`
 	Microphone Microphone `json:"microphone"`
 	Ring       Ring       `json:"ring"`
+
+	Lounge schema.Lounge `json:"lounge,omitzero"`
 }
 
 func Defaults() Config {

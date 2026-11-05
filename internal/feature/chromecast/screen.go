@@ -9,6 +9,7 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/display/video"
 	"github.com/ygelfand/libcountertop/pkg/media/cast"
 	"github.com/ygelfand/libcountertop/pkg/media/cast/engine"
+	castpreferences "github.com/ygelfand/libcountertop/pkg/media/cast/preferences"
 	"github.com/ygelfand/libcountertop/pkg/media/cast/protocols/webreceiver"
 	"github.com/ygelfand/libcountertop/pkg/media/castreceiver"
 	"github.com/ygelfand/libcountertop/pkg/media/playback"
@@ -34,8 +35,10 @@ func init() {
 	)
 }
 
-func configureSettings(r *castreceiver.Receiver) {
-	r.Settings().Table = r.Settings().Table.Without("youtube.lounge")
+func configureSettings(*castreceiver.Receiver) {}
+
+func preferences() castpreferences.Provider {
+	return castreceiver.Preferences("echolocal", config.CastSection)
 }
 
 func needs() []sharedcomponent.Option {
