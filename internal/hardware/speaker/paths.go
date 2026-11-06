@@ -30,6 +30,7 @@ type sequences struct {
 	path    map[Output][]kctl
 	leave   map[Output][]kctl
 	close   []kctl
+	gain    string
 }
 
 // The kernel's headphone jack switch: 1 while something is plugged in.

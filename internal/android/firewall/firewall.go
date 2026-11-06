@@ -14,13 +14,14 @@ const iptables = "/system/bin/iptables"
 
 const (
 	API      = "ECHOLOCAL_API"
+	ADB      = "ECHOLOCAL_ADB"
 	Sendspin = "ECHOLOCAL_SENDSPIN"
 	Web      = "ECHOLOCAL_WEB"
 	Cast     = "ECHOLOCAL_CAST"
 	AirPlay  = "ECHOLOCAL_AIRPLAY"
 )
 
-var All = []string{API, Sendspin, Web, Cast, AirPlay}
+var All = []string{API, ADB, Sendspin, Web, Cast, AirPlay}
 
 const iface = "wlan0"
 

@@ -101,6 +101,8 @@ func whichShowAmp(has func(control string) bool) (showAmp, bool) {
 	return showAmp{}, false
 }
 
+func GainRange() (lo, hi int, ok bool) { return 0, 0, false }
+
 func sequencesFor(has func(control string) bool) sequences {
 	a, ok := whichShowAmp(has)
 	if !ok {

@@ -9,6 +9,7 @@ import (
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/system/access"
 
+	"github.com/ygelfand/echolocal/internal/android/firewall"
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
@@ -44,6 +45,10 @@ func Get() *access.Access { return get() }
 
 // ro.secure is 0: adb over TCP is an unauthenticated root shell.
 func apply(on bool) error {
+	if err := reachable(on); err != nil {
+		return err
+	}
+
 	value := off
 	if on {
 		value = strconv.Itoa(adbPort)
@@ -67,6 +72,19 @@ func apply(on bool) error {
 		)
 	} else {
 		slog.Info("adb is back to the cable only")
+	}
+	return nil
+}
+
+func reachable(on bool) error {
+	if on {
+		if err := firewall.Open(firewall.ADB, adbPort); err != nil {
+			return fmt.Errorf("opening the adb port: %w", err)
+		}
+		return nil
+	}
+	if err := firewall.Close(firewall.ADB); err != nil {
+		return fmt.Errorf("closing the adb port: %w", err)
 	}
 	return nil
 }

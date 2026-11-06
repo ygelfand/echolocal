@@ -7,6 +7,8 @@ type Speaker struct {
 
 	SpeakerOutput   OutputMode `json:"speaker_output"`
 	HeadphoneOutput OutputMode `json:"headphone_output"`
+
+	SpeakerGain int `json:"speaker_gain"`
 }
 
 const (
@@ -18,6 +20,8 @@ const (
 	DefaultResampling = ResampleSinc
 
 	DefaultASP = true
+
+	DefaultSpeakerGain = 6
 )
 
 func defaultSpeaker() Speaker {
@@ -27,6 +31,7 @@ func defaultSpeaker() Speaker {
 		ASP:             DefaultASP,
 		SpeakerOutput:   OutputAuto,
 		HeadphoneOutput: OutputAuto,
+		SpeakerGain:     DefaultSpeakerGain,
 	}
 }
 

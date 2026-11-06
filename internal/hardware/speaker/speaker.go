@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +66,7 @@ type Player struct {
 	speakerMode   config.OutputMode
 	headphoneMode config.OutputMode
 	seq           sequences
+	gain          int32
 
 	voiceMu    sync.Mutex
 	voice      upsample.Resampler
@@ -113,6 +115,7 @@ func New() *Player {
 	p := &Player{
 		speakerMode:   saved.SpeakerOutput,
 		headphoneMode: saved.HeadphoneOutput,
+		gain:          int32(saved.SpeakerGain),
 		stereo:        component.Board().Stereo,
 	}
 	p.routing = routeFor(pluggedIn(), p.speakerMode, p.headphoneMode)
@@ -199,7 +202,24 @@ func (p *Player) device() (*alsa.Playback, *alsa.Mixer) {
 func (p *Player) route() {
 	p.pathMu.Lock()
 	defer p.pathMu.Unlock()
-	p.apply(p.seq.path[p.routing.out])
+	p.apply(p.path(p.routing.out))
+}
+
+func (p *Player) path(out Output) []kctl {
+	seq := p.seq.path[out]
+	if out != OutputSpeaker || p.seq.gain == "" {
+		return seq
+	}
+	return append(slices.Clone(seq), kctl{name: p.seq.gain, level: p.gain})
+}
+
+func (p *Player) SetGain(level int) {
+	p.pathMu.Lock()
+	defer p.pathMu.Unlock()
+	p.gain = int32(level)
+	if p.seq.gain != "" && p.routing.out == OutputSpeaker {
+		p.apply([]kctl{{name: p.seq.gain, level: p.gain}})
+	}
 }
 
 func (p *Player) amp(on bool) {
@@ -244,7 +264,7 @@ func (p *Player) reroute(plugged bool) {
 	moved := want.out != was.out
 	if moved {
 		p.apply(p.seq.leave[was.out])
-		p.apply(p.seq.path[want.out])
+		p.apply(p.path(want.out))
 	}
 	p.pathMu.Unlock()
 

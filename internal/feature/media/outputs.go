@@ -11,11 +11,17 @@ import (
 )
 
 func outputControls() *setting.Controls[config.Speaker] {
-	if !component.Board().Has(board.HeadphoneJack) {
+	rows := outputRows()
+	if len(rows) == 0 {
 		return nil
 	}
 	return &setting.Controls[config.Speaker]{
-		Table:  outputTable(),
+		Table: setting.NewTable(
+			"speaker",
+			[]setting.Group{component.SpeakerGroup},
+			rows,
+			setting.Messages{Text: say.T, Missing: say.Missing},
+		),
 		Device: component.DevicePlayback,
 		Read:   config.SpeakerSection.Read,
 		Save: func(s setting.Setting[config.Speaker], v string) error {
@@ -23,18 +29,19 @@ func outputControls() *setting.Controls[config.Speaker] {
 				return err
 			}
 			c := config.SpeakerSection.Read()
-			speaker.Get().SetOutputs(c.SpeakerOutput, c.HeadphoneOutput)
+			spk := speaker.Get()
+			spk.SetOutputs(c.SpeakerOutput, c.HeadphoneOutput)
+			spk.SetGain(c.SpeakerGain)
 			return nil
 		},
 	}
 }
 
-func outputTable() *setting.Table[config.Speaker] {
-	modes := config.OutputModes()
-	return setting.NewTable(
-		"speaker",
-		[]setting.Group{component.SpeakerGroup},
-		[]setting.Setting[config.Speaker]{
+func outputRows() []setting.Setting[config.Speaker] {
+	var rows []setting.Setting[config.Speaker]
+	if component.Board().Has(board.HeadphoneJack) {
+		modes := config.OutputModes()
+		rows = append(rows,
 			setting.Pick(
 				setting.Setting[config.Speaker]{
 					Name:  "speaker_output",
@@ -55,7 +62,21 @@ func outputTable() *setting.Table[config.Speaker] {
 				modes,
 				func(c *config.Speaker) *config.OutputMode { return &c.HeadphoneOutput },
 			),
-		},
-		setting.Messages{Text: say.T, Missing: say.Missing},
-	)
+		)
+	}
+	if lo, hi, ok := speaker.GainRange(); ok {
+		rows = append(rows, setting.Count(
+			setting.Setting[config.Speaker]{
+				Name:   "speaker_gain",
+				ID:     "speaker_gain",
+				Group:  component.SpeakerGroup,
+				Icon:   "mdi:volume-plus",
+				Slider: true,
+				Min:    lo,
+				Max:    hi,
+			},
+			func(c *config.Speaker) *int { return &c.SpeakerGain },
+		))
+	}
+	return rows
 }

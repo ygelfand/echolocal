@@ -47,6 +47,8 @@ var headphoneOff = []kctl{
 
 const driverGain = "HP Driver Gain Volume"
 
+func GainRange() (lo, hi int, ok bool) { return 0, 12, true }
+
 func sequencesFor(func(control string) bool) sequences {
 	return sequences{
 		init:  initSequence,
@@ -55,5 +57,6 @@ func sequencesFor(func(control string) bool) sequences {
 		path:  pathSequence,
 		leave: map[Output][]kctl{OutputHeadphone: headphoneOff},
 		close: initSequence,
+		gain:  driverGain,
 	}
 }
