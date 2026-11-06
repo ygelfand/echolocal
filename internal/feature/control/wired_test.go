@@ -30,6 +30,7 @@ var coverage = settingtest.Shared.With(settingtest.Coverage{
 		"Speaker.ASP":               "speaker.eq",
 		"Speaker.SpeakerOutput":     "speaker.speaker_output",
 		"Speaker.HeadphoneOutput":   "speaker.headphone_output",
+		"Speaker.SpeakerGain":       "speaker.speaker_gain",
 	},
 	ByHand: map[string]string{
 		"Device.Name":  "told to the process at start-up, never written to the file",

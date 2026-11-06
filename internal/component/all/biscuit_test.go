@@ -132,6 +132,7 @@ var registered = []string{
 	"sendspin_state",
 	"speaker",
 	"speaker_eq",
+	"speaker_gain",
 	"speaker_output",
 	"stop_word_sensitivity",
 	"test_playback",
