@@ -5,8 +5,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ygelfand/libcountertop/pkg/audio/volume"
-
 	"github.com/ygelfand/echolocal/internal/config"
 )
 
@@ -37,7 +35,7 @@ func played(t *testing.T, p *Player) []int16 {
 
 func newTestPlayer() *Player {
 	p := &Player{}
-	p.volume.Store(math.Float32bits(1))
+	p.SetVolume(VolumeSteps)
 	return p
 }
 
@@ -114,9 +112,23 @@ func TestTheSourceFollowsTheMediaLevelLive(t *testing.T) {
 	p.SetLevel(config.StreamVoice, 100)
 	got := played(t, p)
 
-	want := int16(float32(10000)*volume.Gain(60)) + 1000
+	want := int16(float32(10000)*gainFor(p.Output(), 0.6) + 1000)
 	if got[0] != want {
 		t.Errorf("mixed = %d, want media at its level plus voice at full, %d", got[0], want)
+	}
+
+	p.Mute(config.StreamMedia, false)
+	p.SetVolume(VolumeSteps / 2)
+	p.SetLevel(config.StreamMedia, 100)
+	half := played(t, p)[2]
+	p.SetVolume(VolumeSteps)
+	p.SetLevel(config.StreamMedia, 50)
+	if again := played(t, p)[2]; again != half {
+		t.Errorf(
+			"main 50 level 100 played %d, main 100 level 50 played %d, want the same",
+			half,
+			again,
+		)
 	}
 
 	p.Mute(config.StreamMedia, true)

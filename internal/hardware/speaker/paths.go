@@ -74,14 +74,17 @@ var volumeCurves = map[Output][VolumeSteps + 1]float64{
 
 const mute = -90
 
-func gainForStep(out Output, step int) float32 {
+func gainFor(out Output, volume float64) float32 {
 	curve, ok := volumeCurves[out]
 	if !ok {
 		curve = volumeCurves[OutputSpeaker]
 	}
-	step = max(0, min(step, VolumeSteps))
-
-	db := curve[step]
+	if volume <= 0 {
+		return 0
+	}
+	at := min(volume, 1) * VolumeSteps
+	lo := min(int(at), VolumeSteps-1)
+	db := curve[lo] + (curve[lo+1]-curve[lo])*(at-float64(lo))
 	if db <= mute {
 		return 0
 	}

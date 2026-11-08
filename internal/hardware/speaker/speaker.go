@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -58,8 +57,7 @@ type Player struct {
 
 	OnOutput hook.Hook[Output]
 
-	volume atomic.Uint32
-	step   atomic.Int32
+	step atomic.Int32
 
 	pathMu        sync.Mutex
 	routing       route
@@ -73,15 +71,15 @@ type Player struct {
 	resampling upsample.Kind
 	splices    atomic.Uint64
 
-	stereo bool
-	chains []*asp.Chain
-	lanes  [][]float32
-	on     atomic.Bool
-	stale  atomic.Bool
-
-	fed bool
+	stereo  bool
+	tuning  *asp.Tuning
+	drivers int
+	tuned   map[config.Stream]*tunedStream
+	on      atomic.Bool
+	stale   atomic.Bool
 
 	tap    atomic.Pointer[tapTo]
+	tapSum []float32
 	tapBuf []int16
 
 	underruns atomic.Uint64
@@ -89,7 +87,7 @@ type Player struct {
 	deaf atomic.Uint64
 
 	bus mix.Bus
-	sum []int32
+	sum []float32
 
 	written atomic.Uint64
 }
@@ -132,21 +130,42 @@ func New() *Player {
 		slog.Error("the driver tuning is not available, playing untuned", "err", err)
 		return p
 	}
-	drivers := 1
+	if _, err := t.Chain(period); err != nil {
+		slog.Error("the driver tuning will not run, playing untuned", "err", err)
+		return p
+	}
+	p.tuning = t
+	p.drivers = 1
 	if p.stereo {
-		drivers = Channels
+		p.drivers = Channels
 	}
-	for range drivers {
-		c, err := t.Chain(period)
-		if err != nil {
-			slog.Error("the driver tuning will not run, playing untuned", "err", err)
-			p.chains, p.lanes = nil, nil
-			return p
-		}
-		p.chains = append(p.chains, c)
-		p.lanes = append(p.lanes, make([]float32, period))
-	}
+	p.tuned = map[config.Stream]*tunedStream{}
 	return p
+}
+
+type tunedStream struct {
+	chains []*asp.Chain
+	lanes  [][]float32
+	volume float64
+	fed    bool
+	ran    bool
+}
+
+func (p *Player) tunedFor(s config.Stream) (*tunedStream, error) {
+	if t, ok := p.tuned[s]; ok {
+		return t, nil
+	}
+	t := &tunedStream{}
+	for range p.drivers {
+		c, err := p.tuning.Chain(period)
+		if err != nil {
+			return nil, err
+		}
+		t.chains = append(t.chains, c)
+		t.lanes = append(t.lanes, make([]float32, period))
+	}
+	p.tuned[s] = t
+	return t, nil
 }
 
 var (
@@ -273,7 +292,6 @@ func (p *Player) reroute(plugged bool) {
 	}
 	p.amp(true)
 
-	p.SetVolume(int(p.step.Load()))
 	slog.Info("output changed", "output", want.out, "speaker", want.speaker)
 	if moved {
 		p.OnOutput.Emit(want.out)
@@ -386,75 +404,141 @@ func (p *Player) SetTap(t mix.Tap) {
 }
 
 func (p *Player) fill(buf []byte) {
-	if cap(p.sum) < period*Channels {
-		p.sum = make([]int32, period*Channels)
-	}
-	mixed := p.sum[:period*Channels]
-	take, rendered := p.bus.Next(p.written.Load(), mixed)
-
-	if take > 0 && take < period*Channels {
+	const n = period * Channels
+	parts, take, _ := p.bus.Parts(p.written.Load(), n)
+	if take > 0 && take < n {
 		p.splices.Add(1)
 	}
 
-	speaker := p.Output() == OutputSpeaker
-	mono := speaker && !p.stereo
+	out := p.Output()
+	mono := out == OutputSpeaker && !p.stereo
+	tuned := out == OutputSpeaker && p.tuning != nil && p.on.Load()
+	main := float64(p.step.Load()) / VolumeSteps
 
-	fed := take > 0 || rendered
-	drain := fed || p.fed
-	p.fed = fed
-
-	tuned := speaker && len(p.chains) > 0 && p.on.Load() && drain
-
+	if cap(p.sum) < n {
+		p.sum = make([]float32, n)
+	}
+	sum := p.sum[:n]
+	clear(sum)
 	tap := p.tap.Load()
-	if tap != nil && cap(p.tapBuf) < period*Channels {
-		p.tapBuf = make([]int16, period*Channels)
+	var tapSum []float32
+	if tap != nil {
+		if cap(p.tapSum) < n {
+			p.tapSum, p.tapBuf = make([]float32, n), make([]int16, n)
+		}
+		tapSum = p.tapSum[:n]
+		clear(tapSum)
 	}
 
-	gain := p.Volume()
-	for i, j := 0, 0; i < period*Channels; i, j = i+Channels, j+1 {
-		l, r := mixed[i], mixed[i+1]
-		if tap != nil {
-			p.tapBuf[i], p.tapBuf[i+1] = mix.Clamp(
-				int32(float32(l)*gain),
-			), mix.Clamp(
-				int32(float32(r)*gain),
-			)
+	for _, part := range parts {
+		if part.Level == 0 {
+			continue
 		}
+		volume := main * float64(part.Level)
+		gain := gainFor(out, volume)
+		if tap != nil {
+			for i, v := range part.Samples {
+				tapSum[i] += float32(v) * gain
+			}
+		}
+		if !tuned {
+			addScaled(sum, part.Samples, gain, mono)
+			continue
+		}
+		t, err := p.tunedFor(part.Stream)
+		if err != nil {
+			slog.Error(
+				"the driver tuning will not run for a stream, playing it untuned",
+				"stream",
+				part.Stream,
+				"err",
+				err,
+			)
+			addScaled(sum, part.Samples, gain, mono)
+			continue
+		}
+		t.feed(part.Samples, mono)
+		t.volume = volume
+	}
+
+	if tap != nil {
+		for i, v := range tapSum {
+			p.tapBuf[i] = mix.Clamp(int32(v))
+		}
+		tap.Offer(p.tapBuf)
+	}
+
+	if tuned {
+		p.runChains(out, sum)
+	}
+	for i, v := range sum {
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(mix.Clamp(int32(v))))
+	}
+}
+
+func (p *Player) runChains(out Output, sum []float32) {
+	stale := p.stale.Swap(false)
+	for _, t := range p.tuned {
+		if stale {
+			for _, c := range t.chains {
+				c.Reset()
+			}
+		}
+		if !t.fed && !t.ran {
+			continue
+		}
+		gain := gainFor(out, t.volume) * full
+		for c, chain := range t.chains {
+			// The tuning's limiter holds a fixed ceiling.
+			chain.Process(t.lanes[c], t.volume)
+		}
+		right := t.lanes[len(t.lanes)-1]
+		for i, j := 0, 0; i < len(sum); i, j = i+Channels, j+1 {
+			sum[i] += t.lanes[0][j] * gain
+			sum[i+1] += right[j] * gain
+		}
+		for _, l := range t.lanes {
+			clear(l)
+		}
+		t.ran, t.fed = t.fed, false
+	}
+}
+
+func (t *tunedStream) feed(samples []int16, mono bool) {
+	for i, j := 0, 0; i < len(samples); i, j = i+Channels, j+1 {
+		l, r := frame(samples, i)
+		l, r = l/full, r/full
+		if mono {
+			t.lanes[0][j] += (l + r) / 2
+			continue
+		}
+		t.lanes[0][j] += l
+		if len(t.lanes) > 1 {
+			t.lanes[1][j] += r
+		}
+	}
+	t.fed = true
+}
+
+func addScaled(sum []float32, samples []int16, gain float32, mono bool) {
+	for i := 0; i < len(samples); i += Channels {
+		l, r := frame(samples, i)
+		l, r = l*gain, r*gain
 		if mono {
 			l = (l + r) / 2
 			r = l
 		}
-		if tuned {
-			p.lanes[0][j] = float32(mix.Clamp(l)) / full
-			if p.stereo {
-				p.lanes[1][j] = float32(mix.Clamp(r)) / full
-			}
-			continue
-		}
-		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(mix.Clamp(l))*gain)))
-		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(int16(float32(mix.Clamp(r))*gain)))
+		sum[i] += l
+		sum[i+1] += r
 	}
-	if tap != nil {
-		tap.Offer(p.tapBuf[:period*Channels])
-	}
-	if !tuned {
-		return
-	}
+}
 
-	stale := p.stale.Swap(false)
-	share := float64(p.step.Load()) / VolumeSteps
-	for c, chain := range p.chains {
-		if stale {
-			chain.Reset()
-		}
-		// The tuning's limiter holds a fixed ceiling.
-		chain.Process(p.lanes[c], share)
+func frame(samples []int16, i int) (l, r float32) {
+	l = float32(samples[i])
+	if i+1 < len(samples) {
+		r = float32(samples[i+1])
 	}
-	right := p.lanes[len(p.lanes)-1]
-	for i, j := 0, 0; i < period*Channels; i, j = i+Channels, j+1 {
-		binary.LittleEndian.PutUint16(buf[i*2:], uint16(mix.Clamp(int32(p.lanes[0][j]*full*gain))))
-		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(mix.Clamp(int32(right[j]*full*gain))))
-	}
+	return l, r
 }
 
 func (p *Player) Play(samples []int16) { p.PlayStream(config.StreamMedia, samples) }
@@ -501,7 +585,7 @@ func (p *Player) SetResampling(r config.Resampling) config.Resampling {
 }
 
 func (p *Player) SetASP(on bool) bool {
-	on = on && len(p.chains) > 0
+	on = on && p.tuning != nil
 	if on && !p.on.Load() {
 		p.stale.Store(true)
 	}
@@ -546,21 +630,17 @@ func (p *Player) Overlay(s config.Stream, samples []int16) {
 	p.bus.Overlay(s, samples)
 }
 
-func (p *Player) SetLevel(s config.Stream, level int) { p.bus.SetGain(s, volume.Gain(level)) }
+func (p *Player) SetLevel(s config.Stream, level int) {
+	p.bus.SetGain(s, float32(volume.Clamp(level))/100)
+}
 
 func (p *Player) Mute(s config.Stream, on bool) { p.bus.Mute(s, on) }
 
 func (p *Player) Muted(s config.Stream) bool { return p.bus.Muted(s) }
 
-func (p *Player) SetVolume(step int) {
-	step = max(0, min(step, VolumeSteps))
-	p.step.Store(int32(step))
-	p.volume.Store(math.Float32bits(gainForStep(p.Output(), step)))
-}
+func (p *Player) SetVolume(step int) { p.step.Store(int32(max(0, min(step, VolumeSteps)))) }
 
 func (p *Player) Step() int { return int(p.step.Load()) }
-
-func (p *Player) Volume() float32 { return math.Float32frombits(p.volume.Load()) }
 
 func (p *Player) Close() error {
 	p.apply(p.sequences().close)

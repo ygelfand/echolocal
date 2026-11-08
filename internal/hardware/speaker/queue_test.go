@@ -2,7 +2,6 @@ package speaker
 
 import (
 	"encoding/binary"
-	"math"
 	"testing"
 
 	"github.com/ygelfand/echolocal/internal/config"
@@ -11,8 +10,7 @@ import (
 func TestRescalingWhatIsQueuedNeverPlaysSilence(t *testing.T) {
 	const periods = 200
 
-	p := &Player{}
-	p.volume.Store(math.Float32bits(1))
+	p := newTestPlayer()
 	queued := make([]int16, period*Channels*periods)
 	for i := range queued {
 		queued[i] = 1000

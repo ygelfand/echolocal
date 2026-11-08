@@ -29,7 +29,7 @@ func TestRouteForEachModeAndPlug(t *testing.T) {
 	}
 }
 
-func TestGainForStep(t *testing.T) {
+func TestGainForFollowsTheCurveAtEachStep(t *testing.T) {
 	cases := []struct {
 		out  Output
 		step int
@@ -45,24 +45,37 @@ func TestGainForStep(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got := gainForStep(c.out, c.step)
+		got := gainFor(c.out, float64(c.step)/VolumeSteps)
 		if math.Abs(float64(got-c.want)) > 0.001 {
-			t.Errorf("gainForStep(%s, %d) = %v, want %v", c.out, c.step, got, c.want)
+			t.Errorf("gainFor(%s, step %d) = %v, want %v", c.out, c.step, got, c.want)
 		}
 	}
 }
 
-func TestGainForStepClamps(t *testing.T) {
-	if got := gainForStep(OutputSpeaker, -5); got != 0 {
-		t.Errorf("gainForStep(speaker, -5) = %v, want 0", got)
+func TestGainForMainTimesLevelMatchesEitherWay(t *testing.T) {
+	a := gainFor(OutputSpeaker, 1.0*0.5)
+	b := gainFor(OutputSpeaker, 0.5*1.0)
+	if a != b || math.Abs(float64(a-0.398)) > 0.001 {
+		t.Errorf("main 100 level 50 = %v, main 50 level 100 = %v, want both 0.398", a, b)
 	}
-	if got := gainForStep(OutputSpeaker, 99); got != 1 {
-		t.Errorf("gainForStep(speaker, 99) = %v, want 1", got)
+	between := gainFor(OutputSpeaker, 15.5/VolumeSteps)
+	if between <= gainFor(OutputSpeaker, 0.5) ||
+		between >= gainFor(OutputSpeaker, 16.0/VolumeSteps) {
+		t.Errorf("half a step = %v, want between steps 15 and 16", between)
 	}
 }
 
-func TestGainForStepUnknownOutput(t *testing.T) {
-	if got := gainForStep(Output("bluetooth"), 30); got != 1 {
-		t.Errorf("gainForStep(bluetooth, 30) = %v, want 1", got)
+func TestGainForClamps(t *testing.T) {
+	if got := gainFor(OutputSpeaker, -0.2); got != 0 {
+		t.Errorf("gainFor(speaker, -0.2) = %v, want 0", got)
+	}
+	if got := gainFor(OutputSpeaker, 3); got != 1 {
+		t.Errorf("gainFor(speaker, 3) = %v, want 1", got)
+	}
+}
+
+func TestGainForUnknownOutput(t *testing.T) {
+	if got := gainFor(Output("bluetooth"), 1); got != 1 {
+		t.Errorf("gainFor(bluetooth, 1) = %v, want 1", got)
 	}
 }

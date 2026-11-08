@@ -12,6 +12,7 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/firmwarecmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/i2ccmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/mixercmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/netcmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/playercmd"
 
 	"github.com/ygelfand/echolocal/internal/android/prop"
@@ -39,6 +40,7 @@ func (c *Control) tree() *cobra.Command {
 	t.Top(setCommand())
 	t.Top(firmwarecmd.Command(firmware.Get))
 	t.Top(blecmd.Command(ble.Get()))
+	t.Top(netcmd.Command(layout.WifiIface))
 	showing(t)
 	return t.Root()
 }
