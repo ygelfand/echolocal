@@ -35,6 +35,7 @@ func Load(path string) (*Store, error) {
 		func(data []byte, c *Config) error { return schema.MigrateAccess(data, &c.Access) },
 		func(data []byte, c *Config) error { return schema.MigrateDoorbell(data, &c.Doorbell) },
 		func(data []byte, c *Config) error { return schema.MigrateHome(data, &c.Home) },
+		func(data []byte, c *Config) error { return schema.MigrateTodo(data, &c.Todo) },
 		func(data []byte, c *Config) error { return schema.MigrateLounge(data, &c.Lounge) },
 	)
 	shared := schema.NewSections(func() *storage.Store[Config] { return s }, sharedOf).Writer()
