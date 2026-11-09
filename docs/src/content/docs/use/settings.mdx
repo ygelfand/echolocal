@@ -182,10 +182,12 @@ What the page holds depends on the mode ([Dashboards](/use/dashboards/)).
 | Setting | What it does | Choices | Default | Entity |
 |---|---|---|---|---|
 | Close paused player after | Close the player card when paused this long | 1, 3, 5, 10, 15 min, Never | 5 min | `select.<device>_screen_close_paused_player_after` |
-| Mode | The native dashboard, [Tessera](/use/dashboards/#tessera) or a [Home Assistant dashboard](/use/dashboards/#home-assistant). Shown when home control is on and Home Assistant actions are allowed | Native, Tessera, Home Assistant | Native | — |
+| Mode | The native dashboard, [Rings](/use/dashboards/#rings), [Tessera](/use/dashboards/#tessera) or a [Home Assistant dashboard](/use/dashboards/#home-assistant). Shown when home control is on and Home Assistant actions are allowed | Native, Rings, Tessera, Home Assistant | Native | — |
+| Look, Depth, Details | Rings: how the rings are drawn, how many show at once, and which side a device's controls open on ([Rings](/use/dashboards/#rings)) | Wheel, Icicle, Burst; 1–4; Right / bottom, Left / top | Wheel, 3, Right / bottom | — |
+| Floors, Areas, Types, Labels | Rings: floors, rooms and device types to leave out, and labels to show only | | All shown | — |
 | Show as, Dashboard, View | Home Assistant: the user to sign in as (one the EchoLocal integration allows), and the dashboard and view to show | | | — |
 | Theme | Home Assistant: one of Home Assistant's themes for this screen | Home Assistant default, or any theme in Home Assistant | Home Assistant default | — |
-| Clock → | Native: face, placement, size, color, date ([below](#clock)) | | | |
+| Clock → | Native: face, placement, size, color, date ([below](#clock)). Rings: the face and color of the clock in the center | | | |
 | Weather → | Native: the weather card ([below](#weather)) | | | |
 | Lights, Switches → | Native: **Enable**, then **Select devices** by label or by hand, **Group by area** from N devices (0–5, default 2), and **Include switches** in the lights view ([Lights and switches](/use/dashboards/#lights-and-switches)) | | Off | — |
 | Screen saver | Tessera or Home Assistant: the native screen saver, Tessera's, or a Home Assistant dashboard | Native, Tessera, Home Assistant | Native | `select.<device>_screen_screen_saver_mode` |
@@ -398,7 +400,7 @@ lock.
 | Setting | What it does | Default | Entity |
 |---|---|---|---|
 | ADB over network | An unauthenticated root shell on port 5555. Anyone on your network can use it | Off | `switch.<device>_adb_over_network` |
-| Show touches | Draw every finger on the screen with crosshairs, and the number of fingers down and the last gesture in a corner | Off | `switch.<device>_screen_show_touches` |
+| Show touches | **Dots**: a dot under each finger. **Details**: every finger with crosshairs, and the number of fingers down and the last gesture in a corner | Off | `select.<device>_screen_show_touches` |
 | Visuals | A full-screen gallery of every visual | | `select.<device>_screen_visual` |
 | Visual frame rate limit | Cap the visuals' frame rate | 60 | `select.<device>_screen_visual_frame_cap` |
 | Visual seed | Fix a visual's random layout (0 is random) | 0 | `number.<device>_screen_visual_seed` |

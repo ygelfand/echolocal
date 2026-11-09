@@ -29,7 +29,7 @@ On the Echo Shows only.
 | Size | mini | mini, compact, medium, large, xlarge | `select.<device>_screen_size` |
 | Style | standard | standard, material, glass, eink, metro, terminal, hifi, neon, skeuo | `select.<device>_screen_style` |
 | Timer style | Bar | Bar, Banner, Dial, Full screen, Clock face, Corner | `select.<device>_screen_timer_style` |
-| Show touches | Off | On, Off | `switch.<device>_screen_show_touches` |
+| Show touches | Off | Off, Dots, Details | `select.<device>_screen_show_touches` |
 | Theme | Default | Default, Midnight, Nocturne, Slate, Ember, Forest, Ocean, Plum, Carbon, Phosphor, Amber, Graphite, Synthwave, Paper, Linen, Mist, Bloom, Braun, Ink, Custom | `select.<device>_screen_theme` |
 | Custom theme accent | #2f6fdb | Text | `text.<device>_screen_custom_theme_accent` |
 | Custom theme second accent | #7a5af0 | Text | `text.<device>_screen_custom_theme_second_accent` |
@@ -171,7 +171,7 @@ On the Echo Shows only.
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
 | Show completed items | off | On, Off | On the screen only |
-| To-do list | — | Text | On the screen only |
+| To-do lists | — | Text | On the screen only |
 
 ## Cameras
 
@@ -356,6 +356,7 @@ On the Echo Dot only.
 | Call a device | On | On, Off | `switch.<device>_voice_triggers_call_a_device` |
 | Answer a call | On | On, Off | `switch.<device>_voice_triggers_answer_a_call` |
 | Hang up a call | On | On, Off | `switch.<device>_voice_triggers_hang_up_a_call` |
+| Watch YouTube TV (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_watch_youtube_tv` |
 | All actions | On | On, Off | `switch.<device>_voice_triggers_all_actions` |
 | Mirror (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_mirror` |
 | Radar (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_radar` |
@@ -450,6 +451,7 @@ On the Echo Shows only.
 |---|---|---|---|
 | Headphone jack (Echo Show 5, Echo Show 8, Echo Dot) | Auto | Auto, On, Off | `select.<device>_playback_headphone_jack` |
 | Speaker EQ | On, where the Echo's own audio tuning loads | On, Off | `switch.<device>_playback_speaker_eq` |
+| Speaker gain | 6 | 0 to 12 | `number.<device>_playback_speaker_gain` |
 | Speaker (Echo Show 5, Echo Show 8, Echo Dot) | Auto | Auto, On, Off | `select.<device>_playback_speaker` |
 | Voice resampling | Band limited | On, Off | On the screen only |
 
@@ -491,4 +493,15 @@ On the Echo Shows only.
 | Install version | Select for rollback | The available versions | `select.<device>_install_version` |
 | Time zone | Home Assistant | Home Assistant, UTC, Europe/London, Europe/Lisbon, Europe/Paris, Europe/Berlin and 34 more | `select.<device>_time_zone` |
 | Update channel | stable | stable, dev | `select.<device>_update_channel` |
+
+## Home
+
+On the Echo Shows only.
+
+| Setting | Default | Choices | Entity |
+|---|---|---|---|
+| Rings: hidden areas | — | Text | On the screen only |
+| Rings: hidden floors | — | Text | On the screen only |
+| Rings: hidden types | — | Text | On the screen only |
+| Rings: labels | — | Text | On the screen only |
 

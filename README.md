@@ -95,6 +95,8 @@ on the action button.
 
 - A native dashboard with 21 clock faces, photo wallpaper, weather, lights, switches, cameras,
   doorbells and your Home Assistant alarm panel
+- A Rings dashboard: floors, rooms, device types and devices as rings you tap to zoom into, with
+  controls for each device
 - [Tessera](https://github.com/MaxGramser/homeassistant_espscreen) dashboards, using the native
   renderer or embedded Tessera firmware
 - 33 audio visuals on the GPU, for the screen saver or for each assistant while it listens and
@@ -112,6 +114,10 @@ on the action button.
   integration, and full-screen Lights and Switches apps
 - Settings on the screen or from Home Assistant, a PIN to lock them, and config sync between
   devices
+
+<p align="center">
+  <a href="https://www.echolocal.link/use/dashboards/#rings"><img src="docs/public/anim/rings-icicle.webp" alt="The Rings dashboard in the Icicle look, zooming into a room and opening a light's color controls" width="640"></a>
+</p>
 
 ## The optional integration
 

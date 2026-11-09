@@ -18,6 +18,8 @@ The dashboard is the device's home screen. Choose its **Mode** in
 
 - **Native**: a big clock, the weather, and tabs for your lights, switches, cameras, doorbells and
   alarm panel
+- **Rings**: your home as rings of floors, rooms, device types and devices; tap to zoom in and
+  control a device
 - **Tessera**: pages of tiles you lay out in Tessera in Home Assistant, drawn by Tessera's own screen
   software running on the device
 - **Home Assistant**: one of your [Home Assistant dashboards](#home-assistant)
@@ -97,6 +99,43 @@ turn on **Settings → Display → Screen saver → Weather → Show on screen s
 full-screen alarm or a spoken announcement. Checks run every five minutes; use official emergency
 alerts for time-critical warnings.
 
+
+## Rings
+
+Rings draws your Home Assistant devices around a center: floors (when you have two or more), then
+rooms, then device types, then the devices themselves. Each floor and room keeps its own color.
+The center shows the clock, in the face chosen under **Clock**, and how many devices are on.
+
+<video src="/anim/rings-burst.mp4" class="screen-wide" autoplay loop muted playsinline controls aria-label="The Burst look: zooming into a floor and a room, then opening a light's controls"></video>
+
+- Tap a ring to zoom into it; tap the center to go back up.
+- Tap a device to open its controls beside the rings: power, brightness and color for lights,
+  temperature for climate, open and close for covers, lock and unlock for locks, and playback for
+  media.
+- The close button puts the controls away.
+- On/off and other states update live. The refresh button in the corner reloads rooms, floors,
+  names and new devices from Home Assistant; otherwise they reload every 10 minutes.
+
+The device types are Lights, Switches, Media, Climate, Fans, Covers, Locks, Access (doors, windows
+and garage doors), Presence (motion and occupancy sensors) and Cameras.
+
+In **Settings → Dashboard**, with **Mode** set to **Rings**:
+
+| Setting | What it does |
+|---|---|
+| Clock | The face and color of the clock in the center |
+| Look | **Wheel**: rings around a round center. **Icicle**: rows hanging from a bar along the top. **Burst**: rings that fill the screen out to its edges |
+| Depth | How many rings show at once, 1–4 (3 by default) |
+| Details | Where a device's controls open: **Right / bottom** or **Left / top** |
+| Floors | Floors to leave out, **No floor** included |
+| Areas | Rooms to leave out, **No area** included |
+| Types | Device types to leave out |
+| Labels | Show only devices with these Home Assistant labels |
+
+<video src="/anim/rings-icicle.mp4" class="screen-wide" autoplay loop muted playsinline controls aria-label="The Icicle look: four rows, then three, then a light's color controls"></video>
+
+Device controls require **Allow the device to perform Home Assistant actions** in the device's
+ESPHome integration options.
 
 ## Home Assistant
 
