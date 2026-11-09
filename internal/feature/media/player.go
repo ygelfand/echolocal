@@ -121,7 +121,7 @@ func build() *Player {
 	}
 
 	p.Player = mediaplayer.New(mediaplayer.Options[*speaker.Player]{
-		Speaker:  speaker.Get(),
+		Media:    speaker.Get().Lane(config.StreamMedia),
 		Sound:    speaker.Sound(),
 		Rate:     speaker.Rate,
 		Channels: speaker.Channels,

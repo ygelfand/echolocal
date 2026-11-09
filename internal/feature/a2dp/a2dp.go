@@ -26,7 +26,7 @@ var shared *sharedspeaker.Sink
 
 func build() *sharedspeaker.Sink {
 	return sharedspeaker.New(sharedspeaker.Dependencies{
-		Queue:            speaker.Get(),
+		Queue:            speaker.Get().Lane(config.StreamMedia),
 		Radio:            ble.Get,
 		Bonds:            layout.StateDir + "/bonds",
 		CaptureDirectory: "/data/local/tmp",

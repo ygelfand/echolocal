@@ -13,7 +13,7 @@ func New() *playout.Output {
 	a := speaker.Sound().Backgrounds()
 	return playout.New(
 		playout.Options{
-			Queue:    speaker.Get(),
+			Queue:    speaker.Get().Lane(config.StreamMedia),
 			Rate:     speaker.Rate,
 			Channels: speaker.Channels,
 			DuckDB:   func() float64 { return config.Get().Media.DuckDB },

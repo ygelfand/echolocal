@@ -18,7 +18,7 @@ func (device) Play(pcm []int16) {
 	speaker.Get().PlayStream(config.StreamVoice, pcm)
 }
 
-func (device) Queued() int { return speaker.Get().Queued() }
+func (device) Queued() int { return speaker.Get().Lane(config.StreamVoice).Queued() }
 
 func (device) Claim(name string, run func(context.Context) error) {
 	speaker.Sound().

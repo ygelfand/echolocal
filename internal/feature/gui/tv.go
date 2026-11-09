@@ -11,15 +11,13 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/display/tvapp"
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
 	"github.com/ygelfand/libcountertop/pkg/fetch"
-	"github.com/ygelfand/libcountertop/pkg/homeassistant/yttv"
 	"github.com/ygelfand/libcountertop/pkg/settings/schema"
 
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/apps"
-	"github.com/ygelfand/echolocal/internal/feature/chromecast"
 	"github.com/ygelfand/echolocal/internal/feature/media"
-	"github.com/ygelfand/echolocal/internal/feature/product"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
+	featuretv "github.com/ygelfand/echolocal/internal/feature/tv"
 	"github.com/ygelfand/echolocal/internal/feature/volume"
 )
 
@@ -27,7 +25,7 @@ func extendTV(look *widgets.UI, o *screens.Options, app func() *screens.App) {
 	tv := tvapp.New(tvapp.Options{
 		UI:      look,
 		Shell:   shell.Get(),
-		Guide:   yttv.Build(product.Get(), config.TVSection, chromecast.ID),
+		Guide:   featuretv.Get(),
 		Player:  media.Get(),
 		Loud:    func() { volume.Get().Show(config.StreamMedia) },
 		Client:  fetch.Client(musicapp.FetchTime),

@@ -556,6 +556,19 @@ func (p *Player) PlayStream(s config.Stream, samples []int16) {
 
 func (p *Player) Take() []int16 { return p.bus.Take(config.StreamMedia) }
 
+type Lane struct {
+	p *Player
+	s config.Stream
+}
+
+func (p *Player) Lane(s config.Stream) Lane { return Lane{p: p, s: s} }
+
+func (l Lane) Play(samples []int16)         { l.p.PlayStream(l.s, samples) }
+func (l Lane) Take() []int16                { return l.p.bus.Take(l.s) }
+func (l Lane) Adjust(rewrite func([]int16)) { l.p.bus.Adjust(l.s, rewrite) }
+func (l Lane) Queued() int                  { return l.p.bus.StreamLen(l.s) / Channels }
+func (l Lane) Drain()                       { l.p.bus.ClearStream(l.s) }
+
 func (p *Player) Adjust(rewrite func([]int16)) { p.bus.Adjust(config.StreamMedia, rewrite) }
 
 func (p *Player) Heard(s config.Stream, within time.Duration) bool { return p.bus.Heard(s, within) }
