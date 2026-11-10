@@ -35,13 +35,14 @@ Home Assistant and browser interface.
 
 ## Devices
 
-| Device                | Codename | OS          | Status    |
-| --------------------- | -------- | ----------- | --------- |
-| Echo Dot (2nd gen)    | biscuit  | Fire OS 6.x | Supported |
-| Echo Show 5 (1st gen) | checkers | Fire OS 6.x | Supported |
-| Echo Show 5 (2nd gen) | cronos   | Fire OS 6.x | Supported |
-| Echo Show 8 (1st gen) | crown    | Fire OS 6.x | Supported |
-| Echo Show 8 (2nd gen) | athena   | Fire OS 7.x | Supported |
+| Device                | Codename | OS          | Status       |
+| --------------------- | -------- | ----------- | ------------ |
+| Echo Dot (2nd gen)    | biscuit  | Fire OS 6.x | Supported    |
+| Echo (2nd gen)        | radar    | Fire OS 6.x | Experimental |
+| Echo Show 5 (1st gen) | checkers | Fire OS 6.x | Supported    |
+| Echo Show 5 (2nd gen) | cronos   | Fire OS 6.x | Supported    |
+| Echo Show 8 (1st gen) | crown    | Fire OS 6.x | Supported    |
+| Echo Show 8 (2nd gen) | athena   | Fire OS 7.x | Supported    |
 
 ## Additional devices supported by our sister project [LANovo](https://github.com/ygelfand/LANovo)
 
