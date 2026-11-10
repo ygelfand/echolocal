@@ -1,0 +1,6 @@
+# Embedded byte for byte into the binaries and written to devices, where some are checked against a
+# hash: a checkout must never convert them to CRLF, whatever core.autocrlf says.
+internal/host/assets/patch/** text eol=lf
+internal/host/assets/models/*.json text eol=lf
+internal/parts/*.rc text eol=lf
+internal/ui/reveal/*.glsl text eol=lf

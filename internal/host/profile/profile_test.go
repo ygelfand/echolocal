@@ -3,6 +3,7 @@ package profile
 import (
 	"testing"
 
+	"github.com/ygelfand/echolocal/internal/host/assets"
 	"github.com/ygelfand/echolocal/internal/host/sysimg"
 )
 
@@ -68,5 +69,22 @@ func TestRadarResolves(t *testing.T) {
 	}
 	if p.Board.Codename != "radar" || p.Boot.Device != "radar_puffin" {
 		t.Errorf("radar_puffin resolved to board %s with a %s image", p.Board, p.Boot.Device)
+	}
+}
+
+// Regression: a Windows checkout with core.autocrlf rewrote the embedded fstab with CRLF endings,
+// and the installer refused its own copy halfway through flashing a radar.
+func TestEveryPatchAProfileWritesIsTheOneItsHashNames(t *testing.T) {
+	for device, p := range profiles {
+		for _, patch := range p.System.Patches {
+			data, err := assets.Patch(patch.File)
+			if err != nil {
+				t.Errorf("%s: %v", device, err)
+				continue
+			}
+			if err := patch.Verify(data); err != nil {
+				t.Errorf("%s: %v", device, err)
+			}
+		}
 	}
 }
