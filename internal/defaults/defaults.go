@@ -42,6 +42,7 @@ func show5() Set {
 
 var sets = map[string]Set{
 	board.Biscuit.Device:  biscuit,
+	board.Radar.Device:    biscuit,
 	board.Checkers.Device: show5(),
 	board.Cronos.Device:   show5(),
 	board.Crown.Device:    show5(),

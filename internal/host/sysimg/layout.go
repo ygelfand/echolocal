@@ -51,6 +51,24 @@ var Biscuit = Layout{
 	OTAValue:   OTAValue,
 }
 
+// Radar's system partition is biscuit's, except that default.prop carries radar's own build
+// identity: it is edited in place rather than replaced with biscuit's copy.
+var Radar = Layout{
+	Partitions: []Partition{{Name: "system", VerityOffset: VerityOffset}},
+	Policy:     "sepolicy",
+	Patches:    []Patch{Fstab},
+	Adbd:       Adbd,
+	OTAKey:     OTAKey,
+	OTAValue:   OTAValue,
+	PropsPath:  "default.prop",
+	Props: map[string]string{
+		"ro.secure":              "0",
+		"ro.adb.secure":          "0",
+		"ro.debuggable":          "1",
+		"persist.sys.usb.config": "mtp,adb",
+	},
+}
+
 // Checkers and Cronos keep their root filesystem in the boot ramdisk.
 var (
 	Checkers = Layout{

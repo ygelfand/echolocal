@@ -58,6 +58,7 @@ func TestOnlyBoardsWithADeviceCanMatch(t *testing.T) {
 		"crown":    "crown",
 		"athena":   "athena",
 		"rook":     "rook",
+		"radar":    "radar_puffin",
 	}
 
 	for _, b := range All {
@@ -87,6 +88,13 @@ func TestFor(t *testing.T) {
 	if b, ok := For("biscuit"); !ok || b.Codename != "biscuit" {
 		t.Errorf(`For("biscuit") = %v, %v; want biscuit`, b, ok)
 	}
+	if b, ok := For("radar_puffin"); !ok || b.Codename != "radar" {
+		t.Errorf(`For("radar_puffin") = %v, %v; want radar`, b, ok)
+	}
+	// A recovery may report the bare codename, as biscuit's does.
+	if b, ok := For("radar"); !ok || b.Codename != "radar" {
+		t.Errorf(`For("radar") = %v, %v; want radar`, b, ok)
+	}
 	if _, ok := For("sailfish"); ok {
 		t.Error("For matched a device this build has never heard of")
 	}
@@ -98,7 +106,7 @@ func TestUnsupportedBoardsClaimNothing(t *testing.T) {
 	}
 	supported := map[string]bool{
 		Biscuit.Device: true, Checkers.Device: true, Cronos.Device: true,
-		Crown.Device: true, Athena.Device: true, Rook.Device: true,
+		Crown.Device: true, Athena.Device: true, Rook.Device: true, Radar.Device: true,
 	}
 
 	for _, b := range All {
