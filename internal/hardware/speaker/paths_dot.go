@@ -2,6 +2,11 @@
 
 package speaker
 
+import (
+	"log/slog"
+	"slices"
+)
+
 var initSequence = []kctl{
 	{name: "HPL Output Mixer L_DAC Switch", level: 1},
 	{name: "HPR Output Mixer R_DAC Switch", level: 1},
@@ -49,7 +54,47 @@ const driverGain = "HP Driver Gain Volume"
 
 func GainRange() (lo, hi int, ok bool) { return 0, 12, true }
 
-func sequencesFor(func(control string) bool) sequences {
+// radar's codec adds three controls biscuit does not have.
+const (
+	// MFP2 gates the external amplifier: "On" holds it off, and that is how the driver leaves it.
+	mfpMute = "MFP Gpio Mute"
+	// The internal driver's own enable. Ext_Speaker_Amp_Switch is shared with the line-out here.
+	speakerAmp = "Speaker_Amp_Switch"
+	outputMux  = "Headphone_Speaker_Mux"
+)
+
+var radarClose = append(slices.Clone(initSequence), kctl{name: speakerAmp, value: "Off"})
+
+var radarInit = append(slices.Clone(radarClose), kctl{name: mfpMute, value: "Off"})
+
+// The kernel may raise MFP2 again on close, so every path lowers it.
+var radarPath = map[Output][]kctl{
+	OutputSpeaker: append([]kctl{
+		{name: outputMux, value: "Speaker"},
+		{name: mfpMute, value: "Off"},
+		{name: AmpSwitch, value: "On"},
+	}, pathSequence[OutputSpeaker]...),
+	OutputHeadphone: append([]kctl{
+		{name: outputMux, value: "Headphone"},
+		{name: mfpMute, value: "Off"},
+		{name: AmpSwitch, value: "On"},
+	}, pathSequence[OutputHeadphone]...),
+}
+
+func sequencesFor(has func(control string) bool) sequences {
+	if has != nil && has(mfpMute) {
+		slog.Info("speaker amplifier", "gates", "radar")
+		return sequences{
+			init: radarInit,
+			// Only the driver's enable goes off: the shared switch would take the line-out with it.
+			on:    []kctl{{name: AmpSwitch, value: "On"}, {name: speakerAmp, value: "On"}},
+			off:   []kctl{{name: speakerAmp, value: "Off"}},
+			path:  radarPath,
+			leave: map[Output][]kctl{OutputHeadphone: headphoneOff},
+			close: radarClose,
+			gain:  driverGain,
+		}
+	}
 	return sequences{
 		init:  initSequence,
 		on:    []kctl{{name: AmpSwitch, value: "On"}},
