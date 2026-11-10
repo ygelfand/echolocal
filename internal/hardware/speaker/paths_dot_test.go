@@ -117,3 +117,12 @@ func TestRadarRoutesTheDACLikeBiscuit(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyRadarTurnsItsAmpOffWhenIdle(t *testing.T) {
+	if sequencesFor(func(string) bool { return false }).idleOff {
+		t.Error("biscuit's amplifier is switched off through silence")
+	}
+	if !sequencesFor(radarControls).idleOff {
+		t.Error("radar's amplifier is left on through silence")
+	}
+}

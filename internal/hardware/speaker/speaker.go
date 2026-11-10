@@ -65,6 +65,9 @@ type Player struct {
 	headphoneMode config.OutputMode
 	seq           sequences
 	gain          int32
+	ampOn         bool
+
+	idle ampIdle
 
 	voiceMu    sync.Mutex
 	voice      upsample.Resampler
@@ -245,6 +248,7 @@ func (p *Player) amp(on bool) {
 	p.pathMu.Lock()
 	defer p.pathMu.Unlock()
 
+	p.ampOn = on
 	if !p.routing.speaker {
 		return
 	}
@@ -382,7 +386,7 @@ func (p *Player) Run(ctx context.Context) error {
 			return nil
 		}
 
-		p.fill(buf)
+		p.gate(p.fill(buf))
 		if err := mix.Send(ctx, pb, buf, &p.underruns); err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -403,9 +407,29 @@ func (p *Player) SetTap(t mix.Tap) {
 	p.tap.Store(&tapTo{t})
 }
 
-func (p *Player) fill(buf []byte) {
+// gate switches the amplifier for silence on the boards that want it.
+func (p *Player) gate(playing bool) {
+	p.pathMu.Lock()
+	want, on := p.seq.idleOff, p.ampOn
+	p.pathMu.Unlock()
+	if !want {
+		return
+	}
+
+	switch p.idle.next(playing, on, time.Now()) {
+	case ampOn:
+		slog.Debug("speaker amplifier on, audio arrived")
+		p.amp(true)
+	case ampOff:
+		slog.Debug("speaker amplifier off, idle", "after", idleAfter)
+		p.amp(false)
+	}
+}
+
+// fill reports whether anything was queued or a source is attached: silence otherwise.
+func (p *Player) fill(buf []byte) bool {
 	const n = period * Channels
-	parts, take, _ := p.bus.Parts(p.written.Load(), n)
+	parts, take, rendered := p.bus.Parts(p.written.Load(), n)
 	if take > 0 && take < n {
 		p.splices.Add(1)
 	}
@@ -474,6 +498,7 @@ func (p *Player) fill(buf []byte) {
 	for i, v := range sum {
 		binary.LittleEndian.PutUint16(buf[i*2:], uint16(mix.Clamp(int32(v))))
 	}
+	return take > 0 || rendered
 }
 
 func (p *Player) runChains(out Output, sum []float32) {

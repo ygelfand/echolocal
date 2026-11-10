@@ -87,12 +87,13 @@ func sequencesFor(has func(control string) bool) sequences {
 		return sequences{
 			init: radarInit,
 			// Only the driver's enable goes off: the shared switch would take the line-out with it.
-			on:    []kctl{{name: AmpSwitch, value: "On"}, {name: speakerAmp, value: "On"}},
-			off:   []kctl{{name: speakerAmp, value: "Off"}},
-			path:  radarPath,
-			leave: map[Output][]kctl{OutputHeadphone: headphoneOff},
-			close: radarClose,
-			gain:  driverGain,
+			on:      []kctl{{name: AmpSwitch, value: "On"}, {name: speakerAmp, value: "On"}},
+			off:     []kctl{{name: speakerAmp, value: "Off"}},
+			path:    radarPath,
+			leave:   map[Output][]kctl{OutputHeadphone: headphoneOff},
+			close:   radarClose,
+			gain:    driverGain,
+			idleOff: true,
 		}
 	}
 	return sequences{
