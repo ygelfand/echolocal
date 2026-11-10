@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ygelfand/libcountertop/pkg/audio/fft"
@@ -262,6 +263,70 @@ func TestLoadRejectsAWrongLengthFilter(t *testing.T) {
 	}
 	if _, err := Load(dir, dotFiles); err == nil {
 		t.Fatal("a two-tap filter loaded as if it were the tuning")
+	}
+}
+
+// writeTuning puts one n-tap unit impulse under every EQ name in files, plus a usable limiter.
+func writeTuning(t *testing.T, files Files, n int) string {
+	t.Helper()
+	dir := t.TempDir()
+	var body strings.Builder
+	for i := range n {
+		v := "0.0"
+		if i == 0 {
+			v = "1.0"
+		}
+		body.WriteString(v + ",\n")
+	}
+	for _, s := range files.EQ {
+		if err := os.WriteFile(filepath.Join(dir, s.Name), []byte(body.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mbcl, err := json.Marshal(testMBCL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, files.Limiter), mbcl, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestAnUnsetTapCountIsTheUsualOne(t *testing.T) {
+	tuning, err := Load(writeTuning(t, dotFiles, defaultTaps), dotFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(tuning.taps[0]); got != defaultTaps {
+		t.Errorf("loaded %d taps, want %d", got, defaultTaps)
+	}
+}
+
+func TestABoardCanAskForLongerFilters(t *testing.T) {
+	files := dotFiles
+	files.Taps = 2048
+
+	tuning, err := Load(writeTuning(t, files, 2048), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tuning.Chain(384); err != nil {
+		t.Fatalf("a 2048-tap tuning does not build a chain: %v", err)
+	}
+}
+
+func TestLongerFiltersAreRefusedWhereTheBoardDoesNotExpectThem(t *testing.T) {
+	if _, err := Load(writeTuning(t, dotFiles, 2048), dotFiles); err == nil {
+		t.Fatal("a 2048-tap filter loaded on a board that ships 1024")
+	}
+}
+
+func TestANegativeTapCountIsRefused(t *testing.T) {
+	files := dotFiles
+	files.Taps = -1
+	if _, err := Load(t.TempDir(), files); err == nil {
+		t.Fatal("a negative tap count was accepted")
 	}
 }
 
