@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/ygelfand/libcountertop/pkg/input/textentry"
-
+	sharedwifi "github.com/ygelfand/libcountertop/pkg/network/wifi"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/runtime/webapi"
 	"github.com/ygelfand/libcountertop/pkg/runtime/webui"
@@ -21,6 +21,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/dhcp"
 	"github.com/ygelfand/echolocal/internal/feature/discovery"
 	"github.com/ygelfand/echolocal/internal/feature/web"
+	hwwifi "github.com/ygelfand/echolocal/internal/hardware/wifi"
 	"github.com/ygelfand/echolocal/internal/layout"
 )
 
@@ -53,6 +54,7 @@ var get = sync.OnceValue(func() *webapi.API {
 			}
 			return ""
 		},
+		Wifi: sharedwifi.NewMover(hwwifi.Get(), dhcp.Get().Fresh),
 	})
 	component.Settings.Add(a.Controls())
 	return a
