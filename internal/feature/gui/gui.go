@@ -10,6 +10,7 @@ import (
 
 	sharedvolume "github.com/ygelfand/libcountertop/pkg/audio/volume"
 	"github.com/ygelfand/libcountertop/pkg/display/screens"
+	sharedsettings "github.com/ygelfand/libcountertop/pkg/display/settings"
 	"github.com/ygelfand/libcountertop/pkg/display/shell"
 	"github.com/ygelfand/libcountertop/pkg/display/widgets"
 	"github.com/ygelfand/libcountertop/pkg/media/lyrics"
@@ -21,6 +22,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/board"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/a2dp"
 	"github.com/ygelfand/echolocal/internal/feature/assistant"
 	"github.com/ygelfand/echolocal/internal/feature/cameras"
 	"github.com/ygelfand/echolocal/internal/feature/chromecast"
@@ -123,10 +125,13 @@ var Get = sync.OnceValue(func() *screens.App {
 		DoorbellPage:    func() shell.View { return doorbell.View().Page() },
 		Player:          media.Get(),
 		PlayerPage:      media.Page,
-		Lyrics:          lyrics.Build(product.Get()),
-		MediaVolume:     sharedvolume.For(volume.Get(), config.StreamMedia),
-		Volume:          volume.Get(),
-		Streams:         config.Streams(),
+		BluetoothSources: func() shell.View {
+			return sharedsettings.BluetoothSourcesPage(a2dp.Get(), featureshell.Get())
+		},
+		Lyrics:      lyrics.Build(product.Get()),
+		MediaVolume: sharedvolume.For(volume.Get(), config.StreamMedia),
+		Volume:      volume.Get(),
+		Streams:     config.Streams(),
 
 		Upgrade: func() widgets.Upgrade {
 			if up := firmware.Get().Upgrade(); up.Active() {
