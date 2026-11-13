@@ -54,6 +54,7 @@ func build() *Light {
 				ObjectID: "ring",
 				Name:     "LED ring",
 				DeviceID: component.DeviceRing,
+				Category: esphome.CategoryConfig,
 			},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
 
@@ -76,6 +77,7 @@ func build() *Light {
 				Name:              fmt.Sprintf("LED ring segment %d", i+1),
 				DeviceID:          component.DeviceRing,
 				DisabledByDefault: true,
+				Category:          esphome.CategoryConfig,
 			},
 			SupportedColorModes: []esphome.ColorMode{esphome.ColorModeRGB},
 		}
