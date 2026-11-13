@@ -67,6 +67,7 @@ Each assistant has its own set, on its own sub-device. `N` is 1 or 2.
 | `number.<device>_assistant_N_max_listening_time` | Max listening time | Stop listening after this long | 5–60 s | 15 s |
 | `number.<device>_assistant_N_max_thinking_time` | Max thinking time | Give up waiting for Home Assistant after this long | 5–300 s | 90 s |
 | `number.<device>_assistant_N_recordings_kept` | Recordings kept | Keep the last N requests' audio, for the `recordings` action and the card's Activity tab | 0–10 | 0 |
+| `switch.<device>_assistant_N_wake_the_screen` | Wake the screen | Close the screen saver and end night mode when this assistant starts. Echo Shows only | On, Off | Off |
 
 The wake word and the Assist pipeline are picked with Home Assistant's own selects on the same
 device.
