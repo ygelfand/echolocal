@@ -9,6 +9,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/board"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/idle"
 	"github.com/ygelfand/echolocal/internal/feature/visuals"
 	"github.com/ygelfand/echolocal/internal/feature/voice"
 	"github.com/ygelfand/echolocal/internal/hardware/display"
@@ -26,7 +27,12 @@ func init() {
 }
 
 var get = sync.OnceValue(func() *sharedscreen.Assistant {
-	a := sharedscreen.New(sharedscreen.Dependencies{Microphone: mic.Get(), Controller: voice.Get()})
+	a := sharedscreen.New(sharedscreen.Dependencies{
+		Microphone: mic.Get(),
+		Controller: voice.Get(),
+		Words:      config.WakeSection,
+		Screen:     idle.Get(),
+	})
 	voice.Shown.Listen(a.Show)
 	return a
 })

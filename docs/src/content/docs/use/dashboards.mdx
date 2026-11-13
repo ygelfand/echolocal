@@ -22,7 +22,7 @@ The dashboard is the device's home screen. Choose its **Mode** in
   control a device
 - **Tessera**: pages of tiles you lay out in Tessera in Home Assistant, drawn by Tessera's own screen
   software running on the device
-- **Home Assistant**: one of your [Home Assistant dashboards](#home-assistant)
+- **HA**: one of your [Home Assistant dashboards](#home-assistant)
 
 **Mode** shows when home control is on and Home Assistant actions are allowed; otherwise the
 dashboard is native. The button beside it reloads the dashboard from Home Assistant.
@@ -151,7 +151,7 @@ without Home Assistant's header or sidebar.
 2. In the device's ESPHome integration options, turn on **Allow the device to perform Home
    Assistant actions**.
 
-3. On the device, set **Settings → Dashboard → Mode** to **Home Assistant**, then pick
+3. On the device, set **Settings → Dashboard → Mode** to **HA**, then pick
    **Show as** (one of the allowed users), **Dashboard** and **View**.
 
 </Steps>
@@ -159,7 +159,11 @@ without Home Assistant's header or sidebar.
 **Theme** on the same page picks one of Home Assistant's themes for this screen only. The dashboard
 switches between the theme's light and dark mode with the device's own theme.
 
-Set **Screen saver** on the same page to **Home Assistant** to show a dashboard while the device
+Tap a text field on the dashboard to type into it with the on-screen keyboard. The dashboard moves
+up to keep the field above the keyboard. **Enter** works like the Enter key; **Hide** puts the
+keyboard away.
+
+Set **Screen saver** on the same page to **HA** to show a dashboard while the device
 rests. **Screensaver dashboard** and **Screensaver view** then pick which one. When they match the
 dashboard and view above, the open page carries on as the screen saver. Tap the screen to wake
 it. When night mode dims to a clock or turns off the screen, the night mode's screen shows instead.
