@@ -66,13 +66,16 @@ func take(e buttons.Event) bool {
 	if e.Kind != buttons.Tap {
 		return false
 	}
-	if c, ok := Get().Now(); !ok || c.State != sharedcall.Ringing {
+	c, ok := Get().Now()
+	if !ok {
 		return false
 	}
-	switch e.Name {
-	case buttons.Action:
+	switch {
+	case c.State == sharedcall.Ringing && e.Name == buttons.Action:
 		Get().AnswerAudio()
-	case buttons.VolumeDown:
+	case c.State == sharedcall.Ringing && e.Name == buttons.VolumeDown:
+		Get().Hangup()
+	case (c.State == sharedcall.Talking || c.State == sharedcall.Calling) && e.Name == buttons.Action:
 		Get().Hangup()
 	default:
 		return false
