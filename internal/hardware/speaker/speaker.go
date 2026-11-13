@@ -407,7 +407,6 @@ func (p *Player) SetTap(t mix.Tap) {
 	p.tap.Store(&tapTo{t})
 }
 
-// gate switches the amplifier for silence on the boards that want it.
 func (p *Player) gate(playing bool) {
 	p.pathMu.Lock()
 	want, on := p.seq.idleOff, p.ampOn
@@ -426,7 +425,6 @@ func (p *Player) gate(playing bool) {
 	}
 }
 
-// fill reports whether anything was queued or a source is attached: silence otherwise.
 func (p *Player) fill(buf []byte) bool {
 	const n = period * Channels
 	parts, take, rendered := p.bus.Parts(p.written.Load(), n)

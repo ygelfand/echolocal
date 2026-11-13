@@ -50,7 +50,6 @@ func TestAudioLeavesAnOnAmpAlone(t *testing.T) {
 	}
 }
 
-// Audio between two silences starts the clock again, so a track's end is timed from its end.
 func TestAudioRestartsTheIdleClock(t *testing.T) {
 	var g ampIdle
 	g.next(false, true, start)
@@ -80,7 +79,6 @@ func TestFillReportsQueuedAudio(t *testing.T) {
 	}
 }
 
-// A live source places audio by frame and can start at any moment: it keeps the amp on.
 func TestFillReportsAnAttachedSource(t *testing.T) {
 	p := newTestPlayer()
 	p.Attach(&recorder{})
@@ -89,7 +87,6 @@ func TestFillReportsAnAttachedSource(t *testing.T) {
 	}
 }
 
-// The Shows never asked for it: their amplifiers are left as they were.
 func TestGateDoesNothingWhereTheBoardDoesNotWantIt(t *testing.T) {
 	p := newTestPlayer()
 	p.ampOn = true

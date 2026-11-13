@@ -94,8 +94,7 @@ var fbfV2 = geometry{
 	weightsFile: "coefs_FBFV2_LowLatency_8beams.cfg",
 }
 
-// radar's AFE.cfg runs fbfV2's front end on another square of the ring, with its own weights: its
-// FixedBeamFormerV2 Channel Map is [0,1,3,4], and its Mics Post AEC Output Gain is BoostdB 2.51.
+// radar's AFE.cfg: FixedBeamFormerV2 Channel Map [0,1,3,4], Mics Post AEC Output Gain BoostdB 2.51.
 func radarFBFV2() geometry {
 	g := fbfV2
 	g.name = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"

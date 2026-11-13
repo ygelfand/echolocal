@@ -45,7 +45,6 @@ func TestHiddenListsAreDistinct(t *testing.T) {
 	}
 }
 
-// default.prop carries the build fingerprint: biscuit's copy on a radar would misreport it.
 func TestRadarEditsItsOwnDefaultProp(t *testing.T) {
 	for _, p := range radar.System.Patches {
 		if p.Path == sysimg.DefaultProp.Path {
@@ -72,8 +71,6 @@ func TestRadarResolves(t *testing.T) {
 	}
 }
 
-// Regression: a Windows checkout with core.autocrlf rewrote the embedded fstab with CRLF endings,
-// and the installer refused its own copy halfway through flashing a radar.
 func TestEveryPatchAProfileWritesIsTheOneItsHashNames(t *testing.T) {
 	for device, p := range profiles {
 		for _, patch := range p.System.Patches {

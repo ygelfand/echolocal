@@ -85,7 +85,6 @@ var Crown = Image{
 	URL:  downloads + "echolocal-boot-crown.img",
 }
 
-// Fire OS build 12718777476's boot image, with androidboot.selinux=permissive on the cmdline.
 var Radar = Image{
 	SHA256:  "d43e09549323d86c4bd20d88f1efd37642122ed8b5ee740f338ab95978936451",
 	Size:    9762304,

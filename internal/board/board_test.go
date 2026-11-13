@@ -91,7 +91,6 @@ func TestFor(t *testing.T) {
 	if b, ok := For("radar_puffin"); !ok || b.Codename != "radar" {
 		t.Errorf(`For("radar_puffin") = %v, %v; want radar`, b, ok)
 	}
-	// A recovery may report the bare codename, as biscuit's does.
 	if b, ok := For("radar"); !ok || b.Codename != "radar" {
 		t.Errorf(`For("radar") = %v, %v; want radar`, b, ok)
 	}

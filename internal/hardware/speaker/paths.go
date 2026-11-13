@@ -32,12 +32,10 @@ type sequences struct {
 	close   []kctl
 	gain    string
 
-	// idleOff turns the amplifier off through silence, which it otherwise fills with hiss. radar only.
+	// radar's amplifier hisses whenever it is on.
 	idleOff bool
 }
 
-// Long enough to ride out the gaps inside a stream, and past the ALSA buffer and the tuning's tail,
-// so what was last written has played before the amplifier goes off.
 const idleAfter = 250 * time.Millisecond
 
 type ampChange int
@@ -48,13 +46,10 @@ const (
 	ampOff
 )
 
-// ampIdle decides when the write loop switches the amplifier for silence. Only that loop uses it.
 type ampIdle struct {
-	since time.Time // when the silence began; zero while something plays
+	since time.Time
 }
 
-// Turning on in the period the audio is written is early enough: the buffer still holds the
-// zeros written ahead of it.
 func (g *ampIdle) next(playing, on bool, now time.Time) ampChange {
 	if playing {
 		g.since = time.Time{}

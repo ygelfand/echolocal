@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// writeCoefs writes values one per line with a trailing comma, under a comment, as the vendor does.
 func writeCoefs(t *testing.T, path string, values []float32) {
 	t.Helper()
 	var b strings.Builder
@@ -22,7 +21,6 @@ func writeCoefs(t *testing.T, path string, values []float32) {
 	}
 }
 
-// radarDir lays out radar's files: fbfV2's window under its usual name, radar's weights under theirs.
 func radarDir(t *testing.T, weights []float32) string {
 	t.Helper()
 	g := radarFBFV2()
@@ -37,8 +35,6 @@ func radarWeightCount() int {
 	return g.Bands * g.Beams * g.Taps * g.Inputs() * 2
 }
 
-// Regression: radar's /vendor/etc/audio-algorithms holds coefs_FBFV2_4micsSq_8beams_idnr_m15_lowLatency.cfg,
-// which no geometry named, so radar ran without the vendor beamformer.
 func TestRadarsCoefficientsLoad(t *testing.T) {
 	w, err := Load(radarDir(t, make([]float32, radarWeightCount())))
 	if err != nil {
@@ -49,7 +45,6 @@ func TestRadarsCoefficientsLoad(t *testing.T) {
 	}
 }
 
-// radar's AFE.cfg: Channel Map [0,1,3,4], and the weights file's own header says mics 1,2,4,5 counting from one.
 func TestRadarUsesItsOwnSquareOfTheRing(t *testing.T) {
 	if got := radarFBFV2().mics; !slices.Equal(got, []int{0, 1, 3, 4}) {
 		t.Errorf("radar beamforms on mics %v, want [0 1 3 4]", got)
@@ -59,7 +54,6 @@ func TestRadarUsesItsOwnSquareOfTheRing(t *testing.T) {
 	}
 }
 
-// radar's AFE.cfg "Mics Post AEC Output Gain" BoostdB is 2.51, not the 7.2 the other front ends apply.
 func TestRadarBoostsByItsOwnGain(t *testing.T) {
 	if got := radarFBFV2().boostDB; got != 2.51 {
 		t.Errorf("radar boosts by %g dB, want 2.51", got)
@@ -69,8 +63,6 @@ func TestRadarBoostsByItsOwnGain(t *testing.T) {
 	}
 }
 
-// The file's own layout, checked on radar's copy: beams and microphones outside, then bands, then
-// taps, each weight as a real and imaginary pair.
 func TestRadarWeightsDecodeInTheVendorsOrder(t *testing.T) {
 	g := radarFBFV2()
 	const beam, mic, band, tap = 2, 3, 5, 1

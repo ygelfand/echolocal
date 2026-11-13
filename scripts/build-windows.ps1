@@ -1,20 +1,3 @@
-<#
-.SYNOPSIS
-    Builds echolocal.exe and the dot echod on Windows, as `make build-echolocal build-echod` does.
-
-.DESCRIPTION
-    The Makefile only knows Linux and macOS NDK layouts. This runs the same steps with the Windows
-    NDK: the Pryon and AirPlay helpers echod embeds, then the Go builds. It builds the default dot
-    binary (biscuit and radar), not the pinned Echo Show builds, which need more native parts.
-
-    Needs Go (the version in go.mod) on PATH and an Android NDK, r27c or later.
-
-.PARAMETER Ndk
-    The NDK root. Defaults to ANDROID_NDK_HOME.
-
-.EXAMPLE
-    .\scripts\build-windows.ps1 -Ndk C:\Android\android-ndk-r27c
-#>
 [CmdletBinding()]
 param(
     [string]$Ndk = $env:ANDROID_NDK_HOME
@@ -36,11 +19,9 @@ $bin = Join-Path $root 'bin'
 $parts = Join-Path $root 'internal\parts\payload'
 New-Item -ItemType Directory -Force $bin, $parts | Out-Null
 
-# Matches the Makefile: the dot is built against biscuit's Android API level.
 $api = (go run ./cmd/native-target biscuit).Trim()
 $native = Join-Path (go list -m -f '{{.Dir}}' github.com/ygelfand/libcountertop).Trim() 'native'
 
-# What armv7a-linux-androideabi<api>-clang.cmd passes; calling clang.exe directly keeps quoting sane.
 $target = @("--target=armv7a-linux-androideabi$api", '-fno-addrsig')
 $flags = @('-O2', '-Wall', '-Werror', "-I$native", '-DCOUNTERTOP_PREFIX="echolocal"')
 
@@ -56,7 +37,6 @@ $uxplay = "$airplay\uxplay"
 $openssl = "$airplay\third_party\openssl"
 $plist = "$airplay\third_party\libplist"
 
-# The prebuilt libraries are checked against their recorded hashes before anything links them.
 foreach ($dir in $openssl, $plist) {
     foreach ($line in Get-Content "$dir\SHA256SUMS") {
         if (-not $line.Trim()) { continue }

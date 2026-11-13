@@ -11,7 +11,6 @@ const VendorDir = "/vendor/etc/audio-algorithms"
 // The rate the tuning was designed at and the only rate the playback codec takes.
 const Rate = 48000
 
-// The filter length most boards ship. A file of any other length is a different tuning.
 const defaultTaps = 1024
 
 type Step struct {
@@ -22,9 +21,7 @@ type Step struct {
 type Files struct {
 	EQ      []Step
 	Limiter string
-
-	// Taps is how long every EQ filter is; zero means defaultTaps. radar ships 2048.
-	Taps int
+	Taps    int
 }
 
 func (f Files) Listed() bool { return len(f.EQ) > 0 && f.Limiter != "" }

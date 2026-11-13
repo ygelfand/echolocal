@@ -7,7 +7,6 @@ import (
 	"github.com/ygelfand/echolocal/internal/host/sysimg"
 )
 
-// radar is the 2nd-generation Echo.
 var radar = Profile{
 	Board:  board.Radar,
 	Boot:   bootimg.Radar,

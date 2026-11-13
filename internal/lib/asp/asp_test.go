@@ -266,7 +266,6 @@ func TestLoadRejectsAWrongLengthFilter(t *testing.T) {
 	}
 }
 
-// writeTuning puts one n-tap unit impulse under every EQ name in files, plus a usable limiter.
 func writeTuning(t *testing.T, files Files, n int) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -279,7 +278,11 @@ func writeTuning(t *testing.T, files Files, n int) string {
 		body.WriteString(v + ",\n")
 	}
 	for _, s := range files.EQ {
-		if err := os.WriteFile(filepath.Join(dir, s.Name), []byte(body.String()), 0o600); err != nil {
+		if err := os.WriteFile(
+			filepath.Join(dir, s.Name),
+			[]byte(body.String()),
+			0o600,
+		); err != nil {
 			t.Fatal(err)
 		}
 	}

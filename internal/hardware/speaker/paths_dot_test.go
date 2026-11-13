@@ -61,7 +61,6 @@ func TestBiscuitNeverTouchesRadarsGates(t *testing.T) {
 	}
 }
 
-// The driver leaves MFP2 high, which holds the amplifier off: radar plays nothing until it drops.
 func TestRadarOpensTheMFPGateOnStartAndOnEveryPath(t *testing.T) {
 	seqs := sequencesFor(radarControls)
 	which := map[string][]kctl{"init": seqs.init}
@@ -97,8 +96,6 @@ func TestRadarMuxFollowsTheOutput(t *testing.T) {
 	}
 }
 
-// Ext_Speaker_Amp_Switch feeds the line-out as well on radar: turning the speaker off must not
-// silence a plugged-in headphone.
 func TestRadarSpeakerOffLeavesTheLineOut(t *testing.T) {
 	seqs := sequencesFor(radarControls)
 	if _, ok := lastWrite(seqs.off, AmpSwitch); ok {

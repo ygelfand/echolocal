@@ -5,8 +5,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/lib/asp"
 )
 
-// Radar is the 2nd-generation Echo: biscuit's MT8163 platform in a bigger speaker, on the same
-// Fire OS 6 base, so it runs the same build and takes over the same service.
+// Radar is the 2nd-generation Echo.
 var Radar = Board{
 	Device:       "radar_puffin",
 	Codename:     "radar",
@@ -19,7 +18,7 @@ var Radar = Board{
 	NativeAPI:    25,
 	RadioZone:    "mtktswmt",
 
-	// radar skips EQ_90: 80% to full is one step. Its filters are twice biscuit's length.
+	// radar ships no EQ_90.cfg, and 2048-tap filters.
 	Tuning: asp.Files{
 		EQ: []asp.Step{
 			{UpTo: 0.3, Name: "EQ_30.cfg"},
