@@ -31,6 +31,40 @@ type sequences struct {
 	leave   map[Output][]kctl
 	close   []kctl
 	gain    string
+
+	// radar's amplifier hisses whenever it is on.
+	idleOff bool
+}
+
+const idleAfter = 250 * time.Millisecond
+
+type ampChange int
+
+const (
+	ampKeep ampChange = iota
+	ampOn
+	ampOff
+)
+
+type ampIdle struct {
+	since time.Time
+}
+
+func (g *ampIdle) next(playing, on bool, now time.Time) ampChange {
+	if playing {
+		g.since = time.Time{}
+		if !on {
+			return ampOn
+		}
+		return ampKeep
+	}
+	if g.since.IsZero() {
+		g.since = now
+	}
+	if on && now.Sub(g.since) >= idleAfter {
+		return ampOff
+	}
+	return ampKeep
 }
 
 // The kernel's headphone jack switch: 1 while something is plugged in.

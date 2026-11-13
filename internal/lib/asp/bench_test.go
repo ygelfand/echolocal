@@ -6,7 +6,7 @@ import (
 )
 
 func BenchmarkChain(b *testing.B) {
-	h := make([]float32, taps)
+	h := make([]float32, defaultTaps)
 	h[0] = 1
 	c, err := stepped(h).Chain(1024)
 	if err != nil {

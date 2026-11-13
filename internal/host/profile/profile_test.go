@@ -1,6 +1,11 @@
 package profile
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ygelfand/echolocal/internal/host/assets"
+	"github.com/ygelfand/echolocal/internal/host/sysimg"
+)
 
 // Fire OS 6 on biscuit has no package manager.
 func TestBiscuitHidesNothing(t *testing.T) {
@@ -35,6 +40,47 @@ func TestHiddenListsAreDistinct(t *testing.T) {
 
 			if pkg.Reason == "" {
 				t.Errorf("%s hides %s with no reason", device, pkg.Name)
+			}
+		}
+	}
+}
+
+func TestRadarEditsItsOwnDefaultProp(t *testing.T) {
+	for _, p := range radar.System.Patches {
+		if p.Path == sysimg.DefaultProp.Path {
+			t.Fatalf("radar replaces %s with %s", p.Path, p.File)
+		}
+	}
+	if radar.System.PropsPath != sysimg.DefaultProp.Path {
+		t.Errorf("radar edits %q, want %q", radar.System.PropsPath, sysimg.DefaultProp.Path)
+	}
+	for key, want := range map[string]string{"ro.secure": "0", "ro.adb.secure": "0"} {
+		if got := radar.System.Props[key]; got != want {
+			t.Errorf("radar sets %s=%q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestRadarResolves(t *testing.T) {
+	p, err := For("radar_puffin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Board.Codename != "radar" || p.Boot.Device != "radar_puffin" {
+		t.Errorf("radar_puffin resolved to board %s with a %s image", p.Board, p.Boot.Device)
+	}
+}
+
+func TestEveryPatchAProfileWritesIsTheOneItsHashNames(t *testing.T) {
+	for device, p := range profiles {
+		for _, patch := range p.System.Patches {
+			data, err := assets.Patch(patch.File)
+			if err != nil {
+				t.Errorf("%s: %v", device, err)
+				continue
+			}
+			if err := patch.Verify(data); err != nil {
+				t.Errorf("%s: %v", device, err)
 			}
 		}
 	}

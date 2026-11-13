@@ -2,6 +2,11 @@
 
 package speaker
 
+import (
+	"log/slog"
+	"slices"
+)
+
 var initSequence = []kctl{
 	{name: "HPL Output Mixer L_DAC Switch", level: 1},
 	{name: "HPR Output Mixer R_DAC Switch", level: 1},
@@ -49,7 +54,45 @@ const driverGain = "HP Driver Gain Volume"
 
 func GainRange() (lo, hi int, ok bool) { return 0, 12, true }
 
-func sequencesFor(func(control string) bool) sequences {
+const (
+	// "On" holds radar's external amplifier off, and the driver leaves it On.
+	mfpMute    = "MFP Gpio Mute"
+	speakerAmp = "Speaker_Amp_Switch"
+	outputMux  = "Headphone_Speaker_Mux"
+)
+
+var radarClose = append(slices.Clone(initSequence), kctl{name: speakerAmp, value: "Off"})
+
+var radarInit = append(slices.Clone(radarClose), kctl{name: mfpMute, value: "Off"})
+
+var radarPath = map[Output][]kctl{
+	OutputSpeaker: append([]kctl{
+		{name: outputMux, value: "Speaker"},
+		{name: mfpMute, value: "Off"},
+		{name: AmpSwitch, value: "On"},
+	}, pathSequence[OutputSpeaker]...),
+	OutputHeadphone: append([]kctl{
+		{name: outputMux, value: "Headphone"},
+		{name: mfpMute, value: "Off"},
+		{name: AmpSwitch, value: "On"},
+	}, pathSequence[OutputHeadphone]...),
+}
+
+func sequencesFor(has func(control string) bool) sequences {
+	if has != nil && has(mfpMute) {
+		slog.Info("speaker amplifier", "gates", "radar")
+		return sequences{
+			init: radarInit,
+			on:   []kctl{{name: AmpSwitch, value: "On"}, {name: speakerAmp, value: "On"}},
+			// On radar, Ext_Speaker_Amp_Switch also feeds the line-out.
+			off:     []kctl{{name: speakerAmp, value: "Off"}},
+			path:    radarPath,
+			leave:   map[Output][]kctl{OutputHeadphone: headphoneOff},
+			close:   radarClose,
+			gain:    driverGain,
+			idleOff: true,
+		}
+	}
 	return sequences{
 		init:  initSequence,
 		on:    []kctl{{name: AmpSwitch, value: "On"}},

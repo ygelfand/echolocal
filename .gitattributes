@@ -1,0 +1,4 @@
+internal/host/assets/patch/** text eol=lf
+internal/host/assets/models/*.json text eol=lf
+internal/parts/*.rc text eol=lf
+internal/ui/reveal/*.glsl text eol=lf

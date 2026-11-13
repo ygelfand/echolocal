@@ -18,6 +18,7 @@ var profiles = map[string]Profile{
 	board.Crown.Device:    crown,
 	board.Athena.Device:   athena,
 	board.Rook.Device:     rook,
+	board.Radar.Device:    radar,
 }
 
 type Profile struct {

@@ -35,3 +35,91 @@ func TestNoDotSequenceTurnsTheDACOff(t *testing.T) {
 		}
 	}
 }
+
+func radarControls(c string) bool { return c == mfpMute }
+
+func lastWrite(seq []kctl, name string) (kctl, bool) {
+	for i := len(seq) - 1; i >= 0; i-- {
+		if seq[i].name == name {
+			return seq[i], true
+		}
+	}
+	return kctl{}, false
+}
+
+func TestBiscuitNeverTouchesRadarsGates(t *testing.T) {
+	seqs := sequencesFor(func(string) bool { return false })
+	all := append(slices.Clone(seqs.init), seqs.on...)
+	all = append(all, seqs.off...)
+	for _, seq := range seqs.path {
+		all = append(all, seq...)
+	}
+	for _, k := range all {
+		if k.name == mfpMute || k.name == speakerAmp || k.name == outputMux {
+			t.Errorf("a biscuit sequence writes radar's %q", k.name)
+		}
+	}
+}
+
+func TestRadarOpensTheMFPGateOnStartAndOnEveryPath(t *testing.T) {
+	seqs := sequencesFor(radarControls)
+	which := map[string][]kctl{"init": seqs.init}
+	for out, seq := range seqs.path {
+		which["path "+string(out)] = seq
+	}
+	for name, seq := range which {
+		if k, ok := lastWrite(seq, mfpMute); !ok || k.value != "Off" {
+			t.Errorf("the %s sequence leaves %q at %+v", name, mfpMute, k)
+		}
+	}
+}
+
+func TestRadarStartsWithTheDriverOff(t *testing.T) {
+	seqs := sequencesFor(radarControls)
+	if k, ok := lastWrite(seqs.init, speakerAmp); !ok || k.value != "Off" {
+		t.Errorf("init leaves %q at %+v, want Off until the codec settles", speakerAmp, k)
+	}
+	if k, ok := lastWrite(seqs.on, speakerAmp); !ok || k.value != "On" {
+		t.Errorf("the on sequence leaves %q at %+v", speakerAmp, k)
+	}
+}
+
+func TestRadarMuxFollowsTheOutput(t *testing.T) {
+	seqs := sequencesFor(radarControls)
+	for out, want := range map[Output]string{
+		OutputSpeaker:   "Speaker",
+		OutputHeadphone: "Headphone",
+	} {
+		if k, ok := lastWrite(seqs.path[out], outputMux); !ok || k.value != want {
+			t.Errorf("the %s path sets %q to %+v, want %s", out, outputMux, k, want)
+		}
+	}
+}
+
+func TestRadarSpeakerOffLeavesTheLineOut(t *testing.T) {
+	seqs := sequencesFor(radarControls)
+	if _, ok := lastWrite(seqs.off, AmpSwitch); ok {
+		t.Errorf("the off sequence writes %q", AmpSwitch)
+	}
+	if k, ok := lastWrite(seqs.path[OutputHeadphone], AmpSwitch); !ok || k.value != "On" {
+		t.Errorf("the headphone path leaves %q at %+v", AmpSwitch, k)
+	}
+}
+
+func TestRadarRoutesTheDACLikeBiscuit(t *testing.T) {
+	seqs := sequencesFor(radarControls)
+	for _, name := range dacSwitches {
+		if k, ok := lastWrite(seqs.init, name); !ok || k.level != 1 {
+			t.Errorf("radar's init leaves %q at %+v", name, k)
+		}
+	}
+}
+
+func TestOnlyRadarTurnsItsAmpOffWhenIdle(t *testing.T) {
+	if sequencesFor(func(string) bool { return false }).idleOff {
+		t.Error("biscuit's amplifier is switched off through silence")
+	}
+	if !sequencesFor(radarControls).idleOff {
+		t.Error("radar's amplifier is left on through silence")
+	}
+}

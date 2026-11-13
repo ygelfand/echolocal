@@ -11,7 +11,7 @@ const VendorDir = "/vendor/etc/audio-algorithms"
 // The rate the tuning was designed at and the only rate the playback codec takes.
 const Rate = 48000
 
-const taps = 1024
+const defaultTaps = 1024
 
 type Step struct {
 	UpTo float64
@@ -21,9 +21,17 @@ type Step struct {
 type Files struct {
 	EQ      []Step
 	Limiter string
+	Taps    int
 }
 
 func (f Files) Listed() bool { return len(f.EQ) > 0 && f.Limiter != "" }
+
+func (f Files) taps() int {
+	if f.Taps == 0 {
+		return defaultTaps
+	}
+	return f.Taps
+}
 
 type Tuning struct {
 	files Files
@@ -35,9 +43,12 @@ func Load(dir string, files Files) (*Tuning, error) {
 	if !files.Listed() {
 		return nil, errors.New("asp: no tuning files are listed for this board")
 	}
+	if files.Taps < 0 {
+		return nil, fmt.Errorf("asp: a filter of %d taps", files.Taps)
+	}
 	t := &Tuning{files: files}
 	for _, s := range files.EQ {
-		h, err := readFloats(filepath.Join(dir, s.Name), taps)
+		h, err := readFloats(filepath.Join(dir, s.Name), files.taps())
 		if err != nil {
 			return nil, err
 		}
