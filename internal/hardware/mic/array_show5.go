@@ -18,6 +18,8 @@ var adcs = []string{"A"}
 
 const beamforming = false
 
+const delaySum = false
+
 var tunings []subband.Tuning
 
 const lowCutHz = 100

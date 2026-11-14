@@ -45,7 +45,9 @@ var mixes = sync.OnceValue(func() []mix {
 	if !beamforming {
 		return out
 	}
-	out = append(out, mix{config.MixDelaySum, func() Mixer { return NewBeamformer() }})
+	if delaySum {
+		out = append(out, mix{config.MixDelaySum, func() Mixer { return NewBeamformer() }})
+	}
 
 	w := vendor()
 	if w == nil {

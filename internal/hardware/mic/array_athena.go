@@ -13,6 +13,9 @@ const CenterMic = 0
 
 const beamforming = false
 
+// Four mics and no centre one: not the ring beam.go models.
+const delaySum = false
+
 var tunings []subband.Tuning
 
 const lowCutHz = 100
