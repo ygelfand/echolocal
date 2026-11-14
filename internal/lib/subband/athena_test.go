@@ -27,7 +27,7 @@ func athenaWeightCount() int {
 }
 
 func TestAthenaLoadsItsOwnTuning(t *testing.T) {
-	w, err := Load(athenaDir(t, make([]float32, athenaWeightCount())), AthenaFBFV2)
+	w, err := Load(athenaDir(t, make([]float32, athenaWeightCount())), []Tuning{AthenaFBFV2})
 	if err != nil {
 		t.Fatalf("athena's coefficient set did not load: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestAthenaLoadsItsOwnTuning(t *testing.T) {
 // Under the dot's tunings the same folder fails on crown's coefs_FBF.cfg, and without that file
 // it loads fbfV2's mic map: the reason a board must name its tunings.
 func TestAthenasFolderIsMisreadUnderTheDotsTunings(t *testing.T) {
-	if _, err := Load(athenaDir(t, make([]float32, athenaWeightCount())), dotTunings...); err == nil {
+	if _, err := Load(athenaDir(t, make([]float32, athenaWeightCount())), DotTunings); err == nil {
 		t.Error("crown's 4-mic coefs_FBF.cfg loaded as the dot's 7-mic FBF")
 	}
 
@@ -47,7 +47,7 @@ func TestAthenasFolderIsMisreadUnderTheDotsTunings(t *testing.T) {
 	dir := t.TempDir()
 	writeCoefs(t, filepath.Join(dir, g.windowFile), make([]float32, g.WindowLen))
 	writeCoefs(t, filepath.Join(dir, g.weightsFile), make([]float32, athenaWeightCount()))
-	w, err := Load(dir, dotTunings...)
+	w, err := Load(dir, DotTunings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestAthenaWeightsDecodeInTheVendorsOrder(t *testing.T) {
 	values := make([]float32, athenaWeightCount())
 	values[at], values[at+1] = -0.75, 0.125
 
-	w, err := Load(athenaDir(t, values), AthenaFBFV2)
+	w, err := Load(athenaDir(t, values), []Tuning{AthenaFBFV2})
 	if err != nil {
 		t.Fatal(err)
 	}

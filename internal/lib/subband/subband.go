@@ -21,6 +21,9 @@ const (
 	AthenaFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 athena 4 mics 8 beams"
 )
 
+// DotTunings are the front ends the dot's firmwares carry. radar shares the dot's build.
+var DotTunings = []Tuning{FBF, FBFV2, RadarFBFV2}
+
 type geometry struct {
 	name Tuning
 
@@ -173,9 +176,14 @@ func (w *Weights) Inputs() int  { return w.g.Inputs() }
 
 // Load reads the first of the allowed tunings, in the order known lists them, whose weights file
 // is in dir. A board allows only the tunings its own array can carry; see Tuning.
-func Load(dir string, allowed ...Tuning) (*Weights, error) {
+func Load(dir string, allowed []Tuning) (*Weights, error) {
 	if len(allowed) == 0 {
 		return nil, fmt.Errorf("no tuning allowed for %s: this board names none", dir)
+	}
+	for _, name := range allowed {
+		if !slices.ContainsFunc(known, func(g geometry) bool { return g.name == name }) {
+			return nil, fmt.Errorf("%q is not a tuning we know", name)
+		}
 	}
 	for _, g := range known {
 		if !slices.Contains(allowed, g.name) {

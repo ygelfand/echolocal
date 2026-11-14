@@ -30,7 +30,7 @@ var vendor = sync.OnceValue(func() *subband.Weights {
 	if len(tunings) == 0 {
 		return nil
 	}
-	w, err := subband.Load(subband.VendorDir, tunings...)
+	w, err := subband.Load(subband.VendorDir, tunings)
 	if err != nil {
 		slog.Error("vendor beamformer unavailable", "err", err)
 		return nil

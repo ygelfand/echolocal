@@ -21,7 +21,6 @@ var adcs = []string{"A", "B", "C", "D"}
 // beam.go models this ring: six mics 36 mm out and one in the centre.
 const delaySum = true
 
-// The dot firmwares carry one of these. radar shares this build, so all three are allowed.
-var tunings = []subband.Tuning{subband.FBF, subband.FBFV2, subband.RadarFBFV2}
+var tunings = subband.DotTunings
 
 const lowCutHz = 0

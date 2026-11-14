@@ -17,12 +17,12 @@ func vendorWeights(t *testing.T) *Weights {
 		t.Skip("set ECHOLOCAL_VENDOR_DIR to a copy of /vendor/etc/audio-algorithms")
 	}
 
-	tunings := dotTunings
+	tunings := DotTunings
 	if name := os.Getenv("ECHOLOCAL_VENDOR_TUNING"); name != "" {
 		tunings = []Tuning{Tuning(name)}
 	}
 
-	w, err := Load(dir, tunings...)
+	w, err := Load(dir, tunings)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

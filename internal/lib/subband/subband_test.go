@@ -4,15 +4,13 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ygelfand/libcountertop/pkg/audio/fft"
 )
 
 const testFrame = 320
-
-// The tunings the dot build allows, as internal/hardware/mic/array.go lists them.
-var dotTunings = []Tuning{FBF, FBFV2, RadarFBFV2}
 
 func eachGeometry(t *testing.T, f func(*testing.T, geometry)) {
 	t.Helper()
@@ -153,13 +151,25 @@ func TestOddFrameSizesKeepEverySample(t *testing.T) {
 }
 
 func TestLoadWithoutCoefficients(t *testing.T) {
-	if _, err := Load(t.TempDir(), dotTunings...); err == nil {
+	if _, err := Load(t.TempDir(), DotTunings); err == nil {
 		t.Fatal("an empty directory loaded")
 	}
 }
 
 func TestLoadRefusesABoardThatAllowsNoTuning(t *testing.T) {
-	if _, err := Load(radarDir(t, make([]float32, radarWeightCount()))); err == nil {
+	if _, err := Load(radarDir(t, make([]float32, radarWeightCount())), nil); err == nil {
 		t.Fatal("Load with no tunings allowed loaded a coefficient set")
+	}
+}
+
+func TestLoadNamesATuningItDoesNotKnow(t *testing.T) {
+	const typo Tuning = "athena"
+
+	_, err := Load(radarDir(t, make([]float32, radarWeightCount())), []Tuning{RadarFBFV2, typo})
+	if err == nil {
+		t.Fatal("a tuning Load does not know was accepted")
+	}
+	if !strings.Contains(err.Error(), string(typo)) {
+		t.Errorf("the error %q does not name the unknown tuning %q", err, typo)
 	}
 }
