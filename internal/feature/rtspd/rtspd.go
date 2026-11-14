@@ -62,6 +62,7 @@ func Get() *Server {
 			Auth:     camerartspd.Credentials(func() schema.RTSP { return config.Get().RTSP }),
 			Mic:      microphone{},
 			MicMuted: privacy.Get().MicMuted,
+			Audio:    func() bool { return config.Get().RTSP.Audio },
 		})}
 		shared.build()
 		livecam.Get().StreamsChanged.Listen(func([]int) { shared.reload() })
@@ -117,11 +118,16 @@ func (s *Server) build() {
 func (s *Server) Settings() *setting.Controls[schema.RTSP] { return s.knobs }
 
 func (s *Server) apply(at schema.RTSP) error {
+	was := config.Get().RTSP
 	err := config.Set().RTSP().All(at)
-	if at.Enabled {
-		s.srv.Start()
-	} else {
+	switch {
+	case !at.Enabled:
 		s.srv.Stop()
+	case was.Audio != at.Audio:
+		s.srv.Stop()
+		s.srv.Start()
+	default:
+		s.srv.Start()
 	}
 	return err
 }
