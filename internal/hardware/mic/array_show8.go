@@ -16,8 +16,6 @@ const CenterMic = 0
 
 var adcs = []string{"A", "B"}
 
-const beamforming = false
-
 const delaySum = false
 
 var tunings []subband.Tuning

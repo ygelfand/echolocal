@@ -18,8 +18,6 @@ const CenterMic = 6
 // adcs are the four converters the seven microphones arrive on.
 var adcs = []string{"A", "B", "C", "D"}
 
-const beamforming = true
-
 // beam.go models this ring: six mics 36 mm out and one in the centre.
 const delaySum = true
 

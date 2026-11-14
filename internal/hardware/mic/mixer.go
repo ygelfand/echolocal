@@ -27,7 +27,7 @@ type mix struct {
 }
 
 var vendor = sync.OnceValue(func() *subband.Weights {
-	if !beamforming {
+	if len(tunings) == 0 {
 		return nil
 	}
 	w, err := subband.Load(subband.VendorDir, tunings...)
@@ -42,9 +42,6 @@ var vendor = sync.OnceValue(func() *subband.Weights {
 
 var mixes = sync.OnceValue(func() []mix {
 	out := []mix{{config.MixCenter, func() Mixer { return Center{} }}}
-	if !beamforming {
-		return out
-	}
 	if delaySum {
 		out = append(out, mix{config.MixDelaySum, func() Mixer { return NewBeamformer() }})
 	}

@@ -11,8 +11,6 @@ const (
 
 const CenterMic = 0
 
-const beamforming = true
-
 // Four mics and no centre one: not the ring beam.go models.
 const delaySum = false
 
