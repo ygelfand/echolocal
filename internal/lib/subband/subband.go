@@ -15,9 +15,10 @@ import (
 type Tuning string
 
 const (
-	FBF        Tuning = "FilterBank_640 + FBF"
-	FBFV2      Tuning = "FilterBank_768cvxGLow + FBFV2 8 beams"
-	RadarFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
+	FBF         Tuning = "FilterBank_640 + FBF"
+	FBFV2       Tuning = "FilterBank_768cvxGLow + FBFV2 8 beams"
+	RadarFBFV2  Tuning = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
+	AthenaFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 athena 4 mics 8 beams"
 )
 
 type geometry struct {
@@ -75,6 +76,7 @@ var known = []geometry{
 	},
 	fbfV2,
 	radarFBFV2(),
+	athenaFBFV2(),
 }
 
 var fbfV2 = geometry{
@@ -115,6 +117,17 @@ func radarFBFV2() geometry {
 	g.mics = []int{0, 1, 3, 4}
 	g.boostDB = 2.51
 	g.weightsFile = "coefs_FBFV2_4micsSq_8beams_idnr_m15_lowLatency.cfg"
+	return g
+}
+
+// athena's AFE.cfg: the same filter bank, FixedBeamFormerV2 (8 beams, 4 taps) and 3-beam group
+// merger as fbfV2, under fbfV2's weights file name. Its FixedBeamFormerV2 has no Channel Map: the
+// array is its 4 mics, captured as channels 0-3. Mics Post AEC Output Gain BoostdB 2.2.
+func athenaFBFV2() geometry {
+	g := fbfV2
+	g.name = AthenaFBFV2
+	g.mics = []int{0, 1, 2, 3}
+	g.boostDB = 2.2
 	return g
 }
 
