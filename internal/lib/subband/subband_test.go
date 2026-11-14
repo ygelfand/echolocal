@@ -11,10 +11,13 @@ import (
 
 const testFrame = 320
 
+// The tunings the dot build allows, as internal/hardware/mic/array.go lists them.
+var dotTunings = []Tuning{FBF, FBFV2, RadarFBFV2}
+
 func eachGeometry(t *testing.T, f func(*testing.T, geometry)) {
 	t.Helper()
 	for _, g := range known {
-		t.Run(g.name, func(t *testing.T) { f(t, g) })
+		t.Run(string(g.name), func(t *testing.T) { f(t, g) })
 	}
 }
 
@@ -150,7 +153,13 @@ func TestOddFrameSizesKeepEverySample(t *testing.T) {
 }
 
 func TestLoadWithoutCoefficients(t *testing.T) {
-	if _, err := Load(t.TempDir()); err == nil {
+	if _, err := Load(t.TempDir(), dotTunings...); err == nil {
 		t.Fatal("an empty directory loaded")
+	}
+}
+
+func TestLoadRefusesABoardThatAllowsNoTuning(t *testing.T) {
+	if _, err := Load(radarDir(t, make([]float32, radarWeightCount()))); err == nil {
+		t.Fatal("Load with no tunings allowed loaded a coefficient set")
 	}
 }
