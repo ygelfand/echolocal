@@ -8,6 +8,7 @@ import (
 	sharedha "github.com/ygelfand/libcountertop/pkg/homeassistant"
 
 	"github.com/ygelfand/echolocal/internal/config"
+	"github.com/ygelfand/echolocal/internal/feature/arbitration"
 	"github.com/ygelfand/echolocal/internal/feature/detect"
 	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
@@ -29,6 +30,7 @@ func assistantPages() *sharedsettings.AssistantPages {
 			Pryon:       detect.Get().Pryon(),
 			PryonStop:   detect.Get().Pryon().Stop(),
 			Gemini:      detect.Get().Gemini(),
+			Arbitration: &arbitration.Setting,
 			Preferences: preferences(),
 			Models:      wake.Lib().Ours,
 			Phrases:     wake.Lib().Phrases,

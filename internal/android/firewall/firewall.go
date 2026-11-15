@@ -13,15 +13,16 @@ import (
 const iptables = "/system/bin/iptables"
 
 const (
-	API      = "ECHOLOCAL_API"
-	ADB      = "ECHOLOCAL_ADB"
-	Sendspin = "ECHOLOCAL_SENDSPIN"
-	Web      = "ECHOLOCAL_WEB"
-	Cast     = "ECHOLOCAL_CAST"
-	AirPlay  = "ECHOLOCAL_AIRPLAY"
+	API         = "ECHOLOCAL_API"
+	ADB         = "ECHOLOCAL_ADB"
+	Sendspin    = "ECHOLOCAL_SENDSPIN"
+	Web         = "ECHOLOCAL_WEB"
+	Cast        = "ECHOLOCAL_CAST"
+	AirPlay     = "ECHOLOCAL_AIRPLAY"
+	Arbitration = "ECHOLOCAL_ARBITRATION"
 )
 
-var All = []string{API, ADB, Sendspin, Web, Cast, AirPlay}
+var All = []string{API, ADB, Sendspin, Web, Cast, AirPlay, Arbitration}
 
 const iface = "wlan0"
 

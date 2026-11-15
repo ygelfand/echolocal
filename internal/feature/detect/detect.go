@@ -77,7 +77,7 @@ func newDetect() *Detect {
 			voice.Get().Interrupt()
 			return
 		}
-		voice.Get().Start(slot)
+		voice.Get().Heard(slot)
 	}
 	if helper := parts.Pryon(); helper != nil {
 		e.Pryon = func() (pryon.Options, error) {

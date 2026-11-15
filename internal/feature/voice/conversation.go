@@ -10,6 +10,7 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/activity"
+	"github.com/ygelfand/echolocal/internal/feature/arbitration"
 	"github.com/ygelfand/echolocal/internal/feature/feedback"
 	"github.com/ygelfand/echolocal/internal/feature/media"
 	"github.com/ygelfand/echolocal/internal/feature/mute"
@@ -53,6 +54,7 @@ func dependencies() turn.Dependencies {
 			Shown:    &Shown,
 			Effects:  &turnEffects{},
 		},
+		Arbiter: arbitration.Get(),
 	}
 }
 

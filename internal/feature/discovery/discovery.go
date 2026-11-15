@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ygelfand/libcountertop/pkg/assistant/arbitration"
 	"github.com/ygelfand/libcountertop/pkg/media/broadcast"
 	shared "github.com/ygelfand/libcountertop/pkg/network/discovery"
 	sharedpeer "github.com/ygelfand/libcountertop/pkg/network/peer"
@@ -30,11 +31,19 @@ func (identity) Self() sharedpeer.Peer {
 		Project: strings.ToLower(
 			layout.Manufacturer,
 		),
-		Version: layout.Version,
-		Port:    web.Port,
-		Secure:  web.SecurePort,
-		Host:    layout.Slug(config.Get().Device.Name),
+		Version:     layout.Version,
+		Port:        web.Port,
+		Secure:      web.SecurePort,
+		Arbitration: arbitrationPort(),
+		Host:        layout.Slug(config.Get().Device.Name),
 	}
+}
+
+func arbitrationPort() int {
+	if config.Get().Wake.Arbitration <= 0 {
+		return 0
+	}
+	return arbitration.Port
 }
 
 func ID() string {
