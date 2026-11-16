@@ -2,6 +2,8 @@
 
 package mic
 
+import "github.com/ygelfand/echolocal/internal/lib/subband"
+
 // The capture codec accepts one format only: 16 kHz, S24_3LE, 9 channels.
 const (
 	Channels      = 9
@@ -16,6 +18,9 @@ const CenterMic = 6
 // adcs are the four converters the seven microphones arrive on.
 var adcs = []string{"A", "B", "C", "D"}
 
-const beamforming = true
+// beam.go models this ring: six mics 36 mm out and one in the centre.
+const delaySum = true
+
+var tunings = subband.DotTunings
 
 const lowCutHz = 0

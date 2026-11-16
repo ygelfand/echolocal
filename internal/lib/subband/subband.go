@@ -4,10 +4,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
+// Tuning names one of the vendor front ends Load knows.
+//
+// Amazon reuses coefficient file names across arrays that differ: athena ships
+// coefs_FBFV2_LowLatency_8beams.cfg for its own 4 mics, the dot for 4 of its 7. A file name alone
+// cannot say which array it was tuned for, so each board names the tunings its firmware may carry.
+type Tuning string
+
+const (
+	FBF         Tuning = "FilterBank_640 + FBF"
+	FBFV2       Tuning = "FilterBank_768cvxGLow + FBFV2 8 beams"
+	RadarFBFV2  Tuning = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
+	AthenaFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 athena 4 mics 8 beams"
+)
+
+// DotTunings are the front ends the dot's firmwares carry. radar shares the dot's build.
+var DotTunings = []Tuning{FBF, FBFV2, RadarFBFV2}
+
 type geometry struct {
-	name string
+	name Tuning
 
 	Bands int
 
@@ -40,7 +58,7 @@ type geometry struct {
 // The front ends, from each firmware's own AFE.cfg.
 var known = []geometry{
 	{
-		name:        "FilterBank_640 + FBF",
+		name:        FBF,
 		Bands:       64,
 		FFTLen:      128,
 		Hop:         64,
@@ -61,11 +79,12 @@ var known = []geometry{
 	},
 	fbfV2,
 	radarFBFV2(),
+	athenaFBFV2(),
 }
 
 var fbfV2 = geometry{
 	// AFE.cfg "ASR FixedBeamFormerV2" Channel Map [1,2,4,5]: "This selects 4 mics out of 7".
-	name:      "FilterBank_768cvxGLow + FBFV2 8 beams",
+	name:      FBFV2,
 	Bands:     128,
 	FFTLen:    256,
 	Hop:       128,
@@ -97,10 +116,21 @@ var fbfV2 = geometry{
 // radar's AFE.cfg: FixedBeamFormerV2 Channel Map [0,1,3,4], Mics Post AEC Output Gain BoostdB 2.51.
 func radarFBFV2() geometry {
 	g := fbfV2
-	g.name = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
+	g.name = RadarFBFV2
 	g.mics = []int{0, 1, 3, 4}
 	g.boostDB = 2.51
 	g.weightsFile = "coefs_FBFV2_4micsSq_8beams_idnr_m15_lowLatency.cfg"
+	return g
+}
+
+// athena's AFE.cfg: the same filter bank, FixedBeamFormerV2 (8 beams, 4 taps) and 3-beam group
+// merger as fbfV2, under fbfV2's weights file name. Its FixedBeamFormerV2 has no Channel Map: the
+// array is its 4 mics, captured as channels 0-3. Mics Post AEC Output Gain BoostdB 2.2.
+func athenaFBFV2() geometry {
+	g := fbfV2
+	g.name = AthenaFBFV2
+	g.mics = []int{0, 1, 2, 3}
+	g.boostDB = 2.2
 	return g
 }
 
@@ -141,17 +171,30 @@ func (w *Weights) weight(band, beam, tap int) []complex64 {
 
 func (w *Weights) Bands() int   { return w.g.Bands }
 func (w *Weights) Beams() int   { return w.g.Beams }
-func (w *Weights) Name() string { return w.g.name }
+func (w *Weights) Name() string { return string(w.g.name) }
 func (w *Weights) Inputs() int  { return w.g.Inputs() }
 
-func Load(dir string) (*Weights, error) {
+// Load reads the first of the allowed tunings, in the order known lists them, whose weights file
+// is in dir. A board allows only the tunings its own array can carry; see Tuning.
+func Load(dir string, allowed []Tuning) (*Weights, error) {
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("no tuning allowed for %s: this board names none", dir)
+	}
+	for _, name := range allowed {
+		if !slices.ContainsFunc(known, func(g geometry) bool { return g.name == name }) {
+			return nil, fmt.Errorf("%q is not a tuning we know", name)
+		}
+	}
 	for _, g := range known {
+		if !slices.Contains(allowed, g.name) {
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(dir, g.weightsFile)); err != nil {
 			continue
 		}
 		return g.load(dir)
 	}
-	return nil, fmt.Errorf("%s holds none of the coefficient sets we know", dir)
+	return nil, fmt.Errorf("%s holds none of the coefficient sets for %v", dir, allowed)
 }
 
 func (g geometry) load(dir string) (*Weights, error) {

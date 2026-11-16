@@ -36,12 +36,12 @@ func radarWeightCount() int {
 }
 
 func TestRadarsCoefficientsLoad(t *testing.T) {
-	w, err := Load(radarDir(t, make([]float32, radarWeightCount())))
+	w, err := Load(radarDir(t, make([]float32, radarWeightCount())), DotTunings)
 	if err != nil {
 		t.Fatalf("radar's coefficient set did not load: %v", err)
 	}
-	if w.Name() != radarFBFV2().name {
-		t.Errorf("loaded %q, want radar's %q", w.Name(), radarFBFV2().name)
+	if w.Name() != string(RadarFBFV2) {
+		t.Errorf("loaded %q, want radar's %q", w.Name(), RadarFBFV2)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestRadarWeightsDecodeInTheVendorsOrder(t *testing.T) {
 	values := make([]float32, radarWeightCount())
 	values[at], values[at+1] = 0.25, -0.5
 
-	w, err := Load(radarDir(t, values))
+	w, err := Load(radarDir(t, values), DotTunings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestRadarWeightsDecodeInTheVendorsOrder(t *testing.T) {
 }
 
 func TestRadarRefusesAShortWeightsFile(t *testing.T) {
-	if _, err := Load(radarDir(t, make([]float32, radarWeightCount()-1))); err == nil {
+	if _, err := Load(radarDir(t, make([]float32, radarWeightCount()-1)), DotTunings); err == nil {
 		t.Fatal("a weights file one coefficient short loaded")
 	}
 }

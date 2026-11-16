@@ -8,7 +8,8 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/audio/fft"
 )
 
-// The vendor coefficients are not ours to ship.
+// The vendor coefficients are not ours to ship. ECHOLOCAL_VENDOR_TUNING names the tuning to load
+// from them, for a board other than the dot.
 func vendorWeights(t *testing.T) *Weights {
 	t.Helper()
 	dir := os.Getenv("ECHOLOCAL_VENDOR_DIR")
@@ -16,7 +17,12 @@ func vendorWeights(t *testing.T) *Weights {
 		t.Skip("set ECHOLOCAL_VENDOR_DIR to a copy of /vendor/etc/audio-algorithms")
 	}
 
-	w, err := Load(dir)
+	tunings := DotTunings
+	if name := os.Getenv("ECHOLOCAL_VENDOR_TUNING"); name != "" {
+		tunings = []Tuning{Tuning(name)}
+	}
+
+	w, err := Load(dir, tunings)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

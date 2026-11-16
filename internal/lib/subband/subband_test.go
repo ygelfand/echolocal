@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ygelfand/libcountertop/pkg/audio/fft"
@@ -14,7 +15,7 @@ const testFrame = 320
 func eachGeometry(t *testing.T, f func(*testing.T, geometry)) {
 	t.Helper()
 	for _, g := range known {
-		t.Run(g.name, func(t *testing.T) { f(t, g) })
+		t.Run(string(g.name), func(t *testing.T) { f(t, g) })
 	}
 }
 
@@ -150,7 +151,25 @@ func TestOddFrameSizesKeepEverySample(t *testing.T) {
 }
 
 func TestLoadWithoutCoefficients(t *testing.T) {
-	if _, err := Load(t.TempDir()); err == nil {
+	if _, err := Load(t.TempDir(), DotTunings); err == nil {
 		t.Fatal("an empty directory loaded")
+	}
+}
+
+func TestLoadRefusesABoardThatAllowsNoTuning(t *testing.T) {
+	if _, err := Load(radarDir(t, make([]float32, radarWeightCount())), nil); err == nil {
+		t.Fatal("Load with no tunings allowed loaded a coefficient set")
+	}
+}
+
+func TestLoadNamesATuningItDoesNotKnow(t *testing.T) {
+	const typo Tuning = "athena"
+
+	_, err := Load(radarDir(t, make([]float32, radarWeightCount())), []Tuning{RadarFBFV2, typo})
+	if err == nil {
+		t.Fatal("a tuning Load does not know was accepted")
+	}
+	if !strings.Contains(err.Error(), string(typo)) {
+		t.Errorf("the error %q does not name the unknown tuning %q", err, typo)
 	}
 }
