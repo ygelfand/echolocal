@@ -113,7 +113,10 @@ const GeminiDir = ModelDir + "/gemini"
 
 const VoiceprintDir = ModelDir + "/voiceprint"
 
-const VoicesPath = StateDir + "/voices.json"
+const (
+	VoicesPath   = StateDir + "/voices.json"
+	VoicesOutbox = StateDir + "/voices-outbox.json"
+)
 
 const PryonHelper = StateDir + "/bin/echolocal-pryon"
 

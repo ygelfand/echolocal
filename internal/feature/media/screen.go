@@ -21,12 +21,18 @@ var theCard *sharedcard.Card
 
 func card() *sharedcard.Card {
 	cardOnce.Do(func() {
-		theCard = sharedcard.New(
-			sharedcard.Dependencies{Player: Get(), Idle: config.IdleSection, Shell: shell.Get()},
-		)
+		theCard = sharedcard.New(sharedcard.Dependencies{
+			Player: Get(),
+			Idle:   config.IdleSection,
+			Media:  config.MediaSection,
+			Device: component.DevicePlayback,
+			Shell:  shell.Get(),
+		})
+		component.Settings.Add(theCard.Settings())
 	})
 	return theCard
 }
+func Card() *sharedcard.Card { return card() }
 func Page() sharedshell.View { return card().Page() }
 func Showing() bool          { return shell.Get().Top() == Page() }
 func onRail()                { apps.Get().Add(card().App()) }

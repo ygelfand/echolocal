@@ -79,6 +79,7 @@ var Get = sync.OnceValue(func() *screens.App {
 				Clock:   c.Clock,
 				Idle:    c.Idle,
 				Weather: c.Weather,
+				Media:   c.Media,
 			}
 		},
 		UI:           look,
@@ -175,6 +176,7 @@ var Get = sync.OnceValue(func() *screens.App {
 		extendShopping,
 		extendSync,
 		extendTV,
+		extendVoiceMatch,
 	} {
 		extend(look, &o, self)
 	}
