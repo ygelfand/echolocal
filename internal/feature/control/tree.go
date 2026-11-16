@@ -14,12 +14,14 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/mixercmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/netcmd"
 	"github.com/ygelfand/libcountertop/pkg/runtime/control/playercmd"
+	"github.com/ygelfand/libcountertop/pkg/runtime/control/voiceprintcmd"
 
 	"github.com/ygelfand/echolocal/internal/android/prop"
 	"github.com/ygelfand/echolocal/internal/feature/alarm"
 	"github.com/ygelfand/echolocal/internal/feature/discovery"
 	"github.com/ygelfand/echolocal/internal/feature/firmware"
 	"github.com/ygelfand/echolocal/internal/feature/media"
+	"github.com/ygelfand/echolocal/internal/feature/voicematch"
 	"github.com/ygelfand/echolocal/internal/hardware/ble"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/layout"
@@ -37,6 +39,10 @@ func (c *Control) tree() *cobra.Command {
 	t.Add(harness.AudioTask, cancelling()...)
 	t.Add(harness.AudioTask, mixercmd.Command(speaker.Card))
 	t.Add(harness.AudioTask, playercmd.Command(func() playercmd.Player { return media.Get() }))
+	t.Add(
+		harness.AudioTask,
+		voiceprintcmd.Command(func() voiceprintcmd.Source { return voicematch.Get() }),
+	)
 	t.Top(setCommand())
 	t.Top(firmwarecmd.Command(firmware.Get))
 	t.Top(blecmd.Command(ble.Get()))

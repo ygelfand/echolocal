@@ -111,6 +111,10 @@ const PryonDir = ModelDir + "/pryon"
 
 const GeminiDir = ModelDir + "/gemini"
 
+const VoiceprintDir = ModelDir + "/voiceprint"
+
+const VoicesPath = StateDir + "/voices.json"
+
 const PryonHelper = StateDir + "/bin/echolocal-pryon"
 
 const AirPlayHelper = StateDir + "/bin/echolocal-airplay"

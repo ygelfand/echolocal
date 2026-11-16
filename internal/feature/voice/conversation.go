@@ -16,6 +16,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/mute"
 	"github.com/ygelfand/echolocal/internal/feature/recording"
 	"github.com/ygelfand/echolocal/internal/feature/tones"
+	"github.com/ygelfand/echolocal/internal/feature/voicematch"
 	"github.com/ygelfand/echolocal/internal/hardware/mic"
 	"github.com/ygelfand/echolocal/internal/hardware/speaker"
 	"github.com/ygelfand/echolocal/internal/lib/wake"
@@ -55,6 +56,7 @@ func dependencies() turn.Dependencies {
 			Effects:  &turnEffects{},
 		},
 		Arbiter: arbitration.Get(),
+		Voices:  voicematch.Get(),
 	}
 }
 

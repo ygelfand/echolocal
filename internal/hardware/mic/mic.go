@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ygelfand/libcountertop/pkg/assistant/voicematch"
 	"github.com/ygelfand/libcountertop/pkg/audio/aec"
 	"github.com/ygelfand/libcountertop/pkg/audio/alsa"
 	"github.com/ygelfand/libcountertop/pkg/audio/capture"
@@ -109,7 +110,7 @@ func New() *Source {
 		listeners:  map[int]*listener{},
 		raw:        map[int]chan []byte{},
 		echoes:     map[int]chan Echo{},
-		History:    capture.NewHistory(Rate, time.Second),
+		History:    capture.NewHistory(Rate, voicematch.Span),
 		Leveler:    newLeveler(cfg),
 		mixer:      mixer,
 		mixing:     mixing,
