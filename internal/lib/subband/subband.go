@@ -19,6 +19,7 @@ const (
 	FBFV2         Tuning = "FilterBank_768cvxGLow + FBFV2 8 beams"
 	RadarFBFV2    Tuning = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
 	AthenaFBFV2   Tuning = "FilterBank_768cvxGLow + FBFV2 athena 4 mics 8 beams"
+	CrownFBFV2    Tuning = "FilterBank_768cvxGLow + FBFV2 crown 4 mics 8 beams"
 	CheckersFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 checkers 2 mics 7 beams"
 )
 
@@ -81,6 +82,7 @@ var known = []geometry{
 	fbfV2,
 	radarFBFV2(),
 	athenaFBFV2(),
+	crownFBFV2(),
 	checkersFBFV2(),
 }
 
@@ -133,6 +135,16 @@ func athenaFBFV2() geometry {
 	g.name = AthenaFBFV2
 	g.mics = []int{0, 1, 2, 3}
 	g.boostDB = 2.2
+	return g
+}
+
+// crown's AFE.cfg: the same front end as athena's, also with no Channel Map. Its 4 mics are two
+// pairs about 25 mm apart, one per board and per ADC: 0 and 1 on one, 3 and 2 on the other, so
+// channel order goes round the rectangle. Mics Post AEC Output Gain BoostdB 1.9.
+func crownFBFV2() geometry {
+	g := athenaFBFV2()
+	g.name = CrownFBFV2
+	g.boostDB = 1.9
 	return g
 }
 

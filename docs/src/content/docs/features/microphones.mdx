@@ -10,7 +10,7 @@ the device: [config sync](/use/configuration/#config-sync) doesn't copy them.
 
 | Setting | Entity | What it does | Range | Default |
 |---|---|---|---|---|
-| **Microphone mixing** | `select.<device>_microphone_microphone_mixing` | How the microphones are combined. **Center mic** uses one (on the Echo Show 8 2nd gen, an edge microphone, as it has no centre one). **Delay and sum** (Echo Dot and Echo (2nd gen), for their seven-microphone ring) and **Beamformer** (Echo Dot, Echo (2nd gen), Echo Show 5 1st gen and Echo Show 8 2nd gen, where the Echo's own beamformer tuning is present) aim at whoever is speaking | Center mic, Delay and sum, Beamformer | Center mic |
+| **Microphone mixing** | `select.<device>_microphone_microphone_mixing` | How the microphones are combined. **Center mic** uses one (on the Echo Show 8 2nd gen, an edge microphone, as it has no centre one). **Delay and sum** (Echo Dot and Echo (2nd gen), for their seven-microphone ring) and **Beamformer** (Echo Dot, Echo (2nd gen), Echo Show 5 1st gen and Echo Show 8 1st and 2nd gen, where the Echo's own beamformer tuning is present) aim at whoever is speaking | Center mic, Delay and sum, Beamformer | Center mic |
 | **Microphone gain** | `number.<device>_microphone_microphone_gain` | Amplification before anything else | 0–59 dB | 20 dB |
 | **Microphone leveling** | `switch.<device>_microphone_microphone_leveling` | Keeps your voice at a steady level whether you're near or across the room | On, Off | On |
 | **Microphone echo cancellation** | `switch.<device>_microphone_microphone_echo_cancellation` | Removes what the speaker is playing from what the microphones hear, so the wake word works while music plays | On, Off | On |
