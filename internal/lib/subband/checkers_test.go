@@ -39,7 +39,10 @@ func TestCheckersLoadsItsOwnTuning(t *testing.T) {
 
 func TestCheckersWeightsAreTheVendorsSize(t *testing.T) {
 	if got := checkersWeightCount(); got != 14336 {
-		t.Errorf("checkers' tuning reads %d values, want the 14336 in coefs_FBFV2_LowLatency_7beams.cfg", got)
+		t.Errorf(
+			"checkers' tuning reads %d values, want the 14336 in coefs_FBFV2_LowLatency_7beams.cfg",
+			got,
+		)
 	}
 }
 
@@ -53,7 +56,11 @@ func TestCheckersGroupsDoNotWrap(t *testing.T) {
 		t.Errorf("checkers merges with margin %g, hold %d; want 1.26, 12", g.margin, g.hold)
 	}
 	if len(fbfV2.groups) != 8 || fbfV2.Beams != 8 {
-		t.Errorf("deriving checkers' geometry changed fbfV2 to %d beams in %d groups", fbfV2.Beams, len(fbfV2.groups))
+		t.Errorf(
+			"deriving checkers' geometry changed fbfV2 to %d beams in %d groups",
+			fbfV2.Beams,
+			len(fbfV2.groups),
+		)
 	}
 }
 
