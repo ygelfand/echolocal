@@ -1,9 +1,11 @@
 package frontend
 
 import (
+	"context"
 	"net/http"
 	"sync"
 
+	"github.com/ygelfand/libcountertop/pkg/homeassistant/people"
 	"github.com/ygelfand/libcountertop/pkg/input/textentry"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/runtime/webapi"
@@ -19,7 +21,9 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/call"
 	"github.com/ygelfand/echolocal/internal/feature/dhcp"
 	"github.com/ygelfand/echolocal/internal/feature/discovery"
+	"github.com/ygelfand/echolocal/internal/feature/homeassistant"
 	"github.com/ygelfand/echolocal/internal/feature/network"
+	"github.com/ygelfand/echolocal/internal/feature/voicematch"
 	"github.com/ygelfand/echolocal/internal/feature/web"
 	"github.com/ygelfand/echolocal/internal/layout"
 )
@@ -33,6 +37,7 @@ var get = sync.OnceValue(func() *webapi.API {
 		"alarms":    alarm.Get().Handler(alerts.Get().Tones),
 		"call":      call.Get().Handler(discovery.Get().Peers),
 		"broadcast": broadcast.Get().WebHandler(),
+		"voices":    voicematch.Get().Handler(householdPeople),
 	}
 	input := &textentry.Controller{}
 	addDesktop(pages, input)
@@ -47,6 +52,7 @@ var get = sync.OnceValue(func() *webapi.API {
 		LogTag:   layout.LogTag,
 		Screen:   shot,
 		Input:    input,
+		Fired:    &component.Fire,
 		Address: func() string {
 			if lease := dhcp.Get().Lease(); lease != nil {
 				return lease.Address.IP.String()
@@ -75,6 +81,10 @@ func init() {
 		}),
 	)
 	web.Get().PublicRoot(webui.Handler())
+}
+
+func householdPeople(ctx context.Context) ([]people.Person, error) {
+	return people.List(ctx, homeassistant.Get())
 }
 
 func device() webapi.Device {
