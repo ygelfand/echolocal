@@ -15,11 +15,12 @@ import (
 type Tuning string
 
 const (
-	FBF         Tuning = "FilterBank_640 + FBF"
-	FBFV2       Tuning = "FilterBank_768cvxGLow + FBFV2 8 beams"
-	RadarFBFV2  Tuning = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
-	AthenaFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 athena 4 mics 8 beams"
-	CrownFBFV2  Tuning = "FilterBank_768cvxGLow + FBFV2 crown 4 mics 8 beams"
+	FBF           Tuning = "FilterBank_640 + FBF"
+	FBFV2         Tuning = "FilterBank_768cvxGLow + FBFV2 8 beams"
+	RadarFBFV2    Tuning = "FilterBank_768cvxGLow + FBFV2 4micsSq 8 beams"
+	AthenaFBFV2   Tuning = "FilterBank_768cvxGLow + FBFV2 athena 4 mics 8 beams"
+	CrownFBFV2    Tuning = "FilterBank_768cvxGLow + FBFV2 crown 4 mics 8 beams"
+	CheckersFBFV2 Tuning = "FilterBank_768cvxGLow + FBFV2 checkers 2 mics 7 beams"
 )
 
 // DotTunings are the front ends the dot's firmwares carry. radar shares the dot's build.
@@ -82,6 +83,7 @@ var known = []geometry{
 	radarFBFV2(),
 	athenaFBFV2(),
 	crownFBFV2(),
+	checkersFBFV2(),
 }
 
 var fbfV2 = geometry{
@@ -143,6 +145,22 @@ func crownFBFV2() geometry {
 	g := athenaFBFV2()
 	g.name = CrownFBFV2
 	g.boostDB = 1.9
+	return g
+}
+
+// checkers' AFE.cfg: the same filter bank as fbfV2, FixedBeamFormerV2 with 7 beams over its 2 mics
+// (channels 0 and 1, no Channel Map) in its own weights file, laid out as fbfV2's. Its
+// GroupBeamMergerV2 3beamsGroup lists 7 groups that do not wrap round, as a pair of mics covers a
+// half circle: [[0,1,1],[0,1,2],[1,2,3],[2,3,4],[3,4,5],[4,5,6],[5,5,6]], margin 1.26, hold 12.
+// Mics Post AEC Output Gain BoostdB 4.3.
+func checkersFBFV2() geometry {
+	g := fbfV2
+	g.name = CheckersFBFV2
+	g.Beams = 7
+	g.mics = []int{0, 1}
+	g.groups = [][]int{{0, 1, 1}, {0, 1, 2}, {1, 2, 3}, {2, 3, 4}, {3, 4, 5}, {4, 5, 6}, {5, 5, 6}}
+	g.boostDB = 4.3
+	g.weightsFile = "coefs_FBFV2_LowLatency_7beams.cfg"
 	return g
 }
 
