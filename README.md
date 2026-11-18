@@ -123,7 +123,7 @@ on the action button.
 ## The optional integration
 
 Everything above works with stock Home Assistant. The
-[EchoLocal integration](https://github.com/ygelfand/echolocal-hacs) (HACS) adds a dashboard and
+[EchoLocal integration](https://github.com/ygelfand/echolocal-ha) (HACS) adds a dashboard and
 cards for these devices, Fleet to compare settings across devices and copy them from one to the
 others, calls to an Echo Show from a dashboard, turn history with recordings, a wake word library,
 custom tones, groups and a health view. It works with
