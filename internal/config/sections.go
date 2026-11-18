@@ -45,6 +45,8 @@ var (
 	VoiceSection      = sections.Voice
 	AirPlaySection    = sections.AirPlay
 
+	YouTubeAccountsSection = sections.YouTubeAccounts
+
 	LiftSection = storage.Bind(
 		func() *storage.Store[Config] { return store().Store },
 		func(c *Config) *int { return &c.Microphone.VisualizerLift },

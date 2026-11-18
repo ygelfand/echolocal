@@ -177,6 +177,7 @@ var Get = sync.OnceValue(func() *screens.App {
 		extendSync,
 		extendTV,
 		extendVoiceMatch,
+		extendYouTube,
 	} {
 		extend(look, &o, self)
 	}
