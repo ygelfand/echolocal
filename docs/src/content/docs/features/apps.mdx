@@ -37,6 +37,7 @@ minutes without a touch; **Photos** stays open.
 | **Home alarm** | Your [alarm panel](/features/home-alarm/) from Home Assistant |
 | **Thermostat** | Your [thermostats](/features/thermostat/) |
 | **TV** | The [YouTube TV](#tv) guide, and a remote for your TVs |
+| **YouTube** | [YouTube](#youtube) on the device: your home feed, Shorts, subscriptions, history, Watch later and search |
 
 ## Media
 
@@ -140,6 +141,35 @@ ESPHome integration.
 
 **Settings → Home control → YouTube TV**, or the settings button in the app, picks the
 **Default TV** the app opens on and your **Favorites**.
+
+## YouTube
+
+Browse and watch YouTube on the device itself, signed in to your own account. It needs nothing
+from Home Assistant.
+
+**Sign in** the first time you open it: go to **youtube.com/activate** on your phone or computer and
+enter the code on the screen, or scan the QR code. Each device signs in on its own. Add more
+accounts under **Accounts**, and pick which one the app uses there.
+
+| Tab | |
+|---|---|
+| **Search** | Type a search; results come back as rows, with Shorts in their own row |
+| **Home** | Your YouTube home feed, in rows |
+| **Shorts** | Shorts YouTube picks for your account, as a wall of pictures with their titles |
+| **Subscriptions** | The latest videos from the channels you subscribe to, with their Shorts on top |
+| **History** | What you've watched |
+| **Watch later** | Your Watch later list |
+| **Accounts** | Your accounts |
+
+- **Rows scroll sideways**; swiping to the end of a row loads more of it. Scrolling to the bottom of
+  a page loads more rows.
+- **A red bar** along the bottom of a picture shows how much of it you've watched, and a partly watched video
+  picks up where you left off.
+- **Tap a video** to play it full screen. Swipe up for the next video and down for the previous one.
+- **Tap a Short** and the Shorts that follow play one after another.
+
+Videos skip the same [SponsorBlock](https://sponsor.ajay.app) segments as casting, picked under
+**Cast receiver → Skip segments** on [Settings on the screen](/use/settings/#cast-receiver).
 
 ## Mirror
 
