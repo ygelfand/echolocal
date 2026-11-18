@@ -120,6 +120,9 @@ func apart(a, b float64) float64 {
 
 func TestBearingsFindWhereEachBeamPoints(t *testing.T) {
 	eachGeometry(t, func(t *testing.T, g geometry) {
+		if g.Inputs() < 3 {
+			t.Skip("a pair of mics can't tell front from back")
+		}
 		toward := make([]float64, g.Beams)
 		for j := range toward {
 			toward[j] = math.Mod(0.4+float64(j)*2*math.Pi/float64(g.Beams), 2*math.Pi)

@@ -91,10 +91,8 @@ func passThrough(g geometry) *Weights {
 
 func TestBeamFollowsTheTalker(t *testing.T) {
 	eachGeometry(t, func(t *testing.T, g geometry) {
-		const (
-			talker = 3
-			calls  = 140
-		)
+		const calls = 140
+		talker := 3 % g.Inputs()
 		b := passThrough(g).New()
 
 		frame := make([][]int16, g.Channels())
