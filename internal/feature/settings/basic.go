@@ -54,6 +54,7 @@ func basicPages() *sharedsettings.BasicPages {
 			HomeKey:     network.Get(),
 			Media:       media.Get(),
 			Player:      media.Card(),
+			Sponsor:     servicePages(),
 			Previews:    previewKit(),
 			PowerPage:   func() sharedshell.View { return powerPage() },
 			SyncPage:    func() sharedshell.View { return &syncview.Directory{} },

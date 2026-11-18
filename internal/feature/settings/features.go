@@ -11,6 +11,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/a2dp"
 	"github.com/ygelfand/echolocal/internal/feature/airplay"
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
+	"github.com/ygelfand/echolocal/internal/feature/chromecast"
 	"github.com/ygelfand/echolocal/internal/feature/sendspin"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
 )
@@ -20,7 +21,7 @@ func featuresPage() *sharedshell.Page {
 		c := config.Get()
 		return []sharedsettings.Feature{
 			{Key: "features.sendspin", On: c.Sendspin.Enabled, Set: sendspin.Get().SetEnabled},
-			{Key: "features.cast", Page: func() sharedshell.View { return castPage() }},
+			{Key: "features.cast", On: c.Cast.Receiver, Set: chromecast.Get().SetReceiver},
 			{Key: "features.airplay", Page: func() sharedshell.View { return airplayPage() }},
 			{Key: "call.settings", Page: func() sharedshell.View { return callsPage() }},
 			{Key: "features.proxy", On: c.Bluetooth.Proxy, Set: bluetooth.Get().SetProxy},
@@ -34,8 +35,6 @@ func featuresPage() *sharedshell.Page {
 		}
 	}, shell.Get().Push)
 }
-
-func castPage() *sharedshell.Page { return servicePages().Cast() }
 
 func airplayPage() *sharedshell.Page {
 	return sharedsettings.ServicePage(say.T("features.airplay"), airplay.Get().Settings())
