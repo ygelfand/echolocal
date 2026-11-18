@@ -5,6 +5,9 @@ package speaker
 import (
 	"log/slog"
 	"slices"
+
+	"github.com/ygelfand/echolocal/internal/board"
+	"github.com/ygelfand/echolocal/internal/component"
 )
 
 var initSequence = []kctl{
@@ -78,8 +81,11 @@ var radarPath = map[Output][]kctl{
 	}, pathSequence[OutputHeadphone]...),
 }
 
+// biscuit's codec driver has MFP Gpio Mute too, so the control alone does not mean radar.
+var onRadar = func() bool { return component.Board().Codename == board.Radar.Codename }
+
 func sequencesFor(has func(control string) bool) sequences {
-	if has != nil && has(mfpMute) {
+	if onRadar() && has != nil && has(mfpMute) {
 		slog.Info("speaker amplifier", "gates", "radar")
 		return sequences{
 			init: radarInit,
