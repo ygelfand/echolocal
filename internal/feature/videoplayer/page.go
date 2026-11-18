@@ -1,3 +1,5 @@
+//go:build !board_biscuit
+
 package videoplayer
 
 import (
