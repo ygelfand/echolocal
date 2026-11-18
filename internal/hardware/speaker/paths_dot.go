@@ -81,11 +81,10 @@ var radarPath = map[Output][]kctl{
 	}, pathSequence[OutputHeadphone]...),
 }
 
-// biscuit's codec driver has MFP Gpio Mute too, so the control alone does not mean radar.
-var onRadar = func() bool { return component.Board().Codename == board.Radar.Codename }
+func sequencesFor(func(control string) bool) sequences { return boardSequences(component.Board()) }
 
-func sequencesFor(has func(control string) bool) sequences {
-	if onRadar() && has != nil && has(mfpMute) {
+func boardSequences(b board.Board) sequences {
+	if b.Has(board.MFPGatedAmp) {
 		slog.Info("speaker amplifier", "gates", "radar")
 		return sequences{
 			init: radarInit,
