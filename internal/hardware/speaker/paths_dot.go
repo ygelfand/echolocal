@@ -5,6 +5,9 @@ package speaker
 import (
 	"log/slog"
 	"slices"
+
+	"github.com/ygelfand/echolocal/internal/board"
+	"github.com/ygelfand/echolocal/internal/component"
 )
 
 var initSequence = []kctl{
@@ -78,8 +81,10 @@ var radarPath = map[Output][]kctl{
 	}, pathSequence[OutputHeadphone]...),
 }
 
-func sequencesFor(has func(control string) bool) sequences {
-	if has != nil && has(mfpMute) {
+func sequencesFor(func(control string) bool) sequences { return boardSequences(component.Board()) }
+
+func boardSequences(b board.Board) sequences {
+	if b.Has(board.MFPGatedAmp) {
 		slog.Info("speaker amplifier", "gates", "radar")
 		return sequences{
 			init: radarInit,

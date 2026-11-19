@@ -14,7 +14,7 @@ var Radar = Board{
 	SignalsBoot:  true,
 	Model:        "Echo 2nd gen (radar)",
 	DefaultName:  "Echo",
-	Caps:         Ring | MuteLight | HeadphoneJack,
+	Caps:         Ring | MuteLight | HeadphoneJack | MFPGatedAmp,
 	NativeAPI:    25,
 	RadioZone:    "mtktswmt",
 
