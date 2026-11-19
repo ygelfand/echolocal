@@ -5,6 +5,8 @@ package speaker
 import (
 	"slices"
 	"testing"
+
+	"github.com/ygelfand/echolocal/internal/board"
 )
 
 var dacSwitches = []string{"HPL Output Mixer L_DAC Switch", "HPR Output Mixer R_DAC Switch"}
@@ -19,7 +21,7 @@ func TestTheDotRoutesTheDACAtStartup(t *testing.T) {
 }
 
 func TestNoDotSequenceTurnsTheDACOff(t *testing.T) {
-	seqs := sequencesFor(nil)
+	seqs := boardSequences(board.Biscuit)
 	all := map[string][]kctl{"on": seqs.on, "off": seqs.off, "close": seqs.close}
 	for out, seq := range seqs.path {
 		all["path "+string(out)] = seq
@@ -36,7 +38,15 @@ func TestNoDotSequenceTurnsTheDACOff(t *testing.T) {
 	}
 }
 
-func radarControls(c string) bool { return c == mfpMute }
+func TestBiscuitKeepsTheSpeakerAmpOffForTheHeadphones(t *testing.T) {
+	seqs := boardSequences(board.Biscuit)
+	if k, ok := lastWrite(seqs.off, AmpSwitch); !ok || k.value != "Off" {
+		t.Errorf("turning biscuit's speaker off leaves %q at %+v", AmpSwitch, k)
+	}
+	if k, ok := lastWrite(seqs.path[OutputHeadphone], AmpSwitch); ok && k.value == "On" {
+		t.Errorf("biscuit's headphone path turns %q on", AmpSwitch)
+	}
+}
 
 func lastWrite(seq []kctl, name string) (kctl, bool) {
 	for i := len(seq) - 1; i >= 0; i-- {
@@ -48,7 +58,7 @@ func lastWrite(seq []kctl, name string) (kctl, bool) {
 }
 
 func TestBiscuitNeverTouchesRadarsGates(t *testing.T) {
-	seqs := sequencesFor(func(string) bool { return false })
+	seqs := boardSequences(board.Biscuit)
 	all := append(slices.Clone(seqs.init), seqs.on...)
 	all = append(all, seqs.off...)
 	for _, seq := range seqs.path {
@@ -62,7 +72,7 @@ func TestBiscuitNeverTouchesRadarsGates(t *testing.T) {
 }
 
 func TestRadarOpensTheMFPGateOnStartAndOnEveryPath(t *testing.T) {
-	seqs := sequencesFor(radarControls)
+	seqs := boardSequences(board.Radar)
 	which := map[string][]kctl{"init": seqs.init}
 	for out, seq := range seqs.path {
 		which["path "+string(out)] = seq
@@ -75,7 +85,7 @@ func TestRadarOpensTheMFPGateOnStartAndOnEveryPath(t *testing.T) {
 }
 
 func TestRadarStartsWithTheDriverOff(t *testing.T) {
-	seqs := sequencesFor(radarControls)
+	seqs := boardSequences(board.Radar)
 	if k, ok := lastWrite(seqs.init, speakerAmp); !ok || k.value != "Off" {
 		t.Errorf("init leaves %q at %+v, want Off until the codec settles", speakerAmp, k)
 	}
@@ -85,7 +95,7 @@ func TestRadarStartsWithTheDriverOff(t *testing.T) {
 }
 
 func TestRadarMuxFollowsTheOutput(t *testing.T) {
-	seqs := sequencesFor(radarControls)
+	seqs := boardSequences(board.Radar)
 	for out, want := range map[Output]string{
 		OutputSpeaker:   "Speaker",
 		OutputHeadphone: "Headphone",
@@ -97,7 +107,7 @@ func TestRadarMuxFollowsTheOutput(t *testing.T) {
 }
 
 func TestRadarSpeakerOffLeavesTheLineOut(t *testing.T) {
-	seqs := sequencesFor(radarControls)
+	seqs := boardSequences(board.Radar)
 	if _, ok := lastWrite(seqs.off, AmpSwitch); ok {
 		t.Errorf("the off sequence writes %q", AmpSwitch)
 	}
@@ -107,7 +117,7 @@ func TestRadarSpeakerOffLeavesTheLineOut(t *testing.T) {
 }
 
 func TestRadarRoutesTheDACLikeBiscuit(t *testing.T) {
-	seqs := sequencesFor(radarControls)
+	seqs := boardSequences(board.Radar)
 	for _, name := range dacSwitches {
 		if k, ok := lastWrite(seqs.init, name); !ok || k.level != 1 {
 			t.Errorf("radar's init leaves %q at %+v", name, k)
@@ -116,10 +126,10 @@ func TestRadarRoutesTheDACLikeBiscuit(t *testing.T) {
 }
 
 func TestOnlyRadarTurnsItsAmpOffWhenIdle(t *testing.T) {
-	if sequencesFor(func(string) bool { return false }).idleOff {
+	if boardSequences(board.Biscuit).idleOff {
 		t.Error("biscuit's amplifier is switched off through silence")
 	}
-	if !sequencesFor(radarControls).idleOff {
+	if !boardSequences(board.Radar).idleOff {
 		t.Error("radar's amplifier is left on through silence")
 	}
 }

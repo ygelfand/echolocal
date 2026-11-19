@@ -24,6 +24,8 @@ const (
 	MicMutesCamera
 
 	HeadphoneJack
+
+	MFPGatedAmp
 )
 
 type Key string
