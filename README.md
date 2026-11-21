@@ -23,12 +23,12 @@ apps, cameras and video calls. Home Assistant discovers it through the ESPHome n
 The screen examples below are Echo Show features; Echo Dot controls use its light ring, buttons,
 Home Assistant and browser interface.
 
-| Math clock | Matrix alarm panel |
-|:---:|:---:|
+|                                                   Math clock                                                   |                                                 Matrix alarm panel                                                 |
+| :------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------: |
 | <img src="docs/public/carousel/faces-14.png" alt="Math clock in the Graphite theme, in landscape" width="350"> | <img src="docs/public/carousel/homealarm-11.webp" alt="Matrix alarm-panel design with rehearsal data" width="350"> |
 
-| Tessera in Material You | Photo wallpaper and clock placement |
-|:---:|:---:|
+|                                                Tessera in Material You                                                |                                                   Photo wallpaper and clock placement                                                   |
+| :-------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------: |
 | <img src="docs/public/carousel/styles-1.png" alt="Landscape Tessera dashboard in the Material You style" width="350"> | <img src="docs/public/carousel/placements-0.png" alt="Small clock in the bottom-right corner over Google Photos wallpaper" width="350"> |
 
 [Interface gallery](https://www.echolocal.link/use/gallery/) · [Setup guide](https://www.echolocal.link/start/devices/) · [Releases](https://github.com/ygelfand/echolocal/releases)
@@ -46,13 +46,14 @@ Home Assistant and browser interface.
 
 ## Additional devices supported by our sister project [LANovo](https://github.com/ygelfand/LANovo)
 
-| Device                  | Codename  | OS                 | Status    |
-| ----------------------- | --------- | ------------------ | --------- |
-| Lenovo Smart Display 10 | blueberry | Android Things 8.x | Supported |
-| Lenovo Smart Display 8  | amber     | Android Things 8.x | Supported |
-| Lenovo Smart Display 7  | ivy       | Android Things 8.x | Supported |
-| JBL Link View           | opal      | Android Things 8.x | Supported |
-| Lenovo ThinkSmart View  | penghu    | Android 8.x        | Supported |
+| Device                   | Codename  | OS                 | Status    |
+| ------------------------ | --------- | ------------------ | --------- |
+| Lenovo Smart Display 10  | blueberry | Android Things 8.x | Supported |
+| Lenovo Smart Display 8   | amber     | Android Things 8.x | Supported |
+| Lenovo Smart Display 7   | ivy       | Android Things 8.x | Supported |
+| JBL Link View            | opal      | Android Things 8.x | Supported |
+| Lenovo ThinkSmart View   | penghu    | Android 8.x        | Supported |
+| Lenovo Smart Clock Gen 1 | cube      | Android Things 8.x | Supported |
 
 ## Features
 
