@@ -51,6 +51,7 @@ var get = sync.OnceValue(func() *Receiver {
 			}
 		},
 		Latency:  speaker.Get().Latency,
+		Volume:   mediaVolume{},
 		Rate:     speaker.Rate,
 		Channels: speaker.Channels,
 	}

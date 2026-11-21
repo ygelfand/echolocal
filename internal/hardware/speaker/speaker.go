@@ -591,6 +591,7 @@ func (l Lane) Take() []int16                { return l.p.bus.Take(l.s) }
 func (l Lane) Adjust(rewrite func([]int16)) { l.p.bus.Adjust(l.s, rewrite) }
 func (l Lane) Queued() int                  { return l.p.bus.StreamLen(l.s) / Channels }
 func (l Lane) Drain()                       { l.p.bus.ClearStream(l.s) }
+func (l Lane) Speed(times int)              { l.p.bus.SetSpeed(l.s, times, Channels) }
 
 func (p *Player) Adjust(rewrite func([]int16)) { p.bus.Adjust(config.StreamMedia, rewrite) }
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/ygelfand/echolocal/internal/hardware/gpu"
 
-	sharedvolume "github.com/ygelfand/libcountertop/pkg/audio/volume"
 	"github.com/ygelfand/libcountertop/pkg/display/screens"
 	sharedsettings "github.com/ygelfand/libcountertop/pkg/display/settings"
 	"github.com/ygelfand/libcountertop/pkg/display/shell"
@@ -129,10 +128,9 @@ var Get = sync.OnceValue(func() *screens.App {
 		BluetoothSources: func() shell.View {
 			return sharedsettings.BluetoothSourcesPage(a2dp.Get(), featureshell.Get())
 		},
-		Lyrics:      lyrics.Build(product.Get()),
-		MediaVolume: sharedvolume.For(volume.Get(), config.StreamMedia),
-		Volume:      volume.Get(),
-		Streams:     config.Streams(),
+		Lyrics:  lyrics.Build(product.Get()),
+		Volume:  volume.Get(),
+		Streams: config.Streams(),
 
 		Upgrade: func() widgets.Upgrade {
 			if up := firmware.Get().Upgrade(); up.Active() {
@@ -164,6 +162,7 @@ var Get = sync.OnceValue(func() *screens.App {
 	self := func() *screens.App { return app }
 	for _, extend := range []func(*widgets.UI, *screens.Options, func() *screens.App){
 		extendAlarms,
+		extendAirPlay,
 		extendApps,
 		extendCalendar,
 		extendCalls,

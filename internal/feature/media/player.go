@@ -270,6 +270,7 @@ func (p *Player) turn(delta int) {
 		aim.Picked, aim.Screen = (*s).Selected, (*s).Top
 	}
 	s := sharedvolume.Target(aim)
+	p.Levels.Mute(s, false)
 	if s == config.StreamMain {
 		p.Adjust(delta)
 		return

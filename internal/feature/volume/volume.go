@@ -62,6 +62,10 @@ func (v *Volume) Set(s config.Stream, level int) {
 	media.Get().Levels.Set(s, level)
 }
 
+func (v *Volume) Muted(s config.Stream) bool { return media.Get().Levels.Muted(s) }
+
+func (v *Volume) Mute(s config.Stream, on bool) { media.Get().Levels.Mute(s, on) }
+
 func (v *Volume) changed(s config.Stream) {
 	v.Changed.Emit(Change{Stream: s, Level: v.Level(s)})
 	if showing(s) {

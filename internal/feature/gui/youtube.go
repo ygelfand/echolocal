@@ -37,6 +37,7 @@ func extendYouTube(look *widgets.UI, o *screens.Options, _ func() *screens.App) 
 		Resolver: r,
 		Output:   playout.New(),
 		Skip:     func() []string { return config.Get().Cast.YouTube.Skip },
+		Autoplay: func() bool { return config.Get().Media.Autoplay },
 		Client:   client,
 		Redraw:   func() { shell.Get().Redraw() },
 	})
