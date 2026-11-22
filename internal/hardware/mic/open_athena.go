@@ -18,11 +18,13 @@ const (
 	refDevice   = 9
 	refChannels = 2
 
-	inputRate   = 96000
-	inputPeriod = inputRate / 100
+	micRate   = 48000
+	micPeriod = micRate / 100
+	refRate   = 96000
+	refPeriod = refRate / 100
 
 	// Device 17's DMA block is 48 KB: a 64 KB ring faulted the kernel 48 KB in.
-	micPeriods = 3
+	micPeriods = 6
 	refPeriods = 4
 
 	// AFE.cfg MicBoostdB.
@@ -42,12 +44,12 @@ func openCapture() (stream, error) {
 	setupConverter()
 
 	p := &paired{
-		micRS:  resample.NewRational(inputRate, Rate, micChannels),
-		refRS:  resample.NewRational(inputRate, Rate, refChannels),
-		micRaw: make([]byte, inputPeriod*micChannels*4),
-		refRaw: make([]byte, inputPeriod*refChannels*2),
-		micIn:  make([]int16, inputPeriod*micChannels),
-		refIn:  make([]int16, inputPeriod*refChannels),
+		micRS:  resample.NewRational(micRate, Rate, micChannels),
+		refRS:  resample.NewRational(refRate, Rate, refChannels),
+		micRaw: make([]byte, micPeriod*micChannels*4),
+		refRaw: make([]byte, refPeriod*refChannels*2),
+		micIn:  make([]int16, micPeriod*micChannels),
+		refIn:  make([]int16, refPeriod*refChannels),
 	}
 	p.micRS.Headroom(float32(math.Pow(10, micBoostDB/20)))
 
@@ -60,10 +62,10 @@ func openCapture() (stream, error) {
 func (p *paired) start() error {
 	ref, err := alsa.Open(Card, refDevice, alsa.Config{
 		Channels:   refChannels,
-		Rate:       inputRate,
+		Rate:       refRate,
 		Format:     alsa.FormatS16LE,
 		Bits:       16,
-		PeriodSize: inputPeriod,
+		PeriodSize: refPeriod,
 		Periods:    refPeriods,
 	})
 	if err != nil {
@@ -72,10 +74,10 @@ func (p *paired) start() error {
 
 	mics, err := alsa.Open(Card, micDevice, alsa.Config{
 		Channels:   micChannels,
-		Rate:       inputRate,
+		Rate:       micRate,
 		Format:     alsa.FormatS32LE,
 		Bits:       32,
-		PeriodSize: inputPeriod,
+		PeriodSize: micPeriod,
 		Periods:    micPeriods,
 	})
 	if err != nil {
