@@ -67,7 +67,7 @@ type Board struct {
 
 	Keys map[uint16]Key
 
-	Touch string
+	Touch []string
 
 	MuteDir string
 

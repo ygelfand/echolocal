@@ -40,7 +40,7 @@ var Checkers = Board{
 
 	// The mute button reports KEY_POWER, on a node of its own called "gating".
 	Keys:    map[uint16]Key{116: Mute},
-	Touch:   "goodix-ts",
+	Touch:   []string{"goodix-ts"},
 	MuteDir: "/sys/devices/platform/amazon-gating",
 
 	Service:     layout.Binary,

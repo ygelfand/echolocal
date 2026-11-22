@@ -23,7 +23,7 @@ var Athena = Board{
 		"video/hevc": "OMX.MTK.VIDEO.DECODER.HEVC.secure",
 	},
 	Keys:    map[uint16]Key{116: Mute},
-	Touch:   "fts_ts",
+	Touch:   []string{"fts_ts", "goodix-ts"},
 	MuteDir: "/sys/devices/platform/gpio-privacy",
 
 	CameraWidth: 1280, CameraHeight: 720,

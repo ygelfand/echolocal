@@ -86,6 +86,58 @@ On the Echo Dot, the ring shows each stage with its own effect: **Wake word effe
 effect** and **Replying effect**, per assistant. See [Echo Dot: buttons and light
 ring](/use/dot/).
 
+## Voice match
+
+Voice match tells who said the wake word. It needs the [EchoLocal integration](/start/integration/),
+which keeps every voice and sends them to all your devices, so a voice recorded once is known
+everywhere. The speaker model is downloaded the first time voice match is used.
+
+### Add a voice
+
+On an Echo Show, open **Settings → Voice
+assistants → Voice match** and tap **Add a voice**, or use the integration's
+[Voices tab](/start/integration/#voices), which also works with an Echo Dot. Pick a Home Assistant
+person, or **Someone else** and type a name.
+
+<Steps>
+
+1. Say the wake word, then the phrase on the screen. This is repeated five times, with a different
+   phrase each time.
+
+2. Say it once more to confirm. If the last one doesn't match the first five, you see **That didn't
+   sound like the same voice**; record again.
+
+3. If the new voice sounds very like a voice already saved, you're asked whether to keep it.
+
+</Steps>
+
+While recording, wake words go to the recording, not to an assistant.
+
+### Each voice
+
+Tap a voice to record it again, remove it, or set its **Match threshold** (0.30–0.70, default
+0.50). Higher needs a closer match: fewer turns credited to the wrong person, more turns where
+it's left as **Unknown**.
+
+### Where it shows
+
+- The **Last speaker** sensor (`last_speaker`) names who woke the device, or **Unknown**;
+  **Last speaker score** (`last_speaker_score`) is how close the match was.
+- The integration's [Activity tab](/start/integration/#activity) shows the speaker on each turn.
+
+### Recognized voices only
+
+Turn on **Recognized voices only** on an assistant's page on an Echo Show, or
+`known_voices_N` in Home Assistant, and that assistant answers only voices it recognizes:
+
+- The wake chime plays as usual, but nothing goes to Home Assistant until the voice is matched,
+  about 3 seconds after the wake word plus the time the match takes.
+- A voice it doesn't recognize ends the turn with the error sound and look. Home Assistant never
+  sees it.
+- With no voices saved, every wake word is refused.
+- Follow-up questions after a reply, **Talk now**, the action button
+  and the **Wake** button skip the check.
+
 ## Stop
 
 Say **"stop"**, no wake word needed, tap the screen on an Echo Show, or tap the action button on an Echo Dot. It stops, in order: a ringing alarm or timer, the assistant, an announcement, then pauses music.

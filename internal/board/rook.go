@@ -8,7 +8,7 @@ var Rook = Board{
 	Model:        "Echo Spot (rook)",
 	DefaultName:  "Echo Spot",
 	Caps:         Panel | Wifi,
-	Touch:        "goodix-ts",
+	Touch:        []string{"goodix-ts"},
 	Tessera:      Tessera{Board: "guition", Columns: 2, Rows: 3},
 
 	Service:     "/system/app/echod/echod",

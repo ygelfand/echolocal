@@ -19,8 +19,19 @@ func init() {
 		sharedcomponent.Supervise(service.Restart(time.Second, time.Minute)))
 }
 
-var get = sync.OnceValue(
-	func() *touch.Screen { return touch.New(component.Board().Touch, display.Get()) },
-)
+var get = sync.OnceValue(func() *touch.Screen { return touch.New(device(), display.Get()) })
+
+func device() string {
+	names := component.Board().Touch
+	for _, name := range names {
+		if _, err := touch.Find(name); err == nil {
+			return name
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return names[0]
+}
 
 func Get() *touch.Screen { return get() }

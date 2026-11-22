@@ -72,6 +72,8 @@ var registered = []string{
 	"ip_address",
 	"keep_recordings_1",
 	"keep_recordings_2",
+	"known_voices_1",
+	"known_voices_2",
 	"last_heard",
 	"last_reply",
 	"last_speaker",
