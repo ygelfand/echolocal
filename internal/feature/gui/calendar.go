@@ -15,6 +15,7 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/apps"
 	"github.com/ygelfand/echolocal/internal/feature/calendar"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
+	"github.com/ygelfand/echolocal/internal/feature/weather"
 )
 
 func extendCalendar(look *widgets.UI, o *screens.Options, app func() *screens.App) {
@@ -23,6 +24,7 @@ func extendCalendar(look *widgets.UI, o *screens.Options, app func() *screens.Ap
 		UI:       look,
 		Shell:    shell.Get(),
 		Calendar: cal,
+		Forecast: weather.Get(),
 		Gate:     func(w *gogui.Window) gogui.View { return app().Gate(w) },
 		TwentyFour: func() bool {
 			return config.Get().Screen.Hours == schema.TwentyFourHour
