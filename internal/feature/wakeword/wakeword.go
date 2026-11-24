@@ -58,6 +58,7 @@ func Get() *WakeWord {
 			Wake:     Requested.Emit,
 			Extras:   shared.extras,
 			Tones:    tones.Get().Choices,
+			Looks:    looks(),
 		})
 		component.Settings.Add(shared.Controls())
 		if component.Board().Has(board.Ring) {
