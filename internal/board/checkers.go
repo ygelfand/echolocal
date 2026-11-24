@@ -1,6 +1,8 @@
 package board
 
 import (
+	"github.com/ygelfand/libcountertop/pkg/media/h264"
+
 	"github.com/ygelfand/echolocal/internal/layout"
 	"github.com/ygelfand/echolocal/internal/lib/asp"
 )
@@ -36,7 +38,8 @@ var Checkers = Board{
 	},
 
 	CameraWidth: 1280, CameraHeight: 720,
-	CameraSizes: []string{"1280x720", "960x480", "864x480", "640x480"},
+	CameraSizes:   []string{"1280x720", "960x480", "864x480", "640x480"},
+	CameraProfile: h264.Baseline,
 
 	// The mute button reports KEY_POWER, on a node of its own called "gating".
 	Keys:    map[uint16]Key{116: Mute},

@@ -40,6 +40,7 @@ var registered = []string{
 	"cast_bundle",
 	"cast_credentials",
 	"cast_credentials_expire",
+	"cast_forecast",
 	"cast_oracle",
 	"cast_receiver",
 	"cast_youtube_lounge",

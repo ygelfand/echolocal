@@ -21,7 +21,7 @@ func front(d *sharedcall.Dependencies) {
 	d.Stage = callview.NewStage(shell.Get())
 	d.Video = callvideo.New(callvideo.Dependencies{
 		Display: display.Get(),
-		Camera:  callvideo.NewCamera(livecam.Get().Sessions()),
+		Camera:  callvideo.NewCamera(livecam.Get().Sessions(), livecam.Get().Profile()),
 	})
 	d.Messages = message.Get()
 }

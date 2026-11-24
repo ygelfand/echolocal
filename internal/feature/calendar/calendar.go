@@ -8,13 +8,19 @@ import (
 	"github.com/ygelfand/libcountertop/pkg/homeassistant/calendar"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 
+	"github.com/ygelfand/echolocal/internal/board"
 	"github.com/ygelfand/echolocal/internal/component"
 	"github.com/ygelfand/echolocal/internal/config"
 	"github.com/ygelfand/echolocal/internal/feature/product"
 )
 
 func init() {
-	component.Register(sharedcomponent.Device, Get, sharedcomponent.Order(61))
+	component.Register(
+		sharedcomponent.Device,
+		Get,
+		sharedcomponent.Order(61),
+		component.Needs(board.Panel),
+	)
 }
 
 type Calendar struct{ *calendar.Calendar }

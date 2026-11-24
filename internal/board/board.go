@@ -3,6 +3,8 @@ package board
 import (
 	"strings"
 
+	"github.com/ygelfand/libcountertop/pkg/media/h264"
+
 	"github.com/ygelfand/echolocal/internal/lib/asp"
 )
 
@@ -94,6 +96,7 @@ type Board struct {
 
 	CameraWidth, CameraHeight int
 	CameraSizes               []string
+	CameraProfile             h264.Profile
 	SubWidth                  int
 
 	Service     string

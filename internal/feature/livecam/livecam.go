@@ -60,6 +60,7 @@ var Get = sync.OnceValue(func() Camera {
 	o := live.Options{
 		Vendor: vendor,
 		Streams: live.Streams{
+			Profile:     b.CameraProfile,
 			Main:        b.CameraSizes,
 			MainDefault: fmt.Sprintf("%dx%d", b.CameraWidth, b.CameraHeight),
 		},
