@@ -134,7 +134,11 @@ func newDetect() *Detect {
 	return d
 }
 
-func (d *Detect) Entities() []esphome.Entity   { return []esphome.Entity{d.stop.Entity} }
+func (d *Detect) Entities() []esphome.Entity {
+	out := []esphome.Entity{d.stop.Entity}
+	out = append(out, d.pryon.Controls().Entities()...)
+	return append(out, d.gemini.Controls().Entities()...)
+}
 func (d *Detect) Pryon() *detect.PryonSwitch   { return d.pryon }
 func (d *Detect) Gemini() *detect.GeminiSwitch { return d.gemini }
 func (d *Detect) Restore(c config.Config)      { d.stop.Restore(c.Wake.Stop.Threshold) }

@@ -6,6 +6,7 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
+	"github.com/ygelfand/libcountertop/pkg/say"
 	setting "github.com/ygelfand/libcountertop/pkg/settings"
 	"github.com/ygelfand/libcountertop/pkg/settings/schema"
 	"github.com/ygelfand/libcountertop/pkg/voice"
@@ -22,6 +23,7 @@ type Triggers struct {
 }
 
 var get = sync.OnceValue(func() *Triggers {
+	say.UseVoice(config.VoiceSection.Read().Language)
 	t := &Triggers{knobs: &setting.Controls[schema.Voice]{
 		Table: voice.NewTable(
 			actions.Get().Names(),
@@ -48,6 +50,7 @@ func (t *Triggers) Controls() *setting.Controls[schema.Voice] { return t.knobs }
 
 func save(s setting.Setting[schema.Voice], v string) error {
 	err := setting.Store(config.VoiceSection, s, v)
+	say.UseVoice(config.VoiceSection.Read().Language)
 	applyCommands()
 	actions.Get().Declare()
 	return err
