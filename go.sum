@@ -304,8 +304,8 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/ygelfand/go-esphome-device v0.0.21 h1:CRwZEkndhxRhUvFCqc5yyb3/kPpGJ68YGpGV2nrbQDM=
 github.com/ygelfand/go-esphome-device v0.0.21/go.mod h1:wCDvFZ4VYe1sq+pOQz7NhbELA1HwvcNrCxdle+hjZcs=
-github.com/ygelfand/libcountertop v0.1.1-0.20261127032339-ec9453dbff99 h1:r9BlwxVNy5DrfzCcFv5n1ZO7g4BWUHQ0zmCsUekiyj0=
-github.com/ygelfand/libcountertop v0.1.1-0.20261127032339-ec9453dbff99/go.mod h1:8DwbMC6wlDn5+B5BxhY+pg8d4V7uVKvyRYTH1/hjnbw=
+github.com/ygelfand/libcountertop v0.1.1-0.20261127033514-609f7f91f827 h1:fWFAChAI8EjkTcU1f0Cf1HC5CrLm3C48FzfDL2AruWI=
+github.com/ygelfand/libcountertop v0.1.1-0.20261127033514-609f7f91f827/go.mod h1:8DwbMC6wlDn5+B5BxhY+pg8d4V7uVKvyRYTH1/hjnbw=
 github.com/ygelfand/plexgo v0.31.6 h1:I867xfVGKLhh3R2+JoOe3yvossnim/Ni1hJ2P0b+CCA=
 github.com/ygelfand/plexgo v0.31.6/go.mod h1:2ktmVeO5LOHt63ym3KlyMOTr+J0bWCj07Y5jKcyvY+Q=
 github.com/ygelfand/reolinkproxy v0.0.0-20261026000641-3a2fddcfed4f h1:am3mVXsua7qzoNwvd1UYBZf7EIx8ZkhPeCLw1DqlAiY=
