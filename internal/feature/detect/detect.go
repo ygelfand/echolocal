@@ -9,6 +9,7 @@ import (
 
 	"github.com/ygelfand/libcountertop/pkg/inference/detect"
 	"github.com/ygelfand/libcountertop/pkg/inference/pryon"
+	sharedwake "github.com/ygelfand/libcountertop/pkg/inference/wake"
 	sharedcomponent "github.com/ygelfand/libcountertop/pkg/runtime/component"
 	"github.com/ygelfand/libcountertop/pkg/runtime/payload"
 	"github.com/ygelfand/libcountertop/pkg/runtime/service"
@@ -72,12 +73,12 @@ func newDetect() *Detect {
 		}
 		return wakeword.Threshold(slot)
 	}
-	e.OnDetect = func(slot int) {
-		if slot == detect.StopSlot {
+	e.OnDetect = func(d sharedwake.Detection) {
+		if d.Slot == detect.StopSlot {
 			voice.Get().Interrupt()
 			return
 		}
-		voice.Get().Heard(slot)
+		voice.Get().Heard(d)
 	}
 	if helper := parts.Pryon(); helper != nil {
 		e.Pryon = func() (pryon.Options, error) {

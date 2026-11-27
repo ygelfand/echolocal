@@ -24,7 +24,7 @@ On the Echo Shows only.
 | Alert style | Banner | Banner, Card, Full screen, Toast | `select.<device>_screen_alert_style` |
 | Font | Style default | Style default, Roboto, Atkinson Hyperlegible, Nunito, Fredoka, Comfortaa, Barlow Condensed, Oswald, Roboto Slab, Lora, Space Grotesk, Exo 2 | `select.<device>_screen_font` |
 | Keyboard size | Compact | Compact, Standard, Large, Full width | `select.<device>_screen_keyboard_size` |
-| Language | English | English, Italiano, Tiếng Việt | `select.<device>_screen_language` |
+| Language | English | English, Deutsch, Italiano, Nederlands, Tiếng Việt | `select.<device>_screen_language` |
 | Auto brightness | On | On, Off | `switch.<device>_screen_auto_brightness` |
 | Size | mini | mini, compact, medium, large, xlarge | `select.<device>_screen_size` |
 | Style | standard | standard, material, glass, eink, metro, terminal, hifi, neon, skeuo | `select.<device>_screen_style` |
@@ -37,6 +37,7 @@ On the Echo Shows only.
 | Custom theme secondary text | #6d7480 | Text | `text.<device>_screen_custom_theme_secondary_text` |
 | Custom theme cards | #ffffff | Text | `text.<device>_screen_custom_theme_cards` |
 | Custom theme text | #22252a | Text | `text.<device>_screen_custom_theme_text` |
+| Volume panel position | Right | Left, Right | `select.<device>_screen_volume_panel_position` |
 
 ## Screen saver
 
@@ -102,6 +103,7 @@ On the Echo Shows only.
 | Animate dashboard weather | On | On, Off | `switch.<device>_screen_animate_dashboard_weather` |
 | Weather on dashboard | On | On, Off | `switch.<device>_screen_weather_on_dashboard` |
 | Weather entity | — | Text | On the screen only |
+| Forecast entity | — | Text | On the screen only |
 | Dashboard weather look | Compact | Compact, Stack, Icon, Words, Card, Detail | `select.<device>_screen_dashboard_weather_look` |
 | Dashboard weather vertical position | Top | Top, Center, Bottom | `select.<device>_screen_dashboard_weather_vertical_position` |
 | Radar starting range | 200 mi | 50 mi, 100 mi, 200 mi, 300 mi, 400 mi, 600 mi, 800 mi | `select.<device>_screen_radar_starting_range` |
@@ -161,8 +163,12 @@ On the Echo Shows only.
 
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
+| Calendar colors | — | Text | On the screen only |
 | Calendars | — | Text | On the screen only |
-| Days to show | 7 days | On, Off | On the screen only |
+| Opens on | Last used | Last used, Day, Week, Month | `select.<device>_screen_opens_on` |
+| Next event on the screensaver | Off | On, Off | `switch.<device>_screen_next_event_on_the_screensaver` |
+| Weather on days | On | On, Off | `switch.<device>_screen_weather_on_days` |
+| First day of the week | Auto | Auto, Sunday, Monday | `select.<device>_screen_first_day_of_the_week` |
 
 ## Shopping list
 
@@ -224,6 +230,7 @@ On the Echo Shows only.
 | Home alarm show while arming | Off | On, Off | `switch.<device>_screen_home_alarm_show_while_arming` |
 | Home alarm arming sound | None | None, Chirp, Ding, Rise, Timer, Trouble | `select.<device>_screen_home_alarm_arming_sound` |
 | Alarm panel | — | Text | On the screen only |
+| Hidden zones | — | On, Off | On the screen only |
 | Home alarm look | Keypad | Keypad, Shield, Card, Ring, Dial, Neon, Hardware, Flip board, Terminal, Console, Blueprint, Matrix, Vault, Minimal | `select.<device>_screen_home_alarm_look` |
 | Home alarm show during entry delay | On | On, Off | `switch.<device>_screen_home_alarm_show_during_entry_delay` |
 | Home alarm entry delay sound | Timer | None, Chirp, Ding, Rise, Timer, Trouble | `select.<device>_screen_home_alarm_entry_delay_sound` |
@@ -240,6 +247,7 @@ On the Echo Shows only.
 
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
+| Thermostats | — | On, Off | On the screen only |
 | Thermostat look | Dial | Dial, Column, Wheel, Bars, Split, Terminal, Brass, Mission | `select.<device>_screen_thermostat_look` |
 | Thermostat dashboard tab | Off | On, Off | `switch.<device>_screen_thermostat_dashboard_tab` |
 
@@ -278,6 +286,9 @@ On the Echo Shows only.
 
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
+| Cast bundle | — | Text | `text.<device>_playback_cast_bundle` |
+| Cast forecast | — | Text | `text.<device>_playback_cast_forecast` |
+| Cast oracle | — | Text | `text.<device>_playback_cast_oracle` |
 | Cast receiver | Off | On, Off | `switch.<device>_playback_cast_receiver` |
 | YouTube SponsorBlock categories (Echo Shows) | sponsor | Text | `text.<device>_playback_youtube_sponsorblock_categories` |
 
@@ -360,17 +371,23 @@ On the Echo Dot only.
 | Call a device | On | On, Off | `switch.<device>_voice_triggers_call_a_device` |
 | Answer a call | On | On, Off | `switch.<device>_voice_triggers_answer_a_call` |
 | Hang up a call | On | On, Off | `switch.<device>_voice_triggers_hang_up_a_call` |
+| Cook from recipes (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_cook_from_recipes` |
 | Watch YouTube TV (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_watch_youtube_tv` |
 | All actions | On | On, Off | `switch.<device>_voice_triggers_all_actions` |
+| Cook mode (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_cook_mode` |
 | Mirror (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_mirror` |
 | Radar (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_radar` |
 | All commands (Echo Shows) | On | On, Off | `switch.<device>_voice_triggers_all_commands` |
 | Home Assistant names to listen for (Echo Shows) | Areas only | Areas only | `select.<device>_voice_triggers_home_assistant_names_to_listen_for` |
+| Voice actions language | English | English, Deutsch, Italiano, Nederlands, Tiếng Việt | `select.<device>_voice_triggers_voice_actions_language` |
 
 ## Voice assistants
 
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
+| Gemini wake word | Off | On, Off | `switch.<device>_gemini_wake_word` |
+| Amazon wake words | Off | On, Off | `switch.<device>_amazon_wake_words` |
+| Amazon stop word | Off | On, Off | `switch.<device>_amazon_stop_word` |
 | Stop word sensitivity | 70 | 50 to 100 % | On the screen only |
 | Follow-up time | 0 s | 0 to 30 s | `number.<device>_assistant_N_follow_up_time` |
 | Recordings kept | 0 | 0 to 10 | `number.<device>_assistant_N_recordings_kept` |
@@ -441,8 +458,6 @@ On the Echo Shows only.
 
 | Setting | Default | Choices | Entity |
 |---|---|---|---|
-| Cast bundle | — | Text | `text.<device>_playback_cast_bundle` |
-| Cast oracle | — | Text | `text.<device>_playback_cast_oracle` |
 | Alerts mute | Off | On, Off | `switch.<device>_playback_alerts_mute` |
 | Feedback mute | Off | On, Off | `switch.<device>_playback_feedback_mute` |
 | Main mute | Off | On, Off | `switch.<device>_playback_main_mute` |
@@ -504,7 +519,6 @@ On the Echo Shows only.
 |---|---|---|---|
 | Install version | Select for rollback | The available versions | `select.<device>_install_version` |
 | Time zone | Home Assistant | Home Assistant, UTC, Europe/London, Europe/Lisbon, Europe/Paris, Europe/Berlin and 34 more | `select.<device>_time_zone` |
-| Update channel | stable | stable, dev | `select.<device>_update_channel` |
 
 ## Home
 
@@ -516,4 +530,19 @@ On the Echo Shows only.
 | Rings: hidden floors | — | Text | On the screen only |
 | Rings: hidden types | — | Text | On the screen only |
 | Rings: labels | — | Text | On the screen only |
+
+## Mealie
+
+On the Echo Shows only.
+
+| Setting | Default | Choices | Entity |
+|---|---|---|---|
+| Mealie server | — | Text | `text.<device>_screen_mealie_server` |
+| Mealie API token | — | Text | `text.<device>_screen_mealie_api_token` |
+
+## Update
+
+| Setting | Default | Choices | Entity |
+|---|---|---|---|
+| Update channel | stable | stable, dev | `select.<device>_update_channel` |
 
