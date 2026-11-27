@@ -72,6 +72,7 @@ func TestSavedKeysKeepTheirLayout(t *testing.T) {
 		"radio",
 		"todo",
 		"tv",
+		"mealie",
 		"voice",
 	}
 	slices.Sort(want)

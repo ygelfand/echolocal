@@ -27,6 +27,7 @@ var get = sync.OnceValue(func() *Actions {
 	a.reg.Add(broadcast.Get().Action())
 	a.reg.Add(alarm.Get().VoiceAction())
 	a.addTV()
+	a.addRecipes()
 	for _, action := range call.Get().ControlActions() {
 		a.reg.Add(action)
 	}

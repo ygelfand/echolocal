@@ -3,6 +3,8 @@
 package settings
 
 import (
+	"github.com/ygelfand/libcountertop/pkg/display/plexapp"
+	sharedrecipes "github.com/ygelfand/libcountertop/pkg/display/recipes"
 	sharedsettings "github.com/ygelfand/libcountertop/pkg/display/settings"
 	sharedshell "github.com/ygelfand/libcountertop/pkg/display/shell"
 	"github.com/ygelfand/libcountertop/pkg/say"
@@ -12,6 +14,8 @@ import (
 	"github.com/ygelfand/echolocal/internal/feature/airplay"
 	"github.com/ygelfand/echolocal/internal/feature/bluetooth"
 	"github.com/ygelfand/echolocal/internal/feature/chromecast"
+	"github.com/ygelfand/echolocal/internal/feature/plex"
+	"github.com/ygelfand/echolocal/internal/feature/recipes"
 	"github.com/ygelfand/echolocal/internal/feature/sendspin"
 	"github.com/ygelfand/echolocal/internal/feature/shell"
 )
@@ -32,6 +36,18 @@ func featuresPage() *sharedshell.Page {
 				},
 			},
 			{Key: "features.rtsp", Page: func() sharedshell.View { return streamPage() }},
+			{
+				Key: "features.mealie",
+				Page: func() sharedshell.View {
+					return sharedrecipes.SettingsPage(recipes.Get())
+				},
+			},
+			{
+				Key: "features.plex",
+				Page: func() sharedshell.View {
+					return plexapp.SettingsPage(plex.Get(), shell.Get())
+				},
+			},
 		}
 	}, shell.Get().Push)
 }

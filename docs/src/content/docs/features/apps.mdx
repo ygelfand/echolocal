@@ -10,6 +10,10 @@ import radio from '../../../assets/screens/app-radio-browse.webp';
 import alarms from '../../../assets/screens/app-alarm-editor.webp';
 import tv from '../../../assets/screens/app-tv.webp';
 import tvCard from '../../../assets/screens/app-tv-card.webp';
+import plexHome from '../../../assets/screens/app-plex-home.webp';
+import plexLibrary from '../../../assets/screens/app-plex-library.webp';
+import plexCategories from '../../../assets/screens/app-plex-categories.webp';
+import plexTitle from '../../../assets/screens/app-plex-title.webp';
 
 On the Echo Shows.
 
@@ -38,6 +42,7 @@ minutes without a touch; **Photos** stays open.
 | **Thermostat** | Your [thermostats](/features/thermostat/) |
 | **TV** | The [YouTube TV](#tv) guide, and a remote for your TVs |
 | **YouTube** | [YouTube](#youtube) on the device: your home feed, Shorts, subscriptions, history, Watch later and search |
+| **Plex** | Your [Plex](#plex) server's movies and shows, played on the device |
 
 ## Media
 
@@ -170,6 +175,52 @@ accounts under **Accounts**, and pick which one the app uses there.
 
 Videos skip the same [SponsorBlock](https://sponsor.ajay.app) segments as casting, picked under
 **Cast receiver → Skip segments** on [Settings on the screen](/use/settings/#cast-receiver).
+
+## Plex
+
+Browse your Plex Media Server and watch movies and shows on the device itself. It needs nothing
+from Home Assistant.
+
+**Sign in** the first time you open it: go to **plex.tv/link** on your phone or computer and enter
+the code on the screen, or scan the QR code. If your account has a Plex Home, pick who's watching
+(and enter their PIN if they have one). Each device signs in on its own.
+
+The bar down the side has **Search**, **Home**, one entry per library on your server, and
+**Settings**. Tap the entry you're already on to reload it and go back to the top.
+
+<Image src={plexHome} alt="Plex home rows: Continue Watching and On Deck, with See all" />
+
+| Page | |
+|---|---|
+| **Search** | Search your server; results come back in rows |
+| **Home** | Your server's home rows: Continue Watching, On Deck, recently added and the rest |
+| A library | **Recommended** rows for that library, the whole **Library**, and **Categories** |
+
+- **Recommended** shows the library's own rows from Plex. A library Plex has no rows for opens on
+  **Library**.
+- **Library** lists every title. Pick the order under **Sort**, flip it with the arrow next to it,
+  and narrow it to **Unwatched**. **Shuffle** plays a random title. In title order, the letters down
+  the side jump straight to that letter. More titles load as you scroll.
+- **Categories** shows the library's genres; tap one to list just that genre.
+- **See all** next to a row opens everything in it.
+- **A bar** along the bottom of a picture shows how much you've watched.
+
+<Image src={plexLibrary} alt="A Plex library sorted by title, with the sort menu, Unwatched, Shuffle and the letters down the side" />
+
+<Image src={plexCategories} alt="A Plex library's categories as tiles" />
+
+Tap a title to open it. There you can **Resume** where you left off or **Play from start**, pick
+**Subtitles** (or turn them off), and **Mark watched** or **Mark unwatched**. The subtitle you pick
+is saved with your account, so your other Plex apps use it too. Shows list their seasons and
+episodes.
+
+<Image src={plexTitle} alt="A Plex episode with Resume, Play from start, the Subtitles menu open and Mark watched" />
+
+Plex decides how each title plays: it plays the file as it is when the device can decode it, and
+otherwise converts what's needed on the fly. Your progress goes back to Plex as you watch, so you can
+pick up on another screen.
+
+**Settings** in the bar shows the connection status, and has **Switch profile** and **Sign out**.
 
 ## Mirror
 

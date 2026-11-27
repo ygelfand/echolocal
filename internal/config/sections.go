@@ -40,12 +40,14 @@ var (
 	WeatherSection    = sections.Weather
 	TodoSection       = sections.Todo
 	TVSection         = sections.TV
+	MealieSection     = sections.Mealie
 	CalendarSection   = sections.Calendar
 	RadioSection      = sections.Radio
 	VoiceSection      = sections.Voice
 	AirPlaySection    = sections.AirPlay
 
 	YouTubeAccountsSection = sections.YouTubeAccounts
+	PlexSection            = sections.Plex
 
 	LiftSection = storage.Bind(
 		func() *storage.Store[Config] { return store().Store },
