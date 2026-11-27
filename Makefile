@@ -373,6 +373,7 @@ publish-local:
 
 .PHONY: release
 release: ## Release the version in VERSION, then start the next patch version
+	@git diff --quiet HEAD -- VERSION || { echo "VERSION has local changes"; exit 1; }
 	git push origin HEAD
 	@$(MAKE) --no-print-directory tag TAG=$(BASE)
 	@next=$$(echo $(BASE) | awk -F. -v OFS=. '{$$NF += 1; print}'); \
@@ -383,7 +384,7 @@ release: ## Release the version in VERSION, then start the next patch version
 .PHONY: tag
 tag:
 	@test -n "$(TAG)" || { echo "usage: make release, make release-dev, make release-dev-local, or make tag TAG=0.4.2"; exit 1; }
-	@test -z "$$(git status --porcelain)" || { echo "the working tree is dirty"; exit 1; }
+	@git fetch -q origin && git branch -r --contains HEAD | grep -q . || { echo "push HEAD first"; exit 1; }
 	@git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null && { echo "$(TAG) already exists"; exit 1; } || true
 	git tag -a "$(TAG)" -m "EchoLocal $(TAG)"
 	git push origin "$(TAG)"
